@@ -39,18 +39,27 @@ Do not add snapshot activation semantics silently: changing this contract requir
 `update` therefore can change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest manifest no longer declares those items.
 
-Shared manifests describe item identity, relative payloads, logical target roots, platforms, and modes.
-Git URLs, branches, absolute paths, per-device registration, and explicit link/copy overrides are machine-local.
+The primary input is a user-owned local skill catalog, independent of the repositories it lists.
+Each skill has a stable name, explicit source type (currently only Git), and repository location; optional subdirectory and branch select the skill within that repository.
+Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
+The catalog owns repository URLs and requested branches; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
+Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
+Application paths consume these prepared local checkouts without fetching.
+The current implementation uses one checkout per skill; do not introduce deduplication or a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
-Preserve the existing four-field manifest compatibility while rejecting malformed active rows.
+The previous source-local links.conf workflow is compatibility support, not the model for new skill registration.
+Keep its existing four-field parser and saved ownership records functional when changing the primary workflow.
 
 ## Ownership and safety
 
-Only registered items may be installed; a source update cannot enroll new items automatically.
-Stable `(source ID, item ID)` pairs identify ownership independently of mutable paths.
+Only declared catalog skills or explicitly registered legacy items may be installed; a content repository update cannot expand the local catalog.
+Catalog skill names identify ownership independently of repository URLs and paths; legacy items retain `(source ID, item ID)` identities.
 Do not infer ownership from an existing file or delete targets when declarations disappear.
 Reject overlapping target trees and require detach before changing an existing item's path or mode.
 A directory item owns its entire subtree, so extra local files are meaningful modifications.
+Repository-root skills are valid and use direct links, not an extra content layer.
+Exclude only their top-level .git administration entry from content fingerprints, copies, and materializing detach; never duplicate a repository database or worktree pointer into an unmanaged skill.
+Git identity checks still validate the managed checkout's origin and expected branch before applying or updating.
 
 Link, copy, and merge have different contracts.
 Never silently fall back from link to copy.
@@ -72,6 +81,8 @@ Do not discard state when a target is missing, unreadable, or cannot be safely m
 ## Validation expectations
 
 Changes to delivery must exercise clone, fast-forward, dirty/divergent histories, network/remote failures, and live-link removal guards using local Git fixtures.
+Catalog tests must start with repositories lacking links.conf, exercise root and nested skills, and keep the inventory independent of both checkouts and installation roots.
+Verify that missing inventory files do not prevent status from observing installed contents or detach from preserving them.
 Changes to installation must exercise unmanaged targets, local edits, directory contents, partial config preservation, detach, and failure recovery.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 Keep command contracts, examples, and platform limitations in the README aligned with behavior.

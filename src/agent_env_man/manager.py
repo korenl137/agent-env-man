@@ -1,9 +1,11 @@
 """Explicit ownership and per-target transactions; delivery lives elsewhere."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
+import shutil
 import stat
+import tempfile
 import uuid
 
 from . import codex
@@ -26,15 +28,90 @@ class Manager:
     def __init__(self, config: Config, state: State):
         self.config, self.state = config, state
 
+    def delivery_source(self, source):
+        if source.repository and source.branch is None:
+            branch = self.state.data["sources"].get(source.name, {}).get("branch")
+            if not branch:
+                raise Error(f"{source.name}: run bootstrap to prepare the checkout and record its default branch")
+            return replace(source, branch=branch)
+        return source
+
+    def prepare_skills(self, names=(), *, timeout=30):
+        """Clone listed repositories, validating skills before publishing a checkout.
+
+        Clone success does not install anything. Existing checkouts are checked
+        in place and never reset or pulled by bootstrap.
+        """
+        self.state.ready()
+        sources = {name: s for name, s in self.config.sources.items() if s.repository}
+        if set(names) - sources.keys():
+            raise Error("Unknown catalog skill selection")
+        self.check_destinations([i for s in sources.values() for i in self.config.declarations(s)])
+        report, failed = [], False
+        for name, source in sources.items():
+            if names and name not in names:
+                continue
+            temporary = None
+            source_state = self.state.data["sources"].setdefault(name, {})
+            try:
+                git = Git(timeout)
+                created = not exists(source.path)
+                previous_branch = source_state.get("branch") if source_state.get("repository") == source.git else None
+                branch = source.branch or previous_branch
+                if created:
+                    source.path.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = Path(tempfile.mkdtemp(prefix=".aem-clone-", dir=source.path.parent))
+                    options = ("--branch", branch) if branch else ()
+                    git.run(None, "clone", "--single-branch", *options, "--", source.git, str(temporary))
+                local_path = temporary or source.path
+                if branch is None:
+                    branch = git.run(local_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout
+                prepared = replace(source, path=local_path, branch=branch)
+                git.clean(prepared)
+                item = self.config.declarations(source)[0]
+                git.skill_descriptor(prepared, item.relative)
+                # Use the staged root for ancestry checks, without changing config.
+                payload = local_path / item.relative
+                if not (payload / "SKILL.md").is_file():
+                    raise Error(f"{name}: skill path must contain SKILL.md")
+                cursor = payload
+                while cursor != local_path:
+                    if cursor.is_symlink() or is_reparse(cursor):
+                        raise Error(f"Skill source contains a symlink/junction: {cursor}")
+                    cursor = cursor.parent
+                fingerprint(payload, exclude_git=item.relative == ".")
+                revision = git.run(local_path, "rev-parse", "HEAD").stdout
+                if temporary:
+                    if exists(source.path):
+                        raise Error("Checkout destination appeared while cloning; refusing replacement")
+                    os.rename(temporary, source.path)
+                    temporary = None
+                source_state.update(repository=source.git, branch=branch, revision=revision, error=None)
+                if created:
+                    source_state.update(last_fetch=now(), observed_revision=revision)
+                report.append({"skill": name, "status": "cloned" if created else "already-prepared", "checkout": str(source.path)})
+            except (Error, OSError, ValueError) as exc:
+                failed = True
+                source_state["error"] = str(exc)
+                report.append({"skill": name, "status": "failed", "error": str(exc)})
+            finally:
+                if temporary:
+                    shutil.rmtree(temporary)
+            source_state["last_attempt"] = now()
+            self.state.save()
+        return report, failed
+
     def items(self):
+        self.config.catalog()
         result = []
         for source in self.config.sources.values():
-            result.extend(self.config.manifest(source))
+            result.extend(self.config.declarations(source))
         return result
 
     def selected(self, requested=(), *, reattach=False):
         all_items = self.items()
         registered = {f"{s.name}:{i}" for s in self.config.sources.values() for i in s.items}
+        registered.update(i.key for i in all_items if i.kind == "skill")
         available = {i.key for i in all_items}
         detached = {k for k, r in self.state.data["items"].items() if r.get("detached")}
         missing = registered - available - detached
@@ -45,7 +122,7 @@ class Manager:
         if requested and set(requested) - available:
             raise Error("Selected items are no longer declared in a manifest")
         if reattach and not requested:
-            raise Error("--reattach requires explicit --item SOURCE:ID selections")
+            raise Error("--reattach requires explicit --item selections")
         items = [i for i in all_items if i.key in registered and (not requested or i.key in requested)]
         items = [i for i in items if reattach or not self.state.data["items"].get(i.key, {}).get("detached")]
         self.check_destinations([i for i in all_items if i.key in registered and i.key not in detached])
@@ -73,7 +150,9 @@ class Manager:
             if cursor.is_symlink() or is_reparse(cursor):
                 raise Error(f"Source path contains a symlink/junction: {cursor}")
             cursor = cursor.parent
-        return fingerprint(item.source)
+        if item.kind == "skill" and (not item.source.is_dir() or not (item.source / "SKILL.md").is_file()):
+            raise Error(f"{item.key}: skill path must be a directory containing SKILL.md")
+        return fingerprint(item.source, exclude_git=item.kind == "skill" and item.relative == ".")
 
     def plan(self, item, *, adopt=False, replace=False, reattach=False):
         payload_hash = self.payload(item)
@@ -84,8 +163,10 @@ class Manager:
                 raise Error(f"{item.key}: detached; use --reattach")
             old = None
         record = {"source_name": item.source_name, "relative": item.relative, "source": str(item.source),
+                  "id": item.id,
                   "target": str(item.target), "mode": item.mode, "hash": payload_hash,
-                  "directory": item.source.is_dir(), "detached": False}
+                  "directory": item.source.is_dir(), "detached": False, "kind": item.kind,
+                  "exclude_git": item.kind == "skill" and item.relative == "."}
         present = before["kind"] != "missing"
         if item.mode == "link":
             correct = before == {"kind": "link", "to": str(item.source)}
@@ -144,8 +225,9 @@ class Manager:
         backup = item.target.with_name(item.target.name + ".aem-backup-" + suffix)
         try:
             if plan.materialize is not None:
-                copy_payload(plan.materialize, stage)
-                if fingerprint(stage) != plan.record["hash"] or fingerprint(plan.materialize) != plan.record["hash"]:
+                exclude_git = plan.record.get("exclude_git", False)
+                copy_payload(plan.materialize, stage, exclude_git=exclude_git)
+                if fingerprint(stage) != plan.record["hash"] or fingerprint(plan.materialize, exclude_git=exclude_git) != plan.record["hash"]:
                     raise Error(f"{item.key}: linked contents changed during detach")
             elif item.mode == "link":
                 try:
@@ -154,7 +236,7 @@ class Manager:
                     raise Error("Cannot create a symbolic link; enable Windows Developer Mode/link privileges "
                                 "or explicitly configure this item as copy") from exc
             elif item.mode == "copy":
-                copy_payload(item.source, stage)
+                copy_payload(item.source, stage, exclude_git=plan.record.get("exclude_git", False))
                 if fingerprint(stage) != plan.record["hash"] or self.payload(item) != plan.record["hash"]:
                     raise Error(f"{item.key}: source changed while copying")
             else:
@@ -227,17 +309,21 @@ class Manager:
     def apply(self, requested=(), *, adopt=False, replace=False, reattach=False, dry_run=False, timeout=30):
         self.state.ready()
         if (adopt or replace) and not requested:
-            raise Error("--adopt and --replace require explicit --item SOURCE:ID selections")
+            raise Error("--adopt and --replace require explicit --item selections")
         items = self.selected(requested, reattach=reattach)
         revisions = {}
         for name in {i.source_name for i in items}:
             source = self.config.sources[name]
             if source.git:
                 git = Git(timeout)
+                source = self.delivery_source(source)
                 git.clean(source)
                 revisions[name] = git.run(source.path, "rev-parse", "HEAD").stdout
                 for item in [i for i in items if i.source_name == name]:
-                    git.tracked_payload(source, item.relative)
+                    if item.kind == "skill":
+                        git.skill_descriptor(source, item.relative)
+                    else:
+                        git.tracked_payload(source, item.relative)
         plans = [self.plan(i, adopt=adopt, replace=replace, reattach=reattach) for i in items]
         for plan in plans:
             plan.record["revision"] = revisions.get(plan.item.source_name)
@@ -263,8 +349,8 @@ class Manager:
             if old["mode"] == "link":
                 if target.is_symlink():
                     content = target.resolve(strict=True)
-                    record["hash"] = fingerprint(content)
-                    item = Item(old["source_name"], key.split(":", 1)[1], old["relative"], Path(old["source"]), target, "link")
+                    record["hash"] = fingerprint(content, exclude_git=old.get("exclude_git", False))
+                    item = Item(old["source_name"], old.get("id", key.split(":")[-1]), old["relative"], Path(old["source"]), target, "link", old.get("kind", "payload"))
                     plans.append(Plan(item, observation(target), record, True, materialize=content))
                 else:
                     # An editor may already have replaced the link. Keep its
@@ -292,7 +378,7 @@ class Manager:
             source_state = self.state.data["sources"].setdefault(name, {})
             try:
                 if source.git:
-                    Git(timeout).update(source, self.state.data["items"], source_state)
+                    Git(timeout).update(self.delivery_source(source), self.state.data["items"], source_state)
                     status = "updated"
                 else:
                     if not source.path.is_dir():
@@ -311,7 +397,7 @@ class Manager:
     def item_status(self, item, old):
         if old and old.get("detached"):
             return "detached", None
-        if item.id not in self.config.sources[item.source_name].items:
+        if item.kind != "skill" and item.id not in self.config.sources[item.source_name].items:
             return "unregistered", None
         desired = self.payload(item)
         current = observation(item.target)
@@ -355,8 +441,13 @@ class Manager:
 
     def status(self, *, refresh=False, timeout=30):
         report = {"sources": [], "items": [], "pending": self.state.data.get("pending")}
+        try:
+            sources = self.config.sources
+        except Error as exc:
+            report["catalog_error"] = str(exc)
+            sources = {}
         seen = set()
-        for name, source in self.config.sources.items():
+        for name, source in sources.items():
             entry = {"source": name, "path": str(source.path), "transport": "git" if source.git else "external",
                      **self.state.data["sources"].get(name, {})}
             entry["last_update_error"] = entry.pop("error", None)
@@ -364,6 +455,7 @@ class Manager:
             try:
                 if source.git:
                     git = Git(timeout)
+                    source = self.delivery_source(source)
                     if refresh:
                         revision = git.fetch(source)
                         stored = self.state.data["sources"].setdefault(name, {})
@@ -371,6 +463,9 @@ class Manager:
                         self.state.save()
                         entry.update({k: v for k, v in stored.items() if k != "error"})
                     git.validate(source)
+                    entry["head"] = git.run(source.path, "rev-parse", "HEAD").stdout
+                    branch = git.run(source.path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+                    entry["branch"] = branch.stdout if branch.returncode == 0 else "detached"
                     entry["checkout"] = "dirty" if git.run(source.path, "status", "--porcelain", "--untracked-files=all", "--ignored").stdout else "clean"
                     entry["remote_relation"] = git.relation(source)
                 else:
@@ -378,7 +473,7 @@ class Manager:
             except (Error, OSError, ValueError) as exc:
                 entry["error"] = str(exc)
             try:
-                for item in self.config.manifest(source):
+                for item in self.config.declarations(source):
                     seen.add(item.key)
                     item_entry = {"item": item.key, "target": str(item.target), "mode": item.mode}
                     old = self.state.data["items"].get(item.key)

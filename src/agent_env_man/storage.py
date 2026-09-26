@@ -37,7 +37,7 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600):
             os.unlink(temporary)
 
 
-def fingerprint(path: Path) -> str:
+def fingerprint(path: Path, *, exclude_git: bool = False) -> str:
     """Hash regular payloads, including empty directories and executable bits.
 
     Nested links and special files are excluded so copy and detach never leave
@@ -56,6 +56,8 @@ def fingerprint(path: Path) -> str:
         digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0")
         if kind == "d":
             for child in sorted(current.iterdir(), key=lambda p: p.name):
+                if exclude_git and not relative and child.name == ".git":
+                    continue
                 visit(child, f"{relative}/{child.name}")
         else:
             file_hash = hashlib.sha256()
@@ -76,10 +78,14 @@ def observation(path: Path) -> dict:
     return {"kind": "directory" if path.is_dir() else "file", "hash": fingerprint(path)}
 
 
-def copy_payload(source: Path, destination: Path):
-    fingerprint(source)
+def copy_payload(source: Path, destination: Path, *, exclude_git: bool = False):
+    fingerprint(source, exclude_git=exclude_git)
     if source.is_dir():
-        shutil.copytree(source, destination, symlinks=True)
+        # A repository-root skill can be installed directly, but detaching or
+        # copying it must not clone Git administration data or a worktree link.
+        def ignored(directory, names):
+            return {".git"} if exclude_git and Path(directory) == source else set()
+        shutil.copytree(source, destination, symlinks=True, ignore=ignored)
     else:
         shutil.copy2(source, destination)
 

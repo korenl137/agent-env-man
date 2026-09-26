@@ -27,7 +27,8 @@ class Git:
         if path is not None:
             command += ["-C", str(path)]
         command += list(args)
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", GIT_LITERAL_PATHSPECS="1")
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", GIT_LITERAL_PATHSPECS="1",
+                   GIT_OPTIONAL_LOCKS="0")
         # Existing SSH_COMMAND customizations remain usable, but cannot prompt.
         env["GIT_SSH_COMMAND"] = env.get("GIT_SSH_COMMAND", "ssh") + " -oBatchMode=yes"
         kwargs = {"start_new_session": True} if os.name != "nt" else {
@@ -52,10 +53,14 @@ class Git:
             raise Error(f"Git {args[0]} failed: {result.stderr or result.stdout}")
         return result
 
-    def validate(self, source: Source):
+    def validate_checkout(self, source: Source):
+        """Check repository identity without contacting the remote."""
         top = self.run(source.path, "rev-parse", "--show-toplevel").stdout
         if Path(top).resolve() != source.path:
             raise Error(f"{source.name}: source path must be the checkout root")
+
+    def validate(self, source: Source):
+        self.validate_checkout(source)
         remote = self.run(source.path, "remote", "get-url", "origin").stdout
         if remote != source.git:
             raise Error(f"{source.name}: origin differs from the registered Git URL")
@@ -99,15 +104,37 @@ class Git:
                 continue
             if str(source.path / record["relative"]) != record["source"]:
                 raise Error(f"{key}: source path moved; detach before reconfiguration")
-            listing = self.run(source.path, "ls-tree", "-z", revision, "--", record["relative"]).stdout
-            mode = listing.split(" ", 1)[0] if listing else ""
+            relative = record["relative"]
+            if record.get("kind") == "skill":
+                self.skill_descriptor(source, relative, revision)
+            if relative == "." and record.get("kind") == "skill":
+                mode = "040000"
+            else:
+                listing = self.run(source.path, "ls-tree", "-z", revision, "--", relative).stdout
+                mode = listing.split(" ", 1)[0] if listing else ""
             allowed = ("040000",) if record["directory"] else ("100644", "100755")
             if mode not in allowed:
                 raise Error(f"{key}: incoming commit removes or changes the kind of a live link source; detach first")
-            if record["directory"]:
-                tree = self.run(source.path, "ls-tree", "-rz", revision, "--", record["relative"]).stdout
+            if record["directory"] and record.get("kind") != "skill":
+                pathspec = () if relative == "." else (relative,)
+                tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
                 if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
                     raise Error(f"{key}: incoming linked directory contains a symlink or submodule")
+
+    def skill_descriptor(self, source: Source, relative: str, revision: str = "HEAD"):
+        """Require a tracked descriptor and a skill tree of regular Git files.
+
+        Inspect Git modes too: Windows can check out Git symlinks as ordinary
+        text files, so filesystem inspection alone cannot enforce this contract.
+        """
+        descriptor = "SKILL.md" if relative == "." else relative + "/SKILL.md"
+        listing = self.run(source.path, "ls-tree", "-z", revision, "--", descriptor).stdout
+        if not listing or listing.split(" ", 1)[0] not in ("100644", "100755"):
+            raise Error(f"{source.name}: skill needs a tracked regular {descriptor} at {revision}")
+        pathspec = () if relative == "." else (relative,)
+        tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
+        if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
+            raise Error(f"{source.name}: skill contains a Git symlink or submodule")
 
     def update(self, source: Source, records: dict, source_state: dict):
         self.clean(source)

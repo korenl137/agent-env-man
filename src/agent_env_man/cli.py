@@ -19,7 +19,7 @@ from .model import Config, Error, absolute, default_config, identifier, overlaps
 from .storage import State, atomic_write, exists, lock
 
 
-def bootstrap(config, state, args):
+def bootstrap_legacy(config, state, args):
     state.ready()
     name = identifier(args.name)
     if name in config.sources:
@@ -50,7 +50,7 @@ def bootstrap(config, state, args):
     roots.update(explicit)
     registration = {"path": str(path), "manifest": args.manifest, "items": []}
     if args.git:
-        registration.update(git=args.git, branch=args.branch)
+        registration.update(git=args.git, branch=args.branch or "main")
     elif args.attach:
         raise Error("--attach is only needed with --git")
     document.setdefault("sources", {})[name] = registration
@@ -105,15 +105,51 @@ def bootstrap(config, state, args):
             shutil.rmtree(temporary)
 
 
+def bootstrap_skills(config, state, args):
+    state.ready()
+    if args.path or args.git or args.branch or args.attach or args.manifest != "links.conf":
+        raise Error("Declare each skill's Git repository and optional branch/subdir in the local catalog")
+    document = tomlkit.parse(tomlkit.dumps(config.doc))
+    if args.catalog is not None:
+        document["catalog"] = str(args.catalog.expanduser().resolve())
+    if "catalog" not in document:
+        raise Error("Use bootstrap --catalog /path/to/skills.toml")
+    if args.checkout_root is not None:
+        document["checkout_root"] = str(args.checkout_root.expanduser().resolve())
+    roots = document.setdefault("roots", {})
+    for value in args.root:
+        key, separator, location = value.partition("=")
+        if not separator:
+            raise Error("--root expects NAME=ABSOLUTE_PATH")
+        identifier(key)
+        resolved = str(absolute(location))
+        if key in config.roots and config.roots[key] != Path(resolved):
+            raise Error(f"Root {key} is already configured; detach before relocating installed skills")
+        roots[key] = resolved
+    roots.setdefault("skills", str(Path.home() / ".agents/skills"))
+    candidate = Config(config.path, document=document)
+    if set(args.item) - candidate.catalog().keys():
+        raise Error("Unknown catalog skill selection")
+    manager = Manager(candidate, state)
+    # Validate all declarations/ownership before saving a machine binding or
+    # contacting any repository. Failed downloads can then be retried in place.
+    manager.selected(args.item)
+    atomic_write(config.path, tomlkit.dumps(document).encode("utf-8"))
+    report, failed = manager.prepare_skills(args.item, timeout=args.timeout)
+    return {"skills": report, "config": str(config.path), "next": "apply --dry-run"}, failed
+
+
 def parser():
-    result = argparse.ArgumentParser(prog="aem", description="Deliver and install user-owned agent configuration")
+    result = argparse.ArgumentParser(prog="aem", description="Install Git-managed skills from an independent inventory")
     result.add_argument("--config", type=Path, default=default_config(), help="machine-local TOML file")
     commands = result.add_subparsers(dest="command", required=True)
-    boot = commands.add_parser("bootstrap", help="prepare a source and register selected items without installing")
-    boot.add_argument("name")
-    boot.add_argument("--path", required=True)
+    boot = commands.add_parser("bootstrap", help="prepare Git skills from a local catalog; never install targets")
+    boot.add_argument("name", nargs="?", help="legacy links.conf source name")
+    boot.add_argument("--catalog", type=Path, help="local inventory of skill names, source types, and repositories")
+    boot.add_argument("--checkout-root", type=Path, help="device-local storage for managed skill checkouts")
+    boot.add_argument("--path", help="legacy source checkout path")
     boot.add_argument("--git")
-    boot.add_argument("--branch", default="main")
+    boot.add_argument("--branch", help="legacy source branch (default: main)")
     boot.add_argument("--manifest", default="links.conf")
     boot.add_argument("--root", action="append", default=[], metavar="NAME=PATH")
     boot.add_argument("--item", action="append", default=[], metavar="ID")
@@ -124,7 +160,7 @@ def parser():
     update.add_argument("--timeout", type=float, default=30)
     for name in ("apply", "sync"):
         command = commands.add_parser(name, help="install registered local items" if name == "apply" else "update, then apply only if all updates succeed")
-        command.add_argument("--item", action="append", default=[], metavar="SOURCE:ID")
+        command.add_argument("--item", action="append", default=[], metavar="NAME")
         command.add_argument("--timeout", type=float, default=30)
         if name == "apply":
             choices = command.add_mutually_exclusive_group()
@@ -138,7 +174,7 @@ def parser():
     status.add_argument("--refresh", action="store_true")
     status.add_argument("--timeout", type=float, default=30)
     detach = commands.add_parser("detach", help="preserve current contents and release ownership")
-    detach.add_argument("item", nargs="+", metavar="SOURCE:ID")
+    detach.add_argument("item", nargs="+", metavar="NAME")
     detach.add_argument("--dry-run", action="store_true")
     commands.add_parser("recover", help="restore the previous target after an interrupted replacement")
     return result
@@ -157,7 +193,12 @@ def main(argv=None):
             manager = Manager(config, state)
             failed = False
             if args.command == "bootstrap":
-                report = bootstrap(config, state, args)
+                if args.name:
+                    if not args.path or args.catalog or args.checkout_root:
+                        raise Error("Legacy bootstrap needs NAME --path PATH; catalog bootstrap does not take NAME")
+                    report = bootstrap_legacy(config, state, args)
+                else:
+                    report, failed = bootstrap_skills(config, state, args)
             elif args.command == "update":
                 report, failed = manager.update(args.source, timeout=args.timeout)
             elif args.command == "apply":

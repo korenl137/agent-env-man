@@ -1,0 +1,12 @@
+# Copy this inventory to a location you own and replace the example repositories.
+version = 1
+
+[skills.report-helper]
+type = "git"
+repository = "https://github.com/OWNER/RESEARCH-TOOLS.git"
+subdir = "skills/report-helper"
+
+[skills.standalone-skill]
+type = "git"
+repository = "git@github.com:OWNER/STANDALONE-SKILL.git"
+# subdir defaults to "."; branch defaults to the remote's default branch.
