@@ -1,0 +1,78 @@
+# Contributing
+
+## Development and validation
+
+Use Python 3.11 or later and Git.
+Create a virtual environment and install the project with `python -m pip install -e .`.
+TOML Kit is the only runtime dependency; tests use the standard library.
+
+```bash
+python -m unittest discover -s tests -v
+python -m compileall -q src tests
+git diff --check
+```
+
+Run these commands from the activated environment.
+On native Windows the same test command works with `.\.venv\Scripts\python.exe`.
+Tests create temporary sources, targets, config, state, and local Git remotes; do not use actual user homes, credentials, or network remotes in tests.
+Successful symlink tests skip if the host cannot create links; the simulated capability-failure test must still run.
+The initial validation was performed on Linux with Python 3.12; native Windows validation remains required before claiming Windows readiness.
+
+Preserve Linux/WSL and native Windows path handling.
+Use Python filesystem/subprocess APIs, explicit UTF-8, argument lists, and `/` in shared relative paths.
+Do not depend on a POSIX shell from the core.
+Windows-only code must not import POSIX locking or signal primitives at runtime.
+
+## Architectural contracts
+
+The manager owns reusable installation and delivery behavior.
+Personal instructions, research guidance, skills, and settings remain user-supplied content outside this repository.
+Do not introduce personal policies as built-in payloads.
+
+Delivery prepares local source paths; installation consumes those paths without network access.
+Git must remain an end-to-end supported delivery path, not an external setup prerequisite that bypasses the core.
+External folders do not imply ownership of the service that synchronizes them.
+Keep source roots disjoint, and never nest externally synchronized sources inside managed Git checkouts.
+
+Targets directly link to local source content.
+Do not add snapshot activation semantics silently: changing this contract requires an explicit design decision and updated user documentation.
+`update` therefore can change live instruction contents without `apply`.
+The incoming-revision guard protects active link source paths, even if the latest manifest no longer declares those items.
+
+Shared manifests describe item identity, relative payloads, logical target roots, platforms, and modes.
+Git URLs, branches, absolute paths, per-device registration, and explicit link/copy overrides are machine-local.
+Content rendering and arbitrary shell evaluation are not part of path substitution.
+Preserve the existing four-field manifest compatibility while rejecting malformed active rows.
+
+## Ownership and safety
+
+Only registered items may be installed; a source update cannot enroll new items automatically.
+Stable `(source ID, item ID)` pairs identify ownership independently of mutable paths.
+Do not infer ownership from an existing file or delete targets when declarations disappear.
+Reject overlapping target trees and require detach before changing an existing item's path or mode.
+A directory item owns its entire subtree, so extra local files are meaningful modifications.
+
+Link, copy, and merge have different contracts.
+Never silently fall back from link to copy.
+Copy conflict detection uses the last applied content, desired content, and actual target; Git revision alone is insufficient.
+Merge ownership is per explicit leaf key, never an entire application config tree.
+Do not replace a table to install a scalar or drop undeclared keys/comments.
+This version restricts one merge item to a target file; do not extend that without resolving cross-item key ownership.
+
+Prepare and verify a replacement before moving the current target.
+Write the recovery journal before the first rename and commit the ownership record only after installation succeeds.
+Keep target backups; cleanup must never remove user changes discovered during recovery.
+The process lock serializes commands for one configuration, not arbitrary editors or Git processes.
+Retain the documented per-target transaction boundary instead of claiming global atomicity.
+
+Detach preserves the current usable contents, then releases ownership and records a tombstone to prevent automatic reinstallation.
+It does not restore a pre-install value or delete merge keys.
+Do not discard state when a target is missing, unreadable, or cannot be safely materialized.
+
+## Validation expectations
+
+Changes to delivery must exercise clone, fast-forward, dirty/divergent histories, network/remote failures, and live-link removal guards using local Git fixtures.
+Changes to installation must exercise unmanaged targets, local edits, directory contents, partial config preservation, detach, and failure recovery.
+Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
+Keep command contracts, examples, and platform limitations in the README aligned with behavior.
+Do not add an application-specific adapter framework or additional source providers without a demonstrated use case.

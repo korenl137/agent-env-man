@@ -1,0 +1,131 @@
+"""Git delivery, independent of target installation modes except live-link guards."""
+
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import signal
+import subprocess
+import time
+
+from .model import Error, Source
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class Git:
+    def __init__(self, timeout: float = 30):
+        self.deadline = time.monotonic() + timeout
+
+    def run(self, path: Path | None, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise Error("Git operation timed out")
+        command = ["git", "-c", "credential.interactive=false", "-c", "core.hooksPath=" + os.devnull,
+                   "-c", "core.fsmonitor=false", "-c", "submodule.recurse=false"]
+        if path is not None:
+            command += ["-C", str(path)]
+        command += list(args)
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never", GIT_LITERAL_PATHSPECS="1")
+        # Existing SSH_COMMAND customizations remain usable, but cannot prompt.
+        env["GIT_SSH_COMMAND"] = env.get("GIT_SSH_COMMAND", "ssh") + " -oBatchMode=yes"
+        kwargs = {"start_new_session": True} if os.name != "nt" else {
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   stdin=subprocess.DEVNULL, env=env, **kwargs)
+        try:
+            stdout, stderr = process.communicate(timeout=remaining)
+        except subprocess.TimeoutExpired as exc:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.kill()
+            process.communicate()
+            raise Error("Git operation timed out; checkout may need inspection") from exc
+        result = subprocess.CompletedProcess(command, process.returncode,
+                                             stdout.decode("utf-8", errors="replace").strip(),
+                                             stderr.decode("utf-8", errors="replace").strip())
+        if check and result.returncode:
+            raise Error(f"Git {args[0]} failed: {result.stderr or result.stdout}")
+        return result
+
+    def validate(self, source: Source):
+        top = self.run(source.path, "rev-parse", "--show-toplevel").stdout
+        if Path(top).resolve() != source.path:
+            raise Error(f"{source.name}: source path must be the checkout root")
+        remote = self.run(source.path, "remote", "get-url", "origin").stdout
+        if remote != source.git:
+            raise Error(f"{source.name}: origin differs from the registered Git URL")
+        branch = self.run(source.path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+        if branch.returncode or branch.stdout != source.branch:
+            raise Error(f"{source.name}: expected attached branch {source.branch}")
+
+    def clean(self, source: Source):
+        self.validate(source)
+        if self.run(source.path, "status", "--porcelain", "--untracked-files=all").stdout:
+            raise Error(f"{source.name}: dirty checkout; commit or reconcile changes explicitly")
+        if self.run(source.path, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
+            raise Error(f"{source.name}: ignored local files exist; keep local-only data outside the managed checkout")
+        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+            name = self.run(source.path, "rev-parse", "--git-path", marker).stdout
+            location = Path(name)
+            if not location.is_absolute():
+                location = source.path / location
+            if location.exists():
+                raise Error(f"{source.name}: unfinished Git operation ({marker})")
+
+    def fetch(self, source: Source) -> str:
+        self.validate(source)
+        self.run(source.path, "check-ref-format", "refs/heads/" + source.branch)
+        # A forced remote-tracking update is observational; HEAD is never reset.
+        self.run(source.path, "fetch", "--no-tags", "origin",
+                 f"+refs/heads/{source.branch}:refs/remotes/origin/{source.branch}")
+        return self.run(source.path, "rev-parse", "refs/remotes/origin/" + source.branch).stdout
+
+    def relation(self, source: Source) -> str:
+        result = self.run(source.path, "rev-list", "--left-right", "--count",
+                          f"HEAD...refs/remotes/origin/{source.branch}", check=False)
+        if result.returncode:
+            return "unknown"
+        ahead, behind = map(int, result.stdout.split())
+        return "diverged" if ahead and behind else "ahead" if ahead else "behind" if behind else "equal-at-last-fetch"
+
+    def guard_links(self, source: Source, revision: str, records: dict):
+        for key, record in records.items():
+            if record.get("source_name") != source.name or record.get("detached") or record["mode"] != "link":
+                continue
+            if str(source.path / record["relative"]) != record["source"]:
+                raise Error(f"{key}: source path moved; detach before reconfiguration")
+            listing = self.run(source.path, "ls-tree", "-z", revision, "--", record["relative"]).stdout
+            mode = listing.split(" ", 1)[0] if listing else ""
+            allowed = ("040000",) if record["directory"] else ("100644", "100755")
+            if mode not in allowed:
+                raise Error(f"{key}: incoming commit removes or changes the kind of a live link source; detach first")
+            if record["directory"]:
+                tree = self.run(source.path, "ls-tree", "-rz", revision, "--", record["relative"]).stdout
+                if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
+                    raise Error(f"{key}: incoming linked directory contains a symlink or submodule")
+
+    def update(self, source: Source, records: dict, source_state: dict):
+        self.clean(source)
+        candidate = self.fetch(source)
+        source_state.update(last_fetch=now(), observed_revision=candidate)
+        relation = self.relation(source)
+        if relation in ("ahead", "diverged", "unknown"):
+            raise Error(f"{source.name}: {relation}; reconcile Git history manually")
+        self.guard_links(source, candidate, records)
+        self.clean(source)
+        self.run(source.path, "merge", "--ff-only", "--no-autostash", candidate)
+        source_state.update(last_update=now(), revision=candidate, error=None)
+
+    def tracked_payload(self, source: Source, relative: str):
+        listing = self.run(source.path, "ls-tree", "-z", "HEAD", "--", relative).stdout
+        if not listing or listing.split(" ", 1)[0] not in ("040000", "100644", "100755"):
+            raise Error(f"{source.name}: payload must be a tracked regular file or directory: {relative}")
+        # Ignored files would otherwise quietly enter a directory installation.
+        ignored = self.run(source.path, "ls-files", "--others", "--ignored", "--exclude-standard", "--", relative).stdout
+        if ignored:
+            raise Error(f"{source.name}: ignored files inside payload: {relative}")

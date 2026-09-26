@@ -1,0 +1,141 @@
+"""Local bookkeeping, process locks, and conservative filesystem inspection."""
+
+from contextlib import contextmanager
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import tempfile
+
+from .model import Error
+
+
+def exists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def is_reparse(path: Path) -> bool:
+    # Path.is_junction is unavailable on supported Python 3.11 installations.
+    # Reject all Windows reparse payloads rather than following a junction.
+    return bool(getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def atomic_write(path: Path, data: bytes, mode: int = 0o600):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".aem-write-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
+
+def fingerprint(path: Path) -> str:
+    """Hash regular payloads, including empty directories and executable bits.
+
+    Nested links and special files are excluded so copy and detach never leave
+    hidden dependencies on source paths or traverse an external tree.
+    """
+    digest = hashlib.sha256()
+
+    def visit(current, relative):
+        info = current.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise Error(f"Payload symlinks/junctions are unsupported: {current}")
+        kind = "d" if stat.S_ISDIR(info.st_mode) else "f" if stat.S_ISREG(info.st_mode) else None
+        if kind is None:
+            raise Error(f"Special files are unsupported: {current}")
+        executable = info.st_mode & 0o111 if os.name != "nt" else 0
+        digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0")
+        if kind == "d":
+            for child in sorted(current.iterdir(), key=lambda p: p.name):
+                visit(child, f"{relative}/{child.name}")
+        else:
+            file_hash = hashlib.sha256()
+            with current.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    file_hash.update(block)
+            digest.update(file_hash.digest())
+
+    visit(path, "")
+    return digest.hexdigest()
+
+
+def observation(path: Path) -> dict:
+    if path.is_symlink():
+        return {"kind": "link", "to": os.readlink(path)}
+    if not exists(path):
+        return {"kind": "missing"}
+    return {"kind": "directory" if path.is_dir() else "file", "hash": fingerprint(path)}
+
+
+def copy_payload(source: Path, destination: Path):
+    fingerprint(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True)
+    else:
+        shutil.copy2(source, destination)
+
+
+def remove(path: Path):
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path)
+
+
+@contextmanager
+def lock(directory: Path):
+    """One manager per config; OS locks are released even after a crash."""
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "lock").open("a+b") as stream:
+        if os.name == "nt":
+            import msvcrt
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
+                stream.write(b"0")
+                stream.flush()
+            stream.seek(0)
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise Error("Another aem command holds this config's lock") from exc
+        else:
+            import fcntl
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise Error("Another aem command holds this config's lock") from exc
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+class State:
+    def __init__(self, directory: Path):
+        self.path = directory / "state.json"
+        if self.path.exists():
+            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        else:
+            self.data = {"version": 1, "items": {}, "sources": {}, "pending": None}
+        if self.data.get("version") != 1:
+            raise Error("Unsupported state version; do not delete ownership records")
+
+    def save(self):
+        atomic_write(self.path, (json.dumps(self.data, indent=2, ensure_ascii=True) + "\n").encode())
+
+    def ready(self):
+        if self.data.get("pending"):
+            raise Error("An interrupted replacement needs `aem recover`; inspect `aem status` first")

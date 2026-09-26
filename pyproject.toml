@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-env-man"
+version = "0.1.0"
+description = "Deliver user-owned agent configuration and safely manage selected local targets"
+requires-python = ">=3.11"
+dependencies = ["tomlkit>=0.13,<1"]
+
+[project.scripts]
+aem = "agent_env_man.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
