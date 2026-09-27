@@ -73,6 +73,7 @@ The table key is the skill's registration name and installed directory name; it 
 | `branch` | Optional branch. Otherwise bootstrap discovers and records the remote's default branch. |
 | `root` | Target root name; defaults to `skills`. Its actual path is machine-local. |
 | `mode` | `link` by default, or explicit `copy`. |
+| `update` | Optional per-skill automatic update policy; see below. |
 
 Subdirectories use literal `/`-separated paths without traversal or shell expansion.
 The selected directory must contain a regular SKILL.md tracked by Git.
@@ -135,6 +136,7 @@ Windows and WSL should have separate machine configurations and checkout/target 
 | `apply [--item NAME ...]` | Install from prepared local checkouts without network access. |
 | `apply --dry-run` | Validate and show planned actions without writing targets or ownership records. |
 | `sync` | Update, then apply only if all updates succeed. |
+| `auto --trigger EVENT [--item NAME ...] [--dry-run]` | Run due catalog skill policies for an external event, or preview them offline. |
 | `status` | Report checkout, remote-observation, and installation states without contacting remotes. |
 | `status --refresh` | Also fetch remote references without moving checkout branches or applying. |
 | `detach NAME ...` | Keep current usable contents and release management; materialize links into directories. |
@@ -178,13 +180,103 @@ Root skills link directly to the repository root, so its .git entry is visible t
 Nested symlinks/junctions, special files, and submodules are not supported as payloads in this version.
 Portable copy metadata, including executable bits, is preserved; platform-specific ACLs/alternate streams and power-loss atomicity are outside the current guarantee.
 
-## Optional triggers and compatibility
+## Automatic update policies
 
-Manual execution is always supported.
-Shell startup or an agent's supported hook can invoke `aem sync --timeout 5 --min-interval 600` and allow startup to continue if it fails.
-The interval throttles failed attempts too; the process lock serializes commands sharing one configuration.
-Timeouts bound each source's Git operation; multiple sources have separate budgets.
-No hook or service is installed automatically.
+Automatic updates are opt-in and default to `trigger = "manual"`.
+Add policy tables to the skill inventory alongside its existing skill declarations:
+
+```toml
+[updates.defaults]
+trigger = ["shell-start", "agent-start"]
+action = "sync"
+min_interval = 600
+timeout = 5
+
+[updates.policies.observe]
+action = "check"
+
+[skills.report-helper.update]
+policy = "observe"
+min_interval = 3600
+
+[skills.standalone-skill.update]
+trigger = "manual"
+```
+
+`updates.defaults` applies to every catalog skill, regardless of its installation mode.
+Settings resolve in this order: built-in defaults, inventory defaults, the skill's named policy, then explicit skill settings.
+Only specified fields override earlier values; trigger lists replace earlier lists.
+Named policies do not inherit other named policies.
+The current catalog loader reads a local file; policy composition does not depend on that transport or on checkout paths.
+
+| Field | Values and built-in default |
+| --- | --- |
+| `trigger` | `"manual"` (default), or one or more of `"shell-start"`, `"agent-start"`, `"interval"`. Use a string for one event or an array for several. `manual` cannot be combined with events. |
+| `action` | `"sync"` (default) updates the prepared checkout and applies it; `"check"` only checks for remote changes. |
+| `min_interval` | Minimum seconds between automatic attempts for each skill; default `600`, nonnegative. All its events share the same clock. `0` permits every invocation. |
+| `timeout` | Positive, finite seconds for each Git phase of that skill's operation; default `30`. It is not a total deadline across skills or filesystem copying. |
+| `policy` | Optional named policy selection, allowed only in a skill's `update` table. |
+
+With Git, `check` fetches the configured branch and reports its relation to HEAD without moving the checkout or changing installed content.
+`sync` fetches and fast-forwards, then applies: links see the checkout change immediately, and copies are refreshed by apply.
+The policy vocabulary describes these outcomes; it does not expose Git commands as general configuration or add new source types.
+Unknown fields, policies, triggers, and unsupported values are errors before any update starts.
+
+Preview effective policies and which skills are due:
+
+```bash
+aem auto --trigger shell-start --dry-run
+aem auto --trigger agent-start --item report-helper --dry-run
+```
+
+Dry runs neither contact remotes nor record attempts; they may create the configuration lock file.
+Normal output reports each skill as `not-triggered`, `detached`, `throttled`, `checked`, `synced`, or `failed`; dry runs use `planned` for due skills.
+Automatic execution requires prepared checkouts: run bootstrap for newly declared skills first.
+A due `sync` can install a prepared but not yet installed skill, or recreate a missing managed target.
+Detached skills are skipped without fetching and are never automatically reattached.
+
+Attempts are saved before contacting the remote, including attempts that fail or are interrupted.
+`status` includes each source's `automation` record with its latest attempt and outcome.
+Automatic execution processes skills independently: a failed skill does not prevent another due skill from updating and applying.
+It exits 1 if any attempted skill fails, and 0 if all succeed or are skipped.
+An unresolved recovery journal stops further work until recovered.
+Existing protections for local edits, unmanaged targets, dirty/divergent Git history, live links, and backups still apply.
+There is no automatic adoption, conflict replacement, or global rollback.
+
+Explicit `update`, `apply`, `sync`, and `status --refresh` keep their existing behavior and do not consult automatic policies or their attempt clocks.
+In particular, explicit `sync` still applies only after all its updates succeed.
+Legacy sources remain managed through those explicit commands; `auto` selects catalog skills only.
+
+## Connect triggers
+
+A trigger is an event supplied by a caller, not a background service started by TOML.
+Connect the event you configured to the corresponding command:
+
+| Caller | Command |
+| --- | --- |
+| Interactive shell startup | `aem auto --trigger shell-start` |
+| An agent's supported session-start hook | `aem auto --trigger agent-start` |
+| An OS scheduler, such as Task Scheduler or a Linux timer | `aem auto --trigger interval` |
+
+For example, an interactive Bash startup file can call:
+
+```bash
+if [[ $- == *i* ]] && command -v aem >/dev/null 2>&1; then
+    aem auto --trigger shell-start || true
+fi
+```
+
+Use the installed executable's absolute path and `--config` in hooks or scheduled tasks when their environment differs from your terminal.
+For Windows PowerShell, the invocation can be `& 'C:\path\to\aem.exe' --config 'C:\path\to\machine.toml' auto --trigger shell-start`.
+Configure an agent hook to call the `agent-start` command using that agent's supported mechanism and allow startup to continue if updating fails.
+No application-specific hook files, shell profiles, or scheduler registrations are written automatically.
+For periodic updates, set `trigger = "interval"`, choose `min_interval`, and arrange recurring invocations; the manager checks what is due on each invocation and does not wait or launch a daemon.
+Calls are synchronous, and the configuration lock prevents concurrent manager operations against the same state.
+
+The earlier `aem sync --timeout 5 --min-interval 600` invocation remains supported with its configuration-wide throttle.
+Use `auto` when events and per-skill settings should come from TOML.
+
+## Compatibility
 
 The initial source-local links.conf and Codex partial-merge workflow remains available as [legacy compatibility](docs/legacy-links.md).
 It is not required by the skill catalog workflow.

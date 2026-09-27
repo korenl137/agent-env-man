@@ -1,0 +1,133 @@
+"""Source-independent update policies and event-driven execution.
+
+Callers supply events; this module neither installs hooks nor owns a scheduler.
+Policy resolution accepts mappings so it is independent of catalog transport.
+"""
+
+import math
+import time
+
+from .git_source import Git, now
+from .model import Error, identifier
+
+
+TRIGGERS = ("shell-start", "agent-start", "interval")
+DEFAULTS = {"trigger": "manual", "action": "sync", "min_interval": 600, "timeout": 30}
+
+
+def policy_fields(value, location, *, allow_policy=False):
+    """Validate explicit fields before merging, including unused named policies."""
+    allowed = set(DEFAULTS) | ({"policy"} if allow_policy else set())
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise Error(f"{location}: expected update fields {', '.join(sorted(allowed))}")
+    result = dict(value)
+    if "policy" in result:
+        identifier(result["policy"])
+    if "trigger" in result:
+        triggers = result["trigger"]
+        if isinstance(triggers, str):
+            triggers = [triggers]
+        if (not isinstance(triggers, list) or not triggers
+                or any(not isinstance(t, str) or t not in (*TRIGGERS, "manual") for t in triggers)
+                or len(set(triggers)) != len(triggers)
+                or ("manual" in triggers and len(triggers) != 1)):
+            raise Error(f"{location}: trigger must be manual or one or more unique events: {', '.join(TRIGGERS)}")
+        result["trigger"] = list(triggers)
+    if "action" in result and result["action"] not in ("check", "sync"):
+        raise Error(f"{location}: action must be check or sync")
+    for key in ("min_interval", "timeout"):
+        if key in result:
+            number = result[key]
+            if (isinstance(number, bool) or not isinstance(number, (int, float))
+                    or not math.isfinite(number) or number < 0 or (key == "timeout" and number == 0)):
+                raise Error(f"{location}: {key} must be finite and {'positive' if key == 'timeout' else 'nonnegative'}")
+    return result
+
+
+def resolve_policies(updates, skills):
+    """Merge built-ins, global defaults, one named policy, then skill fields.
+
+    Trigger lists replace rather than append; manual explicitly disables events.
+    Source-specific capabilities are checked here, before any network operation.
+    """
+    if not isinstance(updates, dict) or set(updates) - {"defaults", "policies"}:
+        raise Error("updates must contain only defaults and policies tables")
+    defaults = policy_fields(DEFAULTS, "built-in defaults")
+    defaults.update(policy_fields(updates.get("defaults", {}), "updates.defaults"))
+    named = updates.get("policies", {})
+    if not isinstance(named, dict):
+        raise Error("updates.policies must be a table")
+    policies = {identifier(name): policy_fields(value, f"updates.policies.{name}")
+                for name, value in named.items()}
+    result = {}
+    for name, skill in skills.items():
+        own = policy_fields(skill.get("update", {}), f"skills.{name}.update", allow_policy=True)
+        selection = own.pop("policy", None)
+        if selection is not None and selection not in policies:
+            raise Error(f"Skill {name}: unknown update policy {selection!r}")
+        effective = {**defaults, **policies.get(selection, {}), **own}
+        if skill.get("type") != "git":
+            raise Error(f"Skill {name}: update actions are unsupported for source type {skill.get('type')!r}")
+        result[name] = effective
+    return result
+
+
+def run_updates(manager, trigger, names=(), *, dry_run=False):
+    """Run due catalog skills independently under the caller's configuration lock.
+
+    Persist attempts before network access, so failures and interruptions are
+    throttled too. Events share one per-skill clock; manual commands do not use it.
+    No replacements, adoption, or reattachment are authorized by automation.
+    """
+    if trigger not in TRIGGERS:
+        raise Error(f"Unknown automatic update trigger: {trigger}")
+    policies = manager.config.update_policies()
+    if set(names) - policies.keys():
+        raise Error("Unknown catalog skill selection")
+    manager.state.ready()
+    sources = manager.config.sources
+    report, failed = [], False
+    for name, policy in policies.items():
+        if names and name not in names:
+            continue
+        entry = {"skill": name, "policy": policy}
+        report.append(entry)
+        previous = manager.state.data["sources"].get(name, {}).get("automation", {})
+        current = time.time()
+        if trigger not in policy["trigger"]:
+            entry["status"] = "not-triggered"
+        elif manager.state.data["items"].get(name, {}).get("detached"):
+            entry["status"] = "detached"
+        elif "last_attempt" in previous and current - previous["last_attempt"] < policy["min_interval"]:
+            entry["status"] = "throttled"
+        else:
+            entry["status"] = "planned"
+        if entry["status"] != "planned" or dry_run:
+            continue
+        # A failed earlier transaction can leave a recovery journal. Do not
+        # start another skill until that journal has been resolved.
+        manager.state.ready()
+        source_state = manager.state.data["sources"].setdefault(name, {})
+        attempt = {"last_attempt": current, "trigger": trigger, "action": policy["action"], "status": "running"}
+        source_state["automation"] = attempt
+        manager.state.save()
+        try:
+            source = manager.delivery_source(sources[name])
+            if policy["action"] == "check":
+                git = Git(policy["timeout"])
+                revision = git.fetch(source)
+                source_state.update(last_fetch=now(), observed_revision=revision)
+                entry.update(status="checked", remote_relation=git.relation(source))
+            else:
+                outcomes, update_failed = manager.update([name], timeout=policy["timeout"])
+                if update_failed:
+                    raise Error(outcomes[0]["error"])
+                entry["apply"] = manager.apply([name], timeout=policy["timeout"])
+                entry["status"] = "synced"
+            attempt.update(status=entry["status"], last_success=time.time())
+        except (Error, OSError, ValueError) as exc:
+            failed = True
+            entry.update(status="failed", error=str(exc))
+            attempt.update(status="failed", error=str(exc))
+        manager.state.save()
+    return report, failed

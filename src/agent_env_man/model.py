@@ -96,6 +96,7 @@ class Config:
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
         self.catalog_path = None
         self._catalog = None
+        self._update_policies = {}
         self.checkout_root = absolute(self.doc["checkout_root"]) if "checkout_root" in self.doc else self.path.parent / (self.path.name + ".checkouts")
         if overlaps(self.checkout_root, self.path) or overlaps(self.checkout_root, self.state_dir):
             raise Error("Checkout storage must be separate from machine config and state")
@@ -157,14 +158,14 @@ class Config:
             document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
-        if document.get("version") != 1 or set(document) - {"version", "skills"}:
+        if document.get("version") != 1 or set(document) - {"version", "skills", "updates"}:
             raise Error("Skill catalog needs version = 1 and a skills table")
         skills = document.get("skills", {})
         if not isinstance(skills, dict):
             raise Error("Catalog skills must be a TOML table")
         for name, data in skills.items():
             identifier(name)
-            if not isinstance(data, dict) or set(data) - {"type", "repository", "subdir", "branch", "root", "mode"}:
+            if not isinstance(data, dict) or set(data) - {"type", "repository", "subdir", "branch", "root", "mode", "update"}:
                 raise Error(f"Invalid skill declaration: {name}")
             if data.get("type") != "git":
                 raise Error(f"Skill {name}: only type = 'git' is supported")
@@ -187,8 +188,16 @@ class Config:
                 raise Error(f"Skill {name}: expected link or copy mode")
         if self.modes.keys() - skills.keys():
             raise Error("Machine mode override does not name a skill in the catalog")
+        from .updates import resolve_policies
+
+        self._update_policies = resolve_policies(document.get("updates", {}), skills)
         self._catalog = skills
         return skills
+
+    def update_policies(self) -> dict:
+        """Return validated effective policies from the currently bound catalog."""
+        self.catalog()
+        return self._update_policies
 
     @property
     def sources(self) -> dict[str, Source]:

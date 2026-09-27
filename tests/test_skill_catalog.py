@@ -80,6 +80,148 @@ class SkillCatalog(unittest.TestCase):
         self.skills["report"]["mode"] = "copy"
         self.save_catalog()
 
+    def update_policy(self, defaults, policies=None):
+        document = tomlkit.parse(self.catalog.read_text(encoding="utf-8"))
+        document["updates"] = {"defaults": defaults, "policies": policies or {}}
+        self.catalog.write_text(tomlkit.dumps(document), encoding="utf-8")
+
+    def publish_skill_change(self):
+        descriptor = self.repo / "skills/report/SKILL.md"
+        descriptor.write_text(descriptor.read_text() + "Published change\n", encoding="utf-8")
+        self.commit(self.repo)
+
+    def test_auto_defaults_to_manual_and_explicit_sync_still_works(self):
+        self.copy_mode()
+        self.bootstrap()
+        self.publish_skill_change()
+        with patch.object(Git, "fetch", side_effect=AssertionError("Unexpected fetch")):
+            result = self.run_cli("auto", "--trigger", "shell-start")
+        self.assertEqual(result[0]["status"], "not-triggered")
+        self.assertFalse(self.destination.exists())
+        self.run_cli("sync")
+        self.assertIn("Published change", (self.destination / "report/SKILL.md").read_text())
+
+    def test_auto_check_fetches_without_changing_checkout_or_target(self):
+        self.copy_mode()
+        self.update_policy({"trigger": ["shell-start", "agent-start"], "action": "check"})
+        self.bootstrap()
+        self.run_cli("apply")
+        checkout = self.checkouts / "report"
+        head = self.git(checkout, "rev-parse", "HEAD")
+        before = (self.destination / "report/SKILL.md").read_bytes()
+        self.publish_skill_change()
+        result = self.run_cli("auto", "--trigger", "agent-start")
+        self.assertEqual(result[0]["status"], "checked")
+        self.assertEqual(result[0]["remote_relation"], "behind")
+        self.assertEqual(self.git(checkout, "rev-parse", "HEAD"), head)
+        self.assertEqual((self.destination / "report/SKILL.md").read_bytes(), before)
+        self.assertEqual(self.run_cli("status")["sources"][0]["automation"]["status"], "checked")
+
+    def test_auto_sync_updates_link_and_copy(self):
+        self.require_links()
+        for mode in ("link", "copy"):
+            with self.subTest(mode=mode):
+                config = self.root / f"{mode}.toml"
+                destination = self.root / f"{mode}-targets"
+                self.skills["report"]["mode"] = mode
+                self.save_catalog()
+                self.update_policy({"trigger": "shell-start"})
+                self.run_cli("bootstrap", "--catalog", self.catalog, "--root", f"skills={destination}", config=config)
+                self.run_cli("apply", config=config)
+                self.publish_skill_change()
+                result = self.run_cli("auto", "--trigger", "shell-start", config=config)
+                self.assertEqual(result[0]["status"], "synced")
+                self.assertEqual((destination / "report/SKILL.md").read_bytes(),
+                                 (self.repo / "skills/report/SKILL.md").read_bytes())
+                self.assertEqual((destination / "report").is_symlink(), mode == "link")
+
+    def test_auto_policy_preview_is_offline_and_does_not_record_attempt(self):
+        self.copy_mode()
+        self.skills["report"]["update"] = {"policy": "observe", "timeout": 7}
+        self.save_catalog()
+        self.update_policy({"trigger": ["shell-start", "interval"], "min_interval": 1200},
+                           {"observe": {"action": "check", "trigger": "agent-start"}})
+        self.bootstrap()
+        state_path = self.config.parent / (self.config.name + ".state/state.json")
+        before = state_path.read_bytes()
+        with patch.object(Git, "fetch", side_effect=AssertionError("Unexpected fetch")):
+            result = self.run_cli("auto", "--trigger", "agent-start", "--dry-run")
+        self.assertEqual(result[0]["status"], "planned")
+        self.assertEqual(result[0]["policy"], {"trigger": ["agent-start"], "action": "check",
+                                              "timeout": 7, "min_interval": 1200})
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(self.run_cli("auto", "--trigger", "shell-start")[0]["status"], "not-triggered")
+
+    def test_auto_attempt_intervals_are_per_skill_and_shared_across_events(self):
+        self.copy_mode()
+        other = self.repository("other", ".")
+        self.skills["other"] = {"type": "git", "repository": str(other), "mode": "copy",
+                                "update": {"min_interval": 60}}
+        self.save_catalog()
+        self.update_policy({"trigger": ["shell-start", "interval"], "action": "check", "min_interval": 600})
+        self.bootstrap()
+        with patch("agent_env_man.updates.time.time", return_value=1000):
+            self.run_cli("auto", "--trigger", "shell-start")
+        with patch("agent_env_man.updates.time.time", return_value=1060):
+            result = self.run_cli("auto", "--trigger", "interval")
+        self.assertEqual({r["skill"]: r["status"] for r in result}, {"report": "throttled", "other": "checked"})
+        with patch("agent_env_man.updates.time.time", return_value=1600):
+            result = self.run_cli("auto", "--trigger", "shell-start", "--item", "report")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["status"], "checked")
+
+    def test_auto_failed_skill_does_not_block_others_and_failure_is_throttled(self):
+        self.copy_mode()
+        other = self.repository("other", ".")
+        self.skills["other"] = {"type": "git", "repository": str(other), "mode": "copy"}
+        self.save_catalog()
+        self.update_policy({"trigger": "shell-start"})
+        self.bootstrap()
+        shutil.rmtree(self.repo)
+        with patch("agent_env_man.updates.time.time", return_value=1000):
+            result = self.run_cli("auto", "--trigger", "shell-start", code=1)
+        self.assertEqual({r["skill"]: r["status"] for r in result}, {"report": "failed", "other": "synced"})
+        self.assertTrue((self.destination / "other/SKILL.md").is_file())
+        with patch("agent_env_man.updates.time.time", return_value=1001):
+            result = self.run_cli("auto", "--trigger", "shell-start")
+        self.assertEqual([r["status"] for r in result], ["throttled", "throttled"])
+
+    def test_auto_preserves_modified_copies_and_detached_skills(self):
+        self.copy_mode()
+        self.update_policy({"trigger": "shell-start", "min_interval": 0})
+        self.bootstrap()
+        self.run_cli("apply")
+        target = self.destination / "report/SKILL.md"
+        target.write_text("Local edits", encoding="utf-8")
+        self.publish_skill_change()
+        self.assertEqual(self.run_cli("auto", "--trigger", "shell-start", code=1)[0]["status"], "failed")
+        self.assertEqual(target.read_text(), "Local edits")
+        self.run_cli("detach", "report")
+        with patch.object(Git, "fetch", side_effect=AssertionError("Unexpected fetch")):
+            self.assertEqual(self.run_cli("auto", "--trigger", "shell-start")[0]["status"], "detached")
+        self.assertEqual(target.read_text(), "Local edits")
+
+    def test_auto_keeps_live_link_removal_guard(self):
+        self.require_links()
+        self.update_policy({"trigger": "agent-start"})
+        self.bootstrap()
+        self.run_cli("apply")
+        (self.repo / "skills/report/SKILL.md").unlink()
+        self.commit(self.repo)
+        result = self.run_cli("auto", "--trigger", "agent-start", code=1)
+        self.assertEqual(result[0]["status"], "failed")
+        self.assertTrue((self.destination / "report/SKILL.md").is_file())
+
+    def test_invalid_policy_fails_bootstrap_before_clone_or_config_write(self):
+        self.skills["report"]["update"] = {"policy": "missing"}
+        self.save_catalog()
+        with patch.object(Git, "run", side_effect=AssertionError("Unexpected Git command")):
+            error = self.bootstrap(code=1)
+        self.assertIn("unknown update policy", error)
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.checkouts.exists())
+
     def test_catalog_clones_two_independent_repositories_without_manifests(self):
         self.require_links()
         standalone = self.repository("standalone", ".")

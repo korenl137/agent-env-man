@@ -17,6 +17,7 @@ from .git_source import Git, now
 from .manager import Manager
 from .model import Config, Error, absolute, default_config, identifier, overlaps, relative
 from .storage import State, atomic_write, exists, lock
+from .updates import TRIGGERS, run_updates
 
 
 def bootstrap_legacy(config, state, args):
@@ -170,6 +171,10 @@ def parser():
             command.add_argument("--dry-run", action="store_true")
         else:
             command.add_argument("--min-interval", type=float, default=0, help="minimum seconds between attempts, including failures")
+    auto = commands.add_parser("auto", help="run due skill policies for an external trigger")
+    auto.add_argument("--trigger", required=True, choices=TRIGGERS)
+    auto.add_argument("--item", action="append", default=[], metavar="NAME")
+    auto.add_argument("--dry-run", action="store_true", help="show effective policies and due skills without fetching")
     status = commands.add_parser("status", help="inspect local state; network is opt-in")
     status.add_argument("--refresh", action="store_true")
     status.add_argument("--timeout", type=float, default=30)
@@ -204,6 +209,8 @@ def main(argv=None):
             elif args.command == "apply":
                 report = manager.apply(args.item, adopt=args.adopt, replace=args.replace,
                                        reattach=args.reattach, dry_run=args.dry_run, timeout=args.timeout)
+            elif args.command == "auto":
+                report, failed = run_updates(manager, args.trigger, args.item, dry_run=args.dry_run)
             elif args.command == "status":
                 report = manager.status(refresh=args.refresh, timeout=args.timeout)
             elif args.command == "detach":

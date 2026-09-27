@@ -39,16 +39,35 @@ Do not add snapshot activation semantics silently: changing this contract requir
 `update` therefore can change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest manifest no longer declares those items.
 
-The primary input is a user-owned local skill catalog, independent of the repositories it lists.
+The primary input is a user-owned skill catalog, independent of the repositories it lists.
+The current loader reads a local TOML file; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name, explicit source type (currently only Git), and repository location; optional subdirectory and branch select the skill within that repository.
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
-The catalog owns repository URLs and requested branches; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
+The catalog owns repository URLs, requested branches, and declarative automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
 Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
 Application paths consume these prepared local checkouts without fetching.
 The current implementation uses one checkout per skill; do not introduce deduplication or a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
 The previous source-local links.conf workflow is compatibility support, not the model for new skill registration.
 Keep its existing four-field parser and saved ownership records functional when changing the primary workflow.
+
+## Automatic update contracts
+
+Resolve policies by explicit field override: built-in defaults, catalog-wide defaults, one named policy, then skill-local fields.
+Trigger arrays replace earlier arrays; `manual` disables all automatic events for the skill.
+Validate all policy declarations, including unused named policies, before network access.
+Keep common trigger/action/interval settings separate from source-specific delivery options; reject unsupported capabilities rather than substituting another action.
+
+External callers supply shell-start, agent-start, or interval events to `auto`.
+Policy configuration does not install hooks, modify shell profiles, register OS tasks, or imply an in-process scheduler.
+Do not make ordinary apply/status/bootstrap perform implicit automatic updates.
+Explicit commands retain their existing contracts and ignore automatic policy throttles.
+
+Under the existing configuration lock, persist each skill's attempt before network access and throttle failures as well as successes across all its events.
+Preview must not fetch or record attempts.
+Automatic sync applies each successfully updated skill independently; this intentionally differs from explicit sync's all-updates-before-apply gate.
+Preserve existing per-target transactions, stop if recovery is pending, and never adopt, replace conflicts, or reattach detached skills automatically.
+Automatic policies cover catalog skills; legacy sources remain available through explicit commands.
 
 ## Ownership and safety
 
@@ -84,6 +103,7 @@ Changes to delivery must exercise clone, fast-forward, dirty/divergent histories
 Catalog tests must start with repositories lacking links.conf, exercise root and nested skills, and keep the inventory independent of both checkouts and installation roots.
 Verify that missing inventory files do not prevent status from observing installed contents or detach from preserving them.
 Changes to installation must exercise unmanaged targets, local edits, directory contents, partial config preservation, detach, and failure recovery.
+Policy changes must cover precedence, manual opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 Keep command contracts, examples, and platform limitations in the README aligned with behavior.
 Do not add an application-specific adapter framework or additional source providers without a demonstrated use case.
