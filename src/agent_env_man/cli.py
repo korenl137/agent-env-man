@@ -109,7 +109,7 @@ def bootstrap_legacy(config, state, args):
 def bootstrap_skills(config, state, args):
     state.ready()
     if args.path or args.git or args.branch or args.attach or args.manifest != "links.conf":
-        raise Error("Declare each skill's Git repository and optional branch/subdir in the local catalog")
+        raise Error("Declare Git repositories, skills, and optional branches/subdirectories in the local catalog")
     document = tomlkit.parse(tomlkit.dumps(config.doc))
     if args.catalog is not None:
         document["catalog"] = str(args.catalog.expanduser().resolve())
@@ -146,7 +146,7 @@ def parser():
     commands = result.add_subparsers(dest="command", required=True)
     boot = commands.add_parser("bootstrap", help="prepare Git skills from a local catalog; never install targets")
     boot.add_argument("name", nargs="?", help="legacy links.conf source name")
-    boot.add_argument("--catalog", type=Path, help="local inventory of skill names, source types, and repositories")
+    boot.add_argument("--catalog", type=Path, help="local inventory of skills and optional shared Git repositories")
     boot.add_argument("--checkout-root", type=Path, help="device-local storage for managed skill checkouts")
     boot.add_argument("--path", help="legacy source checkout path")
     boot.add_argument("--git")

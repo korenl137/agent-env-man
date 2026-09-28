@@ -96,6 +96,7 @@ class Config:
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
         self.catalog_path = None
         self._catalog = None
+        self._repositories = {}
         self._update_policies = {}
         self.checkout_root = absolute(self.doc["checkout_root"]) if "checkout_root" in self.doc else self.path.parent / (self.path.name + ".checkouts")
         if overlaps(self.checkout_root, self.path) or overlaps(self.checkout_root, self.state_dir):
@@ -158,24 +159,35 @@ class Config:
             document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
-        if document.get("version") != 1 or set(document) - {"version", "skills", "updates"}:
+        if document.get("version") != 1 or set(document) - {"version", "skills", "repositories", "updates"}:
             raise Error("Skill catalog needs version = 1 and a skills table")
         skills = document.get("skills", {})
         if not isinstance(skills, dict):
             raise Error("Catalog skills must be a TOML table")
+        repositories = document.get("repositories", {})
+        if not isinstance(repositories, dict):
+            raise Error("Catalog repositories must be a TOML table")
+        for name, data in repositories.items():
+            identifier(name)
+            if not isinstance(data, dict) or set(data) - {"type", "repository", "branch"}:
+                raise Error(f"Invalid repository declaration: {name}")
+            if data.get("type", "git") != "git":
+                raise Error(f"Repository {name}: only type = 'git' is supported")
+            self._validate_repository(data, f"Repository {name}")
         for name, data in skills.items():
             identifier(name)
-            if not isinstance(data, dict) or set(data) - {"type", "repository", "subdir", "branch", "root", "mode", "update"}:
+            if not isinstance(data, dict) or set(data) - {"type", "repository", "repo", "subdir", "branch", "root", "mode", "update"}:
                 raise Error(f"Invalid skill declaration: {name}")
-            if data.get("type") != "git":
+            if data.get("type", "git" if "repo" in data else None) != "git":
                 raise Error(f"Skill {name}: only type = 'git' is supported")
-            repository = data.get("repository")
-            if not isinstance(repository, str) or not repository or repository.startswith("-"):
-                raise Error(f"Skill {name}: repository must be a Git URL or absolute local repository path")
-            if not (Path(repository).expanduser().is_absolute() or ":" in repository):
-                raise Error(f"Skill {name}: use an absolute path for a local Git repository")
-            if "branch" in data and (not isinstance(data["branch"], str) or not data["branch"] or data["branch"].startswith("-")):
-                raise Error(f"Skill {name}: branch must be a nonempty branch name")
+            if "repo" in data:
+                if ("repository" in data or "branch" in data or not isinstance(data["repo"], str)
+                        or data["repo"] not in repositories):
+                    raise Error(f"Skill {name}: repo must name a declared repository; set its branch there")
+            else:
+                if name == ".aem-repositories" and repositories:
+                    raise Error("Skill name .aem-repositories is reserved for shared checkouts")
+                self._validate_repository(data, f"Skill {name}")
             if name in self._legacy_sources:
                 raise Error(f"Skill name collides with a legacy source: {name}")
             path = data.get("subdir", ".")
@@ -191,8 +203,19 @@ class Config:
         from .updates import resolve_policies
 
         self._update_policies = resolve_policies(document.get("updates", {}), skills)
+        self._repositories = repositories
         self._catalog = skills
         return skills
+
+    @staticmethod
+    def _validate_repository(data, label):
+        repository = data.get("repository")
+        if not isinstance(repository, str) or not repository or repository.startswith("-"):
+            raise Error(f"{label}: repository must be a Git URL or absolute local repository path")
+        if not (Path(repository).expanduser().is_absolute() or ":" in repository):
+            raise Error(f"{label}: use an absolute path for a local Git repository")
+        if "branch" in data and (not isinstance(data["branch"], str) or not data["branch"] or data["branch"].startswith("-")):
+            raise Error(f"{label}: branch must be a nonempty branch name")
 
     def update_policies(self) -> dict:
         """Return validated effective policies from the currently bound catalog."""
@@ -204,13 +227,15 @@ class Config:
         """Derive checkout paths; the inventory never needs device-local bindings."""
         result = dict(self._legacy_sources)
         for name, data in self.catalog().items():
-            repository = data["repository"]
+            shared = data.get("repo")
+            settings = self._repositories[shared] if shared else data
+            repository = settings["repository"]
             if Path(repository).expanduser().is_absolute():
                 repository = str(absolute(repository))
-            path = self.checkout_root / name
+            path = self.checkout_root / ".aem-repositories" / shared if shared else self.checkout_root / name
             if path.resolve() != path:
                 raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
-            result[name] = Source(name, path, None, repository, data.get("branch"), (), {}, True)
+            result[name] = Source(name, path, None, repository, settings.get("branch"), (), {}, True)
         return result
 
     def declarations(self, source: Source) -> list[Item]:

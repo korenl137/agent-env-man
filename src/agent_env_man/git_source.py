@@ -100,7 +100,9 @@ class Git:
 
     def guard_links(self, source: Source, revision: str, records: dict):
         for key, record in records.items():
-            if record.get("source_name") != source.name or record.get("detached") or record["mode"] != "link":
+            shared_skill = (record.get("kind") == "skill"
+                            and record.get("source") == str(source.path / record["relative"]))
+            if (record.get("source_name") != source.name and not shared_skill) or record.get("detached") or record["mode"] != "link":
                 continue
             if str(source.path / record["relative"]) != record["source"]:
                 raise Error(f"{key}: source path moved; detach before reconfiguration")

@@ -66,7 +66,7 @@ def resolve_policies(updates, skills):
         if selection is not None and selection not in policies:
             raise Error(f"Skill {name}: unknown update policy {selection!r}")
         effective = {**defaults, **policies.get(selection, {}), **own}
-        if skill.get("type") != "git":
+        if skill.get("type", "git" if "repo" in skill else None) != "git":
             raise Error(f"Skill {name}: update actions are unsupported for source type {skill.get('type')!r}")
         result[name] = effective
     return result

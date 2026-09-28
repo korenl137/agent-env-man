@@ -337,7 +337,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual((self.checkout / "unfinished.md").read_text(), "unfinished")
         self.run_cli("apply", code=1)
         (self.checkout / "unfinished.md").unlink()
-        shutil.rmtree(self.remote)
+        self.remote.rename(self.root / "unavailable-remote.git")
         report = self.run_cli("sync", code=1)
         self.assertEqual(report["apply"], "skipped")
         self.assertEqual(self.target.read_text(), "Original instructions\n")

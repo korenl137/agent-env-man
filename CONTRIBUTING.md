@@ -16,7 +16,8 @@ Run these commands from the activated environment.
 On native Windows the same test command works with `.\.venv\Scripts\python.exe`.
 Tests create temporary sources, targets, config, state, and local Git remotes; do not use actual user homes, credentials, or network remotes in tests.
 Successful symlink tests skip if the host cannot create links; the simulated capability-failure test must still run.
-The initial validation was performed on Linux with Python 3.12; native Windows validation remains required before claiming Windows readiness.
+The initial validation was performed on Linux with Python 3.12.
+Native Windows tests have run on Python 3.12, but link-dependent tests require a host with symlink creation enabled before claiming full Windows readiness.
 
 Preserve Linux/WSL and native Windows path handling.
 Use Python filesystem/subprocess APIs, explicit UTF-8, argument lists, and `/` in shared relative paths.
@@ -41,12 +42,16 @@ The incoming-revision guard protects active link source paths, even if the lates
 
 The primary input is a user-owned skill catalog, independent of the repositories it lists.
 The current loader reads a local TOML file; policy composition must remain independent of this transport and any future auxiliary-file layout.
-Each skill has a stable name, explicit source type (currently only Git), and repository location; optional subdirectory and branch select the skill within that repository.
+Each skill has a stable name and selects one Git repository and optional subdirectory.
+Named repository declarations let related skills share one URL, branch, and checkout; direct per-skill repository declarations remain supported.
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
 The catalog owns repository URLs, requested branches, and declarative automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
 Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
 Application paths consume these prepared local checkouts without fetching.
-The current implementation uses one checkout per skill; do not introduce deduplication or a provider framework without a demonstrated need.
+Share a checkout only when skills explicitly reference the same named repository; equal URLs in direct declarations do not imply shared ownership.
+Validate every skill in a shared checkout before publishing it, and guard all active links from that checkout before advancing it.
+Keep installation ownership and automatic policies per skill, even when delivery is shared.
+Do not introduce a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
 The previous source-local links.conf workflow is compatibility support, not the model for new skill registration.
 Keep its existing four-field parser and saved ownership records functional when changing the primary workflow.

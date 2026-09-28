@@ -48,14 +48,19 @@ class Manager:
             raise Error("Unknown catalog skill selection")
         self.check_destinations([i for s in sources.values() for i in self.config.declarations(s)])
         report, failed = [], False
+        groups = {}
         for name, source in sources.items():
-            if names and name not in names:
+            groups.setdefault(source.path, []).append((name, source))
+        for members in groups.values():
+            selected = [(name, source) for name, source in members if not names or name in names]
+            if not selected:
                 continue
+            name, source = members[0]
             temporary = None
-            source_state = self.state.data["sources"].setdefault(name, {})
             try:
                 git = Git(timeout)
                 created = not exists(source.path)
+                source_state = self.state.data["sources"].setdefault(name, {})
                 previous_branch = source_state.get("branch") if source_state.get("repository") == source.git else None
                 branch = source.branch or previous_branch
                 if created:
@@ -68,36 +73,48 @@ class Manager:
                     branch = git.run(local_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout
                 prepared = replace(source, path=local_path, branch=branch)
                 git.clean(prepared)
-                item = self.config.declarations(source)[0]
-                git.skill_descriptor(prepared, item.relative)
-                # Use the staged root for ancestry checks, without changing config.
-                payload = local_path / item.relative
-                if not (payload / "SKILL.md").is_file():
-                    raise Error(f"{name}: skill path must contain SKILL.md")
-                cursor = payload
-                while cursor != local_path:
-                    if cursor.is_symlink() or is_reparse(cursor):
-                        raise Error(f"Skill source contains a symlink/junction: {cursor}")
-                    cursor = cursor.parent
-                fingerprint(payload, exclude_git=item.relative == ".")
+                # A shared checkout is published only when every declared skill is valid.
+                for skill_name, skill_source in members:
+                    item = self.config.declarations(skill_source)[0]
+                    git.skill_descriptor(prepared, item.relative)
+                    payload = local_path / item.relative
+                    if not (payload / "SKILL.md").is_file():
+                        raise Error(f"{skill_name}: skill path must contain SKILL.md")
+                    cursor = payload
+                    while cursor != local_path:
+                        if cursor.is_symlink() or is_reparse(cursor):
+                            raise Error(f"Skill source contains a symlink/junction: {cursor}")
+                        cursor = cursor.parent
+                    fingerprint(payload, exclude_git=item.relative == ".")
                 revision = git.run(local_path, "rev-parse", "HEAD").stdout
                 if temporary:
                     if exists(source.path):
                         raise Error("Checkout destination appeared while cloning; refusing replacement")
                     os.rename(temporary, source.path)
                     temporary = None
-                source_state.update(repository=source.git, branch=branch, revision=revision, error=None)
-                if created:
-                    source_state.update(last_fetch=now(), observed_revision=revision)
-                report.append({"skill": name, "status": "cloned" if created else "already-prepared", "checkout": str(source.path)})
+                for skill_name, _ in members:
+                    member_state = self.state.data["sources"].setdefault(skill_name, {})
+                    member_state.update(repository=source.git, branch=branch, revision=revision, error=None)
+                    if created:
+                        member_state.update(last_fetch=now(), observed_revision=revision)
+                for skill_name, _ in selected:
+                    report.append({"skill": skill_name, "status": "cloned" if created else "already-prepared", "checkout": str(source.path)})
             except (Error, OSError, ValueError) as exc:
                 failed = True
-                source_state["error"] = str(exc)
-                report.append({"skill": name, "status": "failed", "error": str(exc)})
+                for skill_name, _ in selected:
+                    self.state.data["sources"].setdefault(skill_name, {})["error"] = str(exc)
+                    report.append({"skill": skill_name, "status": "failed", "error": str(exc)})
             finally:
                 if temporary:
-                    shutil.rmtree(temporary)
-            source_state["last_attempt"] = now()
+                    # Git can mark object files read-only on Windows; a failed
+                    # staged clone must still be removable before returning.
+                    def writable_retry(operation, path, error):
+                        os.chmod(path, stat.S_IWRITE)
+                        operation(path)
+
+                    shutil.rmtree(temporary, onerror=writable_retry)
+            for skill_name, _ in selected:
+                self.state.data["sources"].setdefault(skill_name, {})["last_attempt"] = now()
             self.state.save()
         return report, failed
 
@@ -372,9 +389,14 @@ class Manager:
         if set(names) - self.config.sources.keys():
             raise Error("Unknown source selection")
         results, failed = [], False
+        groups = {}
         for name, source in self.config.sources.items():
-            if names and name not in names:
+            groups.setdefault(source.path, []).append((name, source))
+        for members in groups.values():
+            selected = [(name, source) for name, source in members if not names or name in names]
+            if not selected:
                 continue
+            name, source = members[0]
             source_state = self.state.data["sources"].setdefault(name, {})
             try:
                 if source.git:
@@ -385,12 +407,19 @@ class Manager:
                         raise Error(f"External source missing: {source.path}")
                     status = "external-no-fetch"
                     source_state["error"] = None
-                results.append({"source": name, "status": status})
+                for skill_name, _ in members:
+                    if skill_name != name:
+                        self.state.data["sources"].setdefault(skill_name, {}).update(
+                            {key: source_state[key] for key in ("last_fetch", "observed_revision", "last_update", "revision", "error")
+                             if key in source_state})
+                results.extend({"source": skill_name, "status": status} for skill_name, _ in selected)
             except (Error, OSError) as exc:
                 failed = True
-                source_state["error"] = str(exc)
-                results.append({"source": name, "status": "failed", "error": str(exc)})
-            source_state["last_attempt"] = now()
+                for skill_name, _ in selected:
+                    self.state.data["sources"].setdefault(skill_name, {})["error"] = str(exc)
+                    results.append({"source": skill_name, "status": "failed", "error": str(exc)})
+            for skill_name, _ in selected:
+                self.state.data["sources"].setdefault(skill_name, {})["last_attempt"] = now()
             self.state.save()
         return results, failed
 

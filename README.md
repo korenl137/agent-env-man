@@ -5,7 +5,7 @@ The inventory lists what you want; skill contents stay in their own repositories
 You do not need to combine those repositories or add a manager manifest to them.
 
 ```text
-local skills.toml: name + type + repository location
+local skills.toml: skills + optional shared repositories
                 |
              bootstrap: Git clone
                 v
@@ -23,7 +23,8 @@ Once prepared, the local skills remain usable offline.
 ## Install the manager
 
 Requirements: Python 3.11 or later and Git.
-Linux/WSL and native Windows are supported in the implementation; native Windows execution has not yet been validated.
+Linux/WSL and native Windows are supported in the implementation.
+Native Windows tests have run for non-symlink paths; symlink behavior still needs validation on a host with link creation enabled.
 
 On Linux/WSL, from this repository:
 
@@ -52,10 +53,16 @@ Create a `skills.toml` outside managed checkout storage:
 ```toml
 version = 1
 
-[skills.report-helper]
-type = "git"
+[repositories.research-tools]
 repository = "https://github.com/OWNER/RESEARCH-TOOLS.git"
+
+[skills.report-helper]
+repo = "research-tools"
 subdir = "skills/report-helper"
+
+[skills.second-helper]
+repo = "research-tools"
+subdir = "skills/second-helper"
 
 [skills.standalone-skill]
 type = "git"
@@ -67,10 +74,11 @@ The table key is the skill's registration name and installed directory name; it 
 
 | Field | Meaning |
 | --- | --- |
-| `type` | Required repository type; currently only `git`. |
-| `repository` | Required Git URL or absolute path to a local Git repository, including a bare repository. |
+| `type` | Required for a skill-local repository; currently only `git`. A named repository defaults to `git`. |
+| `repository` | Git URL or absolute path to a local Git repository, including a bare repository; required for skill-local and named repository declarations. |
+| `repo` | Reference to a named entry in `repositories`, as an alternative to a skill-local `repository`. |
 | `subdir` | Skill directory inside the repository; defaults to `.` for a root skill. |
-| `branch` | Optional branch. Otherwise bootstrap discovers and records the remote's default branch. |
+| `branch` | Optional branch on a skill-local or named repository. Otherwise bootstrap discovers and records the remote's default branch. |
 | `root` | Target root name; defaults to `skills`. Its actual path is machine-local. |
 | `mode` | `link` by default, or explicit `copy`. |
 | `update` | Optional per-skill automatic update policy; see below. |
@@ -78,7 +86,10 @@ The table key is the skill's registration name and installed directory name; it 
 Subdirectories use literal `/`-separated paths without traversal or shell expansion.
 The selected directory must contain a regular SKILL.md tracked by Git.
 The manager does not execute installation scripts or validate skill prose/frontmatter as part of installation.
-There is one checkout per listed skill, even if two entries refer to the same repository.
+Each `[repositories.NAME]` entry accepts `repository` and optional `branch` (and optional `type = "git"`).
+Skills referencing the same name share one checkout and branch; each still has its own installation, mode, and update policy.
+Skill-local `repository` declarations retain separate checkouts even when their URLs match.
+To move an installed skill from a skill-local repository declaration to `repo`, detach it, move the preserved target aside, then bootstrap and explicitly reattach it from the new source path.
 
 ## Prepare and install
 
@@ -109,7 +120,8 @@ catalog = "/home/me/ai-config/skills.toml"
 skills = "/home/me/.agents/skills"
 ```
 
-Default checkout storage is the sibling `machine.toml.checkouts/`, with one child per skill name; state is in `machine.toml.state/`.
+Default checkout storage is the sibling `machine.toml.checkouts/`: skill-local repositories use one child per skill name, while named repositories use `.aem-repositories/NAME`.
+State is in `machine.toml.state/`.
 You can set a top-level `checkout_root` explicitly.
 A relative `catalog` value is interpreted relative to the machine configuration file.
 Other machine paths must be absolute or use `~/`.
@@ -151,7 +163,7 @@ Run bootstrap to prepare its checkout, then apply to install it.
 Updates to a skill repository cannot add entries to the separate inventory.
 Deleting an entry does not delete its target or cached checkout; status reports orphaned ownership, and detach can release it.
 Detach records a tombstone, so a listed skill is not immediately installed again.
-Explicitly reattach with `aem apply --item NAME --reattach --replace` when wanted.
+After moving a detached target aside, explicitly reattach with `aem apply --item NAME --reattach`.
 
 ## Preservation and conflicts
 
@@ -171,6 +183,7 @@ Git operations never stash, reset, rebase, commit, or push automatically.
 Updates refuse dirty/untracked/ignored local files, wrong/detached branches, unfinished Git operations, local-ahead history, and divergence.
 Apply also requires a clean, correctly identified checkout.
 An incoming commit cannot remove or change the type of an active link source, or remove its SKILL.md, without first detaching the skill.
+For a shared checkout, this guard covers active links for every skill referencing that repository, including when `update NAME` selects one skill.
 Changing an inventory repository URL does not silently reuse or repoint an old checkout.
 Ordinary fetch/authentication failures keep the existing installation usable; a timeout/interruption during checkout can require manual repair.
 
@@ -219,6 +232,7 @@ The current catalog loader reads a local file; policy composition does not depen
 
 With Git, `check` fetches the configured branch and reports its relation to HEAD without moving the checkout or changing installed content.
 `sync` fetches and fast-forwards, then applies: links see the checkout change immediately, and copies are refreshed by apply.
+When skills share a checkout, advancing it changes all their live links at once; applying copies still follows each skill's selection and policy.
 The policy vocabulary describes these outcomes; it does not expose Git commands as general configuration or add new source types.
 Unknown fields, policies, triggers, and unsupported values are errors before any update starts.
 

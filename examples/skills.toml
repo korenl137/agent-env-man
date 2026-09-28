@@ -12,10 +12,16 @@ timeout = 30
 [updates.policies.observe]
 action = "check"
 
-[skills.report-helper]
-type = "git"
+[repositories.research-tools]
 repository = "https://github.com/OWNER/RESEARCH-TOOLS.git"
+
+[skills.report-helper]
+repo = "research-tools"
 subdir = "skills/report-helper"
+
+[skills.second-helper]
+repo = "research-tools"
+subdir = "skills/second-helper"
 
 [skills.standalone-skill]
 type = "git"

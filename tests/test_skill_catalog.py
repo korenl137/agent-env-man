@@ -15,6 +15,7 @@ import tomlkit
 
 from agent_env_man.cli import main
 from agent_env_man.git_source import Git
+from agent_env_man.model import Config, Error
 from agent_env_man.storage import fingerprint
 
 
@@ -178,7 +179,7 @@ class SkillCatalog(unittest.TestCase):
         self.save_catalog()
         self.update_policy({"trigger": "shell-start"})
         self.bootstrap()
-        shutil.rmtree(self.repo)
+        self.repo.rename(self.root / "unavailable-research-tools")
         with patch("agent_env_man.updates.time.time", return_value=1000):
             result = self.run_cli("auto", "--trigger", "shell-start", code=1)
         self.assertEqual({r["skill"]: r["status"] for r in result}, {"report": "failed", "other": "synced"})
@@ -240,6 +241,109 @@ class SkillCatalog(unittest.TestCase):
         self.assertEqual(self.catalog.read_bytes(), before)
         self.assertEqual(self.git(self.repo, "status", "--porcelain"), "")
 
+    def test_shared_repository_prepares_once_and_installs_two_skills(self):
+        second = self.repo / "skills/second"
+        second.mkdir()
+        (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.skills = {"report": {"repo": "tools", "subdir": "skills/report", "mode": "copy"},
+                       "second": {"repo": "tools", "subdir": "skills/second", "mode": "copy"}}
+        self.catalog.write_text(tomlkit.dumps({"version": 1,
+                                               "repositories": {"tools": {"repository": str(self.repo)}},
+                                               "skills": self.skills}), encoding="utf-8")
+        report = self.bootstrap()
+        checkout = self.checkouts / ".aem-repositories/tools"
+        self.assertEqual([entry["checkout"] for entry in report["skills"]], [str(checkout)] * 2)
+        self.assertTrue((checkout / ".git").is_dir())
+        self.assertFalse((self.checkouts / "report").exists())
+        self.run_cli("apply")
+        self.assertTrue((self.destination / "report/SKILL.md").is_file())
+        self.assertTrue((self.destination / "second/SKILL.md").is_file())
+        (second / "SKILL.md").write_text("# Updated\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.assertEqual(len(self.run_cli("update")), 2)
+        self.run_cli("apply")
+        self.assertEqual((self.destination / "second/SKILL.md").read_text(), "# Updated\n")
+
+    def test_shared_repository_rejects_missing_sibling_before_publish(self):
+        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
+                       "missing": {"repo": "tools", "subdir": "skills/missing"}}
+        self.catalog.write_text(tomlkit.dumps({"version": 1,
+                                               "repositories": {"tools": {"repository": str(self.repo)}},
+                                               "skills": self.skills}), encoding="utf-8")
+        result = self.bootstrap(code=1)
+        self.assertEqual([entry["status"] for entry in result["skills"]], ["failed", "failed"])
+        self.assertFalse((self.checkouts / ".aem-repositories/tools").exists())
+
+    def test_named_repository_reference_is_validated_before_clone(self):
+        self.skills = {"report": {"repo": "unknown", "subdir": "skills/report"}}
+        self.save_catalog()
+        with patch.object(Git, "run", side_effect=AssertionError("Unexpected Git command")):
+            self.assertIn("repo must name a declared repository", self.bootstrap(code=1))
+        self.assertFalse(self.checkouts.exists())
+
+    def test_shared_repository_selective_update_retains_skill_installation_boundary(self):
+        second = self.repo / "skills/second"
+        second.mkdir()
+        (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.skills = {"report": {"repo": "tools", "subdir": "skills/report", "mode": "copy"},
+                       "second": {"repo": "tools", "subdir": "skills/second", "mode": "copy"}}
+        self.catalog.write_text(tomlkit.dumps({"version": 1,
+                                               "repositories": {"tools": {"repository": str(self.repo)}},
+                                               "skills": self.skills}), encoding="utf-8")
+        self.bootstrap()
+        self.run_cli("apply")
+        before = (self.destination / "second/SKILL.md").read_text()
+        (second / "SKILL.md").write_text("# Updated\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.assertEqual(self.run_cli("update", "report")[0]["source"], "report")
+        self.run_cli("apply", "--item", "report")
+        self.assertEqual((self.destination / "second/SKILL.md").read_text(), before)
+        self.run_cli("apply", "--item", "second")
+        self.assertEqual((self.destination / "second/SKILL.md").read_text(), "# Updated\n")
+
+    def test_shared_update_guards_other_skills_live_link(self):
+        self.require_links()
+        second = self.repo / "skills/second"
+        second.mkdir()
+        (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
+                       "second": {"repo": "tools", "subdir": "skills/second"}}
+        self.catalog.write_text(tomlkit.dumps({"version": 1,
+                                               "repositories": {"tools": {"repository": str(self.repo)}},
+                                               "skills": self.skills}), encoding="utf-8")
+        self.bootstrap()
+        self.run_cli("apply")
+        (second / "SKILL.md").unlink()
+        self.commit(self.repo)
+        self.run_cli("update", "report", code=1)
+        self.assertTrue((self.destination / "second/SKILL.md").is_file())
+
+    def test_shared_link_guard_covers_sibling_record_without_link_capability(self):
+        second = self.repo / "skills/second"
+        second.mkdir()
+        (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
+                       "second": {"repo": "tools", "subdir": "skills/second"}}
+        self.catalog.write_text(tomlkit.dumps({"version": 1,
+                                               "repositories": {"tools": {"repository": str(self.repo)}},
+                                               "skills": self.skills}), encoding="utf-8")
+        self.bootstrap()
+        config = Config(self.config)
+        source = config.sources["report"]
+        record = {"source_name": "second", "relative": "skills/second",
+                  "source": str(source.path / "skills/second"), "mode": "link",
+                  "directory": True, "kind": "skill"}
+        (second / "SKILL.md").unlink()
+        self.commit(self.repo)
+        self.git(source.path, "fetch", "origin")
+        revision = self.git(source.path, "rev-parse", "FETCH_HEAD")
+        with self.assertRaises(Error):
+            Git().guard_links(source, revision, {"second": record})
+
     def test_after_bootstrap_local_use_does_not_fetch(self):
         self.copy_mode()
         self.bootstrap()
@@ -281,7 +385,7 @@ class SkillCatalog(unittest.TestCase):
         self.copy_mode()
         self.bootstrap()
         self.run_cli("apply")
-        shutil.rmtree(self.repo)
+        self.repo.rename(self.root / "unavailable-research-tools")
         self.run_cli("sync", code=1)
         self.assertTrue((self.destination / "report/SKILL.md").is_file())
         self.run_cli("apply")
