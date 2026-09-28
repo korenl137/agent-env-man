@@ -157,6 +157,9 @@ Store per-target ownership and shared consumers independently from per-skill Git
 A shared target has one owner, and cannot be materialized for just one of its consumers.
 Explicit catalog roots retain their meaning; omitted destinations use selected agent defaults.
 
+During development, switch `STARTUP_BRIEFING_OUTPUT` in `src/agent_env_man/agents.py` between `"systemMessage"` (UI warning) and `"additionalContext"` (model context) to try both startup briefing behaviors.
+For a regular uv tool installation, reinstall the updated checkout before testing the installed hook.
+
 Test setup with temporary homes and fake installer subprocesses, never actual user profiles or live remote repositories.
 Exercise repeat/add/remove, edited blocks, invalid hook files, redirected paths, grouped hook writes, partial failure/retry, offline previews, and fail-open startup.
 Shell quoting and PowerShell serialization tests do not establish native shell or Windows readiness.
