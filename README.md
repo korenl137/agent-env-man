@@ -496,6 +496,10 @@ The initial source-local links.conf and Codex partial-merge workflow remains ava
 It is not required by the skill catalog workflow.
 Syncthing administration, additional repository types, inventory delivery, generalized merge adapters, and revert are deferred.
 
+## License
+
+This project is licensed under the [MIT License](LICENSE.txt).
+
 ## AI disclosure
 
 OpenAI Codex assisted with design, implementation, documentation, and automated tests.
