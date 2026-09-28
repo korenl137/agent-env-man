@@ -1,11 +1,9 @@
-"""Independent skill inventory, machine bindings, and legacy links.conf input."""
+"""Independent catalog declarations and machine-local bindings."""
 
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
-import sys
 
 import tomlkit
 
@@ -53,13 +51,8 @@ def default_config() -> Path:
 class Source:
     name: str
     path: Path
-    manifest: str | None
     git: str | None
     branch: str | None
-    items: tuple[str, ...]
-    modes: dict[str, str]
-    repository: bool = False
-    instruction: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,7 +63,7 @@ class Item:
     source: Path
     target: Path
     mode: str
-    kind: str = "payload"
+    kind: str
     entry: str | None = None
     agent: str = "codex"
     agents: tuple[str, ...] = ()
@@ -87,16 +80,35 @@ class Config:
         if document is not None:
             self.doc = document
         elif not self.path.exists() and missing_ok:
-            self.doc = tomlkit.parse('version = 1\n\n[roots]\n\n[sources]\n')
+            self.doc = tomlkit.parse('version = 1\n')
         else:
             try:
                 self.doc = tomlkit.parse(self.path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as exc:
                 raise Error(f"Cannot read machine config {self.path}: {exc}") from exc
-        if self.doc.get("version") != 1:
+        version = self.doc.get("version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        if not isinstance(self.doc.get("roots", {}), dict) or not isinstance(self.doc.get("sources", {}), dict):
-            raise Error("roots and sources must be TOML tables")
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup"}
+        if unknown:
+            raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
+        if not isinstance(self.doc.get("roots", {}), dict):
+            raise Error("roots must be a TOML table")
+        if not isinstance(self.doc.get("external_paths", {}), dict):
+            raise Error("external_paths must be a TOML table")
+        for name, value in self.doc.get("external_paths", {}).items():
+            identifier(name)
+            absolute(value)
+        setup = self.doc.get("setup", {})
+        if not isinstance(setup, dict) or set(setup) - {"shells", "executable"}:
+            raise Error("Machine setup accepts only shells and executable")
+        shells = setup.get("shells", {})
+        if not isinstance(shells, dict) or any(
+                name not in ("bash", "zsh", "powershell") or not isinstance(path, str)
+                or not Path(path).is_absolute() for name, path in shells.items()):
+            raise Error("Setup shells must map supported shell names to absolute profile paths")
+        if "executable" in setup:
+            absolute(setup["executable"])
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
         from .agents import bindings
         self.agents = bindings(self.doc)
@@ -127,40 +139,8 @@ class Config:
         self.modes = self.doc.get("modes", {})
         if not isinstance(self.modes, dict) or any(v not in ("link", "copy") for v in self.modes.values()):
             raise Error("Machine modes must map skill names to link or copy")
-        self._legacy_sources = {}
-        for name, data in self.doc.get("sources", {}).items():
+        for name in self.modes:
             identifier(name)
-            if not isinstance(data, dict) or "path" not in data:
-                raise Error(f"Source {name} needs a path")
-            manifest = data.get("manifest", "links.conf")
-            relative(manifest)
-            git = data.get("git")
-            branch = data.get("branch")
-            if git is not None and (not isinstance(git, str) or not git or not isinstance(branch, str) or not branch):
-                raise Error(f"Git source {name} needs git and branch strings")
-            if git is None and branch is not None:
-                raise Error(f"Source {name}: branch requires a Git URL")
-            ids = data.get("items", [])
-            if not isinstance(ids, list) or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
-                raise Error(f"Source {name}: items must be unique identifiers")
-            for item_id in ids:
-                identifier(item_id)
-            if not isinstance(data.get("modes", {}), dict):
-                raise Error(f"Source {name}: modes must be a TOML table")
-            modes = dict(data.get("modes", {}))
-            if any(k not in ids or v not in ("link", "copy") for k, v in modes.items()):
-                raise Error(f"Source {name}: mode overrides must select registered link/copy items")
-            self._legacy_sources[name] = Source(name, absolute(data["path"]), manifest, git, branch, tuple(ids), modes)
-        paths = [s.path for s in self._legacy_sources.values()]
-        for i, path in enumerate(paths):
-            if overlaps(path, self.state_dir) or overlaps(path, self.path):
-                raise Error("Source and machine config/state paths must be separate")
-            if self.catalog_path is not None and overlaps(path, self.catalog_path):
-                raise Error("Keep the inventory outside the skill repositories it lists")
-            if self.catalog_path is not None and overlaps(path, self.checkout_root):
-                raise Error("Legacy source and catalog checkout storage must not overlap")
-            if any(overlaps(path, other) for other in paths[:i]):
-                raise Error("Source roots must not overlap")
 
     @property
     def external_names(self) -> set[str]:
@@ -178,8 +158,10 @@ class Config:
             document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
-        if document.get("version") != 1 or set(document) - {"version", "skills", "repositories", "updates", "instructions", "externals"}:
-            raise Error("Skill catalog needs version = 1 and a skills table")
+        version = document.get("version")
+        allowed = {"version", "skills", "repositories", "updates", "instructions", "externals"}
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1 or set(document) - allowed:
+            raise Error("Catalog requires version = 1 and only skills, repositories, updates, instructions, or externals tables")
         skills = document.get("skills", {})
         if not isinstance(skills, dict):
             raise Error("Catalog skills must be a TOML table")
@@ -204,11 +186,7 @@ class Config:
                         or data["repo"] not in repositories):
                     raise Error(f"Skill {name}: repo must name a declared repository; set its branch there")
             else:
-                if name == ".aem-repositories" and repositories:
-                    raise Error("Skill name .aem-repositories is reserved for shared checkouts")
                 self._validate_repository(data, f"Skill {name}")
-            if name in self._legacy_sources:
-                raise Error(f"Skill name collides with a legacy source: {name}")
             path = data.get("subdir", ".")
             if path != ".":
                 relative(path)
@@ -228,7 +206,7 @@ class Config:
                 raise Error(f"External {name}: declare an empty table; paths belong in machine external_paths")
         for name, data in instructions.items():
             identifier(name)
-            if name in skills or name in self._legacy_sources:
+            if name in skills:
                 raise Error(f"Instruction name collides with another source: {name}")
             if not isinstance(data, dict) or set(data) - {"repo", "external", "subdir", "entry", "root", "destination", "entry_root", "entry_destination"}:
                 raise Error(f"Invalid instruction declaration: {name}")
@@ -252,7 +230,7 @@ class Config:
             if "entry_root" not in data and not self.agents:
                 raise Error(f"Instruction {name}: missing target root entry_root")
         external_paths = {identifier(k): absolute(v) for k, v in bindings.items()}
-        protected = [self.path, self.state_dir, self.checkout_root, *[s.path for s in self._legacy_sources.values()]]
+        protected = [self.path, self.state_dir, self.checkout_root]
         if self.catalog_path:
             protected.append(self.catalog_path)
         paths = list(external_paths.values())
@@ -289,11 +267,11 @@ class Config:
     @property
     def sources(self) -> dict[str, Source]:
         """Derive checkout paths; the inventory never needs device-local bindings."""
-        result = dict(self._legacy_sources)
+        result = {}
         declarations = {**self.catalog(), **self._instructions}
         for name, data in declarations.items():
             if "external" in data:
-                result[name] = Source(name, self._external_paths[data["external"]], None, None, None, self.instruction_ids(data), {}, instruction=True)
+                result[name] = Source(name, self._external_paths[data["external"]], None, None)
                 continue
             shared = data.get("repo")
             settings = self._repositories[shared] if shared else data
@@ -303,11 +281,11 @@ class Config:
             path = self.checkout_root / ".aem-repositories" / shared if shared else self.checkout_root / name
             if path.resolve() != path:
                 raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
-            result[name] = Source(name, path, None, repository, settings.get("branch"), self.instruction_ids(data) if name in self._instructions else (), {}, True, name in self._instructions)
+            result[name] = Source(name, path, repository, settings.get("branch"))
         return result
 
     def instruction_agents(self, data):
-        # Explicit legacy destinations remain single-target. Match their binding
+        # Explicit destinations remain single-target. Match their binding
         # when possible, rather than interpreting one path as several agents.
         if "entry_root" in data:
             root = self.roots[data["entry_root"]]
@@ -319,13 +297,9 @@ class Config:
             if len(self.agents) == 1:
                 return list(self.agents)
             if not self.agents or "codex" in self.agents:
-                return ["codex"]  # Preserve the explicit legacy destination.
+                return ["codex"]  # Use the built-in profile for an explicit destination.
             raise Error("Explicit entry_root must match one selected agent")
         return sorted(self.agents, key=lambda n: (n != "codex", n))
-
-    def instruction_ids(self, data):
-        from .agents import suffix
-        return tuple(part + suffix(n) for n in self.instruction_agents(data) for part in ("bundle", "entry", "hook"))
 
     def declarations(self, source: Source) -> list[Item]:
         from .agents import profile, suffix
@@ -347,11 +321,9 @@ class Config:
                     Item(source.name, "bundle" + tail, subdir, payload, target, "link", "instruction", data["entry"], agent),
                     Item(source.name, "entry" + tail, entry_relative, payload / data["entry"], entry_target,
                          "link", "instruction-entry", data["entry"], agent),
-                    Item(source.name, "hook" + tail, subdir, payload, hook_target, "codex-hook" if agent == "codex" else "agent-hook",
+                    Item(source.name, "hook" + tail, subdir, payload, hook_target, "agent-hook",
                          "instruction-hook", data["entry"], agent)])
             return result
-        if not source.repository:
-            return self.manifest(source)
         data = self.catalog()[source.name]
         relative_path = data.get("subdir", ".")
         payload = source.path if relative_path == "." else source.path / relative(relative_path)
@@ -381,42 +353,3 @@ class Config:
         if any(overlaps(target, path) for path in protected):
             raise Error(f"Target overlaps source, inventory, or manager state: {target}")
         return target
-
-    def manifest(self, source: Source, text: str | None = None) -> list[Item]:
-        if text is None:
-            text = (source.path / source.manifest).read_text(encoding="utf-8")
-        platform = "windows" if os.name == "nt" else "linux" if sys.platform.startswith("linux") else "unsupported"
-        if platform == "unsupported":
-            raise Error("This version supports Linux/WSL and native Windows")
-        result = []
-        ids = set()
-        for number, line in enumerate(text.splitlines(), 1):
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            fields = line.split("|")
-            if len(fields) not in (4, 6):
-                raise Error(f"{source.name}/{source.manifest}:{number}: expected 4 or 6 fields")
-            system, src, root, dst = fields[:4]
-            if system not in ("all", "linux", "windows"):
-                raise Error(f"Unknown platform on line {number}: {system}")
-            if system not in ("all", platform):
-                continue
-            src_path, dst_path = relative(src), relative(dst)
-            if root not in self.roots:
-                raise Error(f"Missing machine root {root!r} for {source.name}:{number}")
-            mode, item_id = fields[4:] if len(fields) == 6 else (
-                "link", "legacy-" + hashlib.sha256(f"{root}\0{dst}".encode()).hexdigest()[:16])
-            identifier(item_id)
-            if item_id in ids:
-                raise Error(f"Duplicate active item ID: {source.name}:{item_id}")
-            ids.add(item_id)
-            if mode not in ("link", "copy", "codex-merge"):
-                raise Error(f"Unknown install mode: {mode}")
-            if item_id in source.modes:
-                if mode == "codex-merge":
-                    raise Error("Cannot override codex-merge with a whole-file mode")
-                mode = source.modes[item_id]
-            src_abs = source.path / src_path
-            target = self.target(root, dst_path)
-            result.append(Item(source.name, item_id, src, src_abs, target, mode))
-        return result

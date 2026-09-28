@@ -264,25 +264,6 @@ class Instructions(InstructionFixture):
         self.assertEqual(found["root"], str(target.resolve()))
         self.assertEqual(Path(found["entry"]).read_text(), "Nested entry")
 
-    def test_existing_guide_upgrades_without_replacing_local_edits(self):
-        self.configure()
-        self.run_cli("apply", "--item", "personal:bundle")
-        self.agent.mkdir()
-        guide = self.agent / "AGENTS.md"
-        guide.write_text("Previous guide\n", encoding="utf-8")
-        state = State(Path(str(self.config) + ".state"))
-        state.data["items"]["personal:entry"] = dict(state.data["items"]["personal:bundle"],
-            id="entry", target=str(guide), mode="entry", kind="instruction-entry", content="Previous guide\n")
-        state.save()
-        guide.write_text("Local edit", encoding="utf-8")
-        self.run_cli("apply", code=1)
-        self.assertFalse((self.agent / "hooks.json").exists())
-        self.assertEqual(guide.read_text(), "Local edit")
-        guide.write_text("Previous guide\n", encoding="utf-8")
-        self.run_cli("apply")
-        self.assertTrue(guide.is_symlink())
-        self.assertEqual(guide.read_text(), (self.bundle / "start.md").read_text())
-
     def test_locator_uses_saved_entry_despite_changed_catalog_and_refuses_pending(self):
         self.configure()
         self.run_cli("apply")
@@ -320,7 +301,7 @@ class Instructions(InstructionFixture):
         config = json.loads((self.agent / "hooks.json").read_text())
         command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         tokens = shlex.split(command)
-        self.assertEqual(tokens, [sys.executable, "-m", "agent_env_man", "--config", str(self.config), "codex-hook", "personal"])
+        self.assertEqual(tokens, [sys.executable, "-m", "agent_env_man", "--config", str(self.config), "agent-hook", "personal", "--agent", "codex"])
         result = subprocess.run(command, shell=True, cwd=self.external, input='{"hook_event_name":"SessionStart"}',
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

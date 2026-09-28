@@ -22,22 +22,13 @@ class Codex:
     name: str = 'codex'
     entry_name: str = 'AGENTS.md'
     hook_name: str = 'hooks.json'
-    merge_mode: str = 'codex-merge'
     notice: str = hooks.TRUST_NOTICE
 
     def defaults(self):
         return {'root': str(Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').expanduser().resolve()),
                 'skills': str(Path.home() / '.agents/skills')}
 
-    def merger(self, mode):
-        if mode != self.merge_mode:
-            raise Error(f"{self.name} does not support configuration mode {mode}")
-        from . import codex
-        return codex
-
     def definition(self, config, name, *, startup=False):
-        if not startup and self.name == 'codex':
-            return hooks.definition(config, name)
         identity = f'{self.name}:startup' if startup else f'{self.name}:{name}'
         args = ['startup', '--trigger', 'agent-start', '--agent', self.name] if startup else ['agent-hook', name, '--agent', self.name]
         marker = hooks.marker(config, identity, 'startup' if startup else 'instruction roots')
@@ -97,5 +88,5 @@ def bindings(document):
 
 
 def suffix(name):
-    # Existing Codex ownership keys are public and must survive setup adoption.
+    # Keep the default profile's item names concise.
     return '' if name == 'codex' else '@' + name

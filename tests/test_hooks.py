@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from agent_env_man import hooks
+from agent_env_man.agents import profile
 from agent_env_man.manager import Manager
 from agent_env_man.model import Config
 from agent_env_man.storage import State, lock
@@ -106,7 +107,7 @@ class HookInstallation(InstructionFixture):
         self.run_cli("apply")
         state_path = Config(self.config).state_dir / "state.json"
         before = state_path.read_bytes()
-        result = self.run_cli("codex-hook", "personal")
+        result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertEqual(result["hookSpecificOutput"]["hookEventName"], "SessionStart")
         context = result["hookSpecificOutput"]["additionalContext"]
         self.assertIn(str(self.bundle), context)
@@ -117,7 +118,7 @@ class HookInstallation(InstructionFixture):
         self.run_cli("detach", "personal:bundle", "personal:entry")
         shutil.rmtree(self.external)
         self.assertEqual(self.hook_file().read_bytes(), registered)
-        result = self.run_cli("codex-hook", "personal")
+        result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertIn(str(self.rules / "personal"), result["hookSpecificOutput"]["additionalContext"])
         self.assertFalse((self.agent / "AGENTS.md").is_symlink())
         self.assertTrue(State(Config(self.config).state_dir).data["items"]["personal:hook"]["detached"])
@@ -126,13 +127,13 @@ class HookInstallation(InstructionFixture):
         self.configure()
         self.run_cli("apply")
         shutil.rmtree(self.external)
-        result = self.run_cli("codex-hook", "personal")
+        result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertIs(result["continue"], False)
         self.assertIn("lookup failed", result["systemMessage"])
         state = State(Config(self.config).state_dir)
         state.data["pending"] = {"example": "pending transaction"}
         state.save()
-        result = self.run_cli("codex-hook", "personal")
+        result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertIs(result["continue"], False)
         self.assertIn("recover", result["stopReason"])
 
@@ -140,7 +141,7 @@ class HookInstallation(InstructionFixture):
         self.configure()
         self.run_cli("apply")
         directory = Config(self.config).state_dir
-        for command in (("codex-hook",), ("agent-hook", "--agent", "codex")):
+        for command in (("agent-hook", "--agent", "codex"),):
             for pending in (False, True):
                 with self.subTest(command=command, pending=pending), ExitStack() as holder:
                     state = State(directory)
@@ -168,7 +169,7 @@ class HookInstallation(InstructionFixture):
         self.run_cli("apply")
         directory = Config(self.config).state_dir
         before = (directory / "state.json").read_bytes()
-        for command in (("codex-hook",), ("agent-hook", "--agent", "codex")):
+        for command in (("agent-hook", "--agent", "codex"),):
             with self.subTest(command=command), lock(directory):
                 with patch("agent_env_man.storage.time.monotonic", side_effect=[0, 0, 5]), \
                         patch("agent_env_man.storage.time.sleep") as retry:
@@ -245,12 +246,12 @@ class HookInstallation(InstructionFixture):
         # Verify platform-independent encoding without claiming a Windows run.
         path = Path("C:/Users/space ' and $name/machine.toml")
         with patch.object(hooks.os, "name", "nt"):
-            _, group = hooks.definition(path, "personal")
+            _, group = profile("codex").definition(path, "personal")
         command = group["hooks"][0]["command"]
         self.assertTrue(command.startswith("powershell.exe -NoProfile -NonInteractive -EncodedCommand "))
         decoded = base64.b64decode(command.split()[-1]).decode("utf-16le")
         self.assertIn("'" + str(path).replace("'", "''") + "'", decoded)
-        self.assertIn("'codex-hook' 'personal'", decoded)
+        self.assertIn("'agent-hook' 'personal' '--agent' 'codex'", decoded)
 
     def test_removed_hook_is_not_silently_reinstalled(self):
         self.configure()
@@ -305,7 +306,7 @@ class HookInstallation(InstructionFixture):
         self.run_cli("apply")
         self.run_cli("detach", "personal:bundle")
         (self.bundle / "development/rules.md").write_text("Live source change")
-        context = self.run_cli("codex-hook", "personal")["hookSpecificOutput"]["additionalContext"]
+        context = self.run_cli("agent-hook", "personal", "--agent", "codex")["hookSpecificOutput"]["additionalContext"]
         metadata = json.loads(context.split("\n")[1])
         self.assertEqual(metadata, {"root": str(self.bundle), "entry": str(self.bundle / "start.md"),
                                     "global_entry": str(self.agent / "AGENTS.md")})
@@ -315,7 +316,7 @@ class HookInstallation(InstructionFixture):
         self.assertEqual(metadata["root"], str(self.bundle))
         self.assertEqual(Path(metadata["root"], "development/rules.md").read_text(), "Live source change")
         self.run_cli("detach", "personal:entry")
-        context = self.run_cli("codex-hook", "personal")["hookSpecificOutput"]["additionalContext"]
+        context = self.run_cli("agent-hook", "personal", "--agent", "codex")["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(json.loads(context.split("\n")[1]), {
             "root": str(self.rules / "personal"), "entry": str(self.rules / "personal/start.md"),
             "global_entry": str(self.agent / "AGENTS.md")})

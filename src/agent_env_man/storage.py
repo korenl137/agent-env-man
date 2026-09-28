@@ -148,9 +148,15 @@ class State:
         if self.path.exists():
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
         else:
-            self.data = {"version": 1, "items": {}, "sources": {}, "pending": None}
-        if self.data.get("version") != 1:
-            raise Error("Unsupported state version; do not delete ownership records")
+            self.data = {"version": 2, "items": {}, "sources": {}, "pending": None}
+        # Version 2 has only catalog ownership and agent-neutral hook modes;
+        # old recovery journals must never be interpreted as current records.
+        if not isinstance(self.data.get("version"), int) or self.data["version"] != 2:
+            raise Error("Unsupported state version; use the matching older AEM to release the installation "
+                        "before creating a new configuration; do not delete ownership records")
+        for record in self.data["items"].values():
+            if record.get("mode") not in ("link", "copy", "agent-hook", "setup-shell", "setup-config"):
+                raise Error("Unsupported installation mode in saved state; do not edit ownership records")
 
     def save(self):
         atomic_write(self.path, (json.dumps(self.data, indent=2, ensure_ascii=True) + "\n").encode())

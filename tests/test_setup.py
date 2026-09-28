@@ -173,7 +173,7 @@ class MachineSetup(SetupFixture):
         self.assertIn(b'READY', result.stdout)
         self.assertEqual(calls.read_text().splitlines(), ['--config', str(self.config), 'startup', '--trigger', 'shell-start'])
 
-    def test_setup_preserves_existing_legacy_installation_and_detach_tombstones(self):
+    def test_setup_preserves_explicit_destinations_and_detach_tombstones(self):
         self.configure()
         self.run_cli('apply')
         self.run_cli('detach', 'report')

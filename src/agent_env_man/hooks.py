@@ -32,14 +32,6 @@ def command(config_path, arguments):
     return result
 
 
-def definition(config_path: Path, name: str) -> tuple[str, dict]:
-    """Use a stable marker for ownership and an absolute interpreter for runtime lookup."""
-    identity = marker(config_path, name, "instruction roots")
-    return identity, {"matcher": "^(startup|resume|clear|compact)$", "hooks": [
-        {"type": "command", "command": command(config_path, ["codex-hook", name]), "timeout": 10,
-         "statusMessage": identity, "additionalContextLimit": 1000}]}
-
-
 def read(path: Path) -> dict:
     """Reject invalid/redirected hook files rather than losing unrelated configuration."""
     if not exists(path):

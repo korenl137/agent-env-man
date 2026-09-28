@@ -32,7 +32,7 @@ class Manager:
         self.config, self.state = config, state
 
     def delivery_source(self, source):
-        if source.repository and source.branch is None:
+        if source.git and source.branch is None:
             branch = self.state.data["sources"].get(source.name, {}).get("branch")
             if not branch:
                 raise Error(f"{source.name}: run bootstrap to prepare the checkout and record its default branch")
@@ -46,9 +46,9 @@ class Manager:
         in place and never reset or pulled by bootstrap.
         """
         self.state.ready()
-        sources = {name: s for name, s in self.config.sources.items() if s.repository or s.instruction}
+        sources = self.config.sources
         if set(names) - sources.keys():
-            raise Error("Unknown catalog skill selection")
+            raise Error("Unknown catalog source selection")
         self.check_destinations([i for s in sources.values() for i in self.config.declarations(s)])
         report, failed = [], False
         groups = {}
@@ -153,22 +153,15 @@ class Manager:
         for item in all_items:
             if item.key in requested and item.kind in ("instruction-entry", "instruction-hook"):
                 requested.update(f"{item.source_name}:{part}{suffix(item.agent)}" for part in ("bundle", "entry", "hook"))
-        registered = {f"{s.name}:{i}" for s in self.config.sources.values() for i in s.items}
-        registered.update(i.key for i in all_items if i.kind == "skill")
-        available = {i.key for i in all_items}
+        registered = {i.key for i in all_items}
         detached = {k for k, r in self.state.data["items"].items() if r.get("detached")}
-        missing = registered - available - detached
-        if missing:
-            raise Error("Registered items disappeared from manifests; detach them or edit registration: " + ", ".join(sorted(missing)))
-        if requested and set(requested) - registered:
-            raise Error("Unknown or unregistered item: " + ", ".join(sorted(set(requested) - registered)))
-        if requested and set(requested) - available:
-            raise Error("Selected items are no longer declared in a manifest")
+        if requested - registered:
+            raise Error("Unknown item selection: " + ", ".join(sorted(requested - registered)))
         if reattach and not requested:
             raise Error("--reattach requires explicit --item selections")
-        items = [i for i in all_items if i.key in registered and (not requested or i.key in requested)]
+        items = [i for i in all_items if not requested or i.key in requested]
         items = [i for i in items if reattach or not self.state.data["items"].get(i.key, {}).get("detached")]
-        self.check_destinations([i for i in all_items if i.key in registered and i.key not in detached])
+        self.check_destinations([i for i in all_items if i.key not in detached])
         if agent is not None:
             profile(agent)
             items = [i for i in items if agent in (i.agents or (i.agent,))]
@@ -176,20 +169,20 @@ class Manager:
         return items
 
     def check_destinations(self, items):
-        # Include inactive/orphaned ownership, not only the current manifest.
+        # Include inactive/orphaned ownership, not only the current catalog.
         owners = {k: Path(r["target"]) for k, r in self.state.data["items"].items() if not r.get("detached")}
         for item in items:
             old = self.state.data["items"].get(item.key)
             if old and not old.get("detached") and (old["target"] != str(item.target) or old["mode"] != item.mode
-                                                    or old["source"] != str(item.source)) and not self.entry_migration(old, item):
+                                                    or old["source"] != str(item.source)):
                 raise Error(f"{item.key}: path or mode changed; detach before reconfiguration")
             for key, target in owners.items():
                 if key != item.key and overlaps(item.target, target):
                     other = next((i for i in items if i.key == key), None)
                     old_other = self.state.data["items"].get(key, {})
-                    if (item.target == target and item.mode in ("codex-hook", "agent-hook")
-                            and ((other and other.mode in ("codex-hook", "agent-hook") and other.agent == item.agent)
-                                 or (old_other.get("mode") in ("codex-hook", "agent-hook")
+                    if (item.target == target and item.mode == "agent-hook"
+                            and ((other and other.mode == "agent-hook" and other.agent == item.agent)
+                                 or (old_other.get("mode") == "agent-hook"
                                      and old_other.get("agent", "codex") == item.agent))):
                         continue
                     raise Error(f"Overlapping targets: {item.key} and {key}")
@@ -244,14 +237,6 @@ class Manager:
         return {"root": str(root), "entry": str(entry), "installed_root": str(target),
                 "detached": bool(record.get("detached"))}
 
-    @staticmethod
-    def entry_migration(old, item):
-        """Only the former AEM-generated guide can migrate in place to a source link."""
-        return (old.get("kind") == "instruction-entry" and old.get("mode") == "entry"
-                and item.kind == "instruction-entry" and old["target"] == str(item.target)
-                and old.get("entry") == item.entry
-                and str(Path(old["source"]) / item.entry) == str(item.source))
-
     def hook_context(self, name, agent="codex"):
         """Return location metadata only; personal instruction text stays in AGENTS.md."""
         found = self.locate(name, agent)
@@ -298,7 +283,7 @@ class Manager:
         if old and old.get("detached"):
             if not reattach:
                 raise Error(f"{item.key}: detached; use --reattach")
-            if item.mode not in ("codex-hook", "agent-hook"):
+            if item.mode != "agent-hook":
                 old = None
         record = {"source_name": item.source_name, "relative": item.relative, "source": str(item.source),
                   "id": item.id,
@@ -307,7 +292,7 @@ class Manager:
                   "exclude_git": item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".",
                   "entry": item.entry, "agent": item.agent, "agents": list(item.agents or (item.agent,))}
         present = before["kind"] != "missing"
-        if item.mode in ("codex-hook", "agent-hook"):
+        if item.mode == "agent-hook":
             marker, group = profile(item.agent).definition(self.config.path, item.source_name)
             content = profile(item.agent).render(item.target, marker, group, old, adopt=adopt, replace=replace)
             record.update(hook_marker=marker, hook_group=group)
@@ -315,10 +300,7 @@ class Manager:
             return Plan(item, before, record, changed, content=content)
         if item.mode == "link":
             correct = before == {"kind": "link", "to": str(item.source)}
-            if old and self.entry_migration(old, item):
-                safe = not present or (before["kind"] == "file"
-                       and item.target.read_bytes() == old["content"].encode("utf-8"))
-            elif old:
+            if old:
                 safe = correct or not present
             else:
                 safe = not present or (adopt and correct)
@@ -335,26 +317,7 @@ class Manager:
             if not safe and not replace:
                 raise Error(f"{item.key}: existing or locally modified copy; use explicit --adopt or --replace")
             return Plan(item, before, record, not desired)
-        merger = profile(item.agent).merger(item.mode)
-        desired = merger.declarations(item.source)
-        document = merger.read(item.target)
-        baseline = old.get("values", {}) if old else {}
-        if set(baseline) - set(desired):
-            raise Error(f"{item.key}: managed keys were removed; detach before changing the owned key set")
-        for path, value in desired.items():
-            found, current = merger.get(document, path)
-            if path in baseline:
-                safe = found and (merger.equal(current, baseline[path]) or merger.equal(current, value))
-                # A missing file can be re-created; a removed key in a present file is a local edit.
-                safe = safe or not present
-            else:
-                safe = not found or (adopt and merger.equal(current, value))
-            if not safe and not replace:
-                raise Error(f"{item.key}: unmanaged or locally modified key {path}; use explicit --adopt or --replace")
-        content = merger.render(document, desired)
-        record["values"] = desired
-        changed = not present or item.target.read_bytes() != content
-        return Plan(item, before, record, changed, content=content)
+        raise Error(f"Unsupported installation mode: {item.mode}")
 
     def install(self, plan):
         item = plan.item
@@ -484,7 +447,7 @@ class Manager:
             plan.record["revision"] = revisions.get(plan.item.source_name)
         report = [{"item": p.item.key, "action": "install" if p.change else "record", "target": str(p.item.target)} for p in plans]
         for entry, plan in zip(report, plans):
-            if plan.item.mode in ("codex-hook", "agent-hook"):
+            if plan.item.mode == "agent-hook":
                 entry.update(hook="would-register" if dry_run and plan.change else "registered" if plan.change else "unchanged",
                              trust="not-managed-by-aem", notice=profile(plan.item.agent).notice,
                              hook_group=plan.record["hook_group"])
@@ -499,7 +462,7 @@ class Manager:
         grouped = {}
         result = []
         for plan in plans:
-            if plan.item.mode not in ("codex-hook", "agent-hook"):
+            if plan.item.mode != "agent-hook":
                 result.append(plan)
                 continue
             grouped.setdefault(plan.item.target, []).append(plan)
@@ -559,7 +522,7 @@ class Manager:
                 if target.is_symlink():
                     content = target.resolve(strict=True)
                     record["hash"] = fingerprint(content, exclude_git=old.get("exclude_git", False))
-                    item = Item(old["source_name"], old.get("id", key.split(":")[-1]), old["relative"], Path(old["source"]), target, "link", old.get("kind", "payload"), agent=old.get("agent", "codex"))
+                    item = Item(old["source_name"], old["id"], old["relative"], Path(old["source"]), target, "link", old["kind"], agent=old.get("agent", "codex"))
                     plans.append(Plan(item, observation(target), record, True, materialize=content))
                 else:
                     # An editor may already have replaced the link. Keep its
@@ -618,8 +581,6 @@ class Manager:
     def item_status(self, item, old):
         if old and old.get("detached"):
             return "detached", None
-        if item.kind != "skill" and item.id not in self.config.sources[item.source_name].items:
-            return "unregistered", None
         desired = self.payload(item)
         current = observation(item.target)
         if old is None:
@@ -628,7 +589,7 @@ class Manager:
             return "configuration-changed", None
         if current["kind"] == "missing":
             return "missing", None
-        if item.mode in ("codex-hook", "agent-hook"):
+        if item.mode == "agent-hook":
             marker, group = profile(item.agent).definition(self.config.path, item.source_name)
             if profile(item.agent).current(item.target, marker, group):
                 return "current", None
@@ -646,26 +607,7 @@ class Manager:
             if actual == old["hash"]:
                 return "stale", None
             return ("conflict" if desired != old["hash"] else "modified-locally"), None
-        merger = profile(item.agent).merger(item.mode)
-        values, baseline = merger.declarations(item.source), old["values"]
-        if set(baseline) - set(values):
-            return "ownership-change", None
-        document = merger.read(item.target)
-        statuses = []
-        for path, value in values.items():
-            found, actual = merger.get(document, path)
-            if path not in baseline:
-                statuses.append("conflict" if found else "stale")
-            elif found and merger.equal(actual, value):
-                statuses.append("current")
-            elif found and merger.equal(actual, baseline[path]):
-                statuses.append("stale")
-            else:
-                statuses.append("modified-locally" if merger.equal(value, baseline[path]) else "conflict")
-        for status in ("conflict", "modified-locally", "stale"):
-            if status in statuses:
-                return status, None
-        return "current", None
+        raise Error(f"Unsupported installation mode: {item.mode}")
 
     def status(self, *, refresh=False, timeout=30, agent=None):
         report = {"sources": [], "items": [], "pending": self.state.data.get("pending")}
@@ -744,9 +686,7 @@ class Manager:
                 if actual != {"kind": "link", "to": record["source"]}:
                     return "modified-locally"
                 return "linked" if target.exists() else "broken-link"
-            if record["mode"] == "entry":
-                matches = actual["kind"] == "file" and target.read_bytes() == record["content"].encode("utf-8")
-            elif record["mode"] in ("codex-hook", "agent-hook"):
+            if record["mode"] == "agent-hook":
                 matches = profile(record.get("agent", "codex")).current(target, record["hook_marker"], record["hook_group"])
             elif record.get("kind") == "setup":
                 block = record.get("block")
@@ -754,11 +694,7 @@ class Manager:
             elif record["mode"] == "copy":
                 matches = actual.get("hash") == record["hash"]
             else:
-                merger = profile(record.get("agent", "codex")).merger(record["mode"])
-                document = merger.read(target)
-                matches = all(found and merger.equal(value, expected)
-                              for key, expected in record["values"].items()
-                              for found, value in [merger.get(document, key)])
+                raise Error(f"Unsupported installation mode: {record['mode']}")
             return "matches-last-apply" if matches else "modified-locally"
         except (Error, OSError, ValueError):
             return "unreadable"

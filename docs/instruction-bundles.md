@@ -4,6 +4,8 @@ Start with an external folder and instructions only.
 Git skills are optional and are added separately at the end of this walkthrough.
 The filenames `instructions.toml` and `machine.toml` are examples: AEM uses the catalog binding and `--config` argument, not filename-based behavior.
 
+The canonical field and command definitions are in [TOML configuration](configuration.md) and [Commands](commands.md).
+
 ## Three things to keep separate
 
 | Part | What it contains | Who manages it |
@@ -183,7 +185,7 @@ Instead, AEM appends a group like the following to `hooks.json`, keeping other e
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/python -m agent_env_man --config /home/me/.config/agent-env-man/machine.toml codex-hook personal",
+            "command": "/absolute/path/to/python -m agent_env_man --config /home/me/.config/agent-env-man/machine.toml agent-hook personal --agent codex",
             "timeout": 10,
             "statusMessage": "AEM instruction roots [generated-identity]",
             "additionalContextLimit": 1000
@@ -195,7 +197,7 @@ Instead, AEM appends a group like the following to `hooks.json`, keeping other e
 }
 ```
 
-The actual interpreter is the absolute Python executable used for installation; the marker is a stable hash of the machine file path and bundle name.
+The actual interpreter is the absolute Python executable used for installation; the marker is a stable hash of the machine file path, agent, and bundle name.
 Neither value needs to be supplied in the catalog.
 Keep this Python environment and its installed AEM package available; rerun apply after moving the environment to update the command.
 
@@ -389,11 +391,9 @@ The skill is not a prerequisite for the instruction bundle; they simply share on
 Explicit `root` and `destination` settings remain supported; keeping them avoids relocating an existing installation.
 For example, `root = "rules"`, `destination = "personal"`, and machine `roots.rules = "/home/me/.agent-rules"` retain the earlier destination.
 Removing those fields from an installed bundle can change its target path, so detach and deliberately reattach if you want to move to the default.
-An ordinary apply upgrades an unchanged, AEM-owned guide to a direct original-entry link and registers the hook; local guide edits are preserved as conflicts.
+Older state and generated-guide installations are not upgraded in place; follow [Removed interfaces](removed-interfaces.md) before installing the current version.
 
 ## Validation performed
 
-The offline tests cover bootstrap/preview without registration, exact original-entry links, preserved unrelated hooks, idempotence, local edits, failed writes and recovery, detached copies, missing sources, migration from the older generated guide, and command quoting.
-Codex CLI 0.156.1 also discovered the generated group through `hooks/list` in an isolated temporary Codex home with no warnings or errors and `trustStatus: untrusted`.
-No hook trust was granted and no model session was started for that check.
+The offline tests cover bootstrap/preview without registration, exact original-entry links, preserved unrelated hooks, idempotence, local edits, failed writes and recovery, detached copies, missing sources, and command quoting.
 Native Windows execution and delivery into a real approved model session remain unverified.

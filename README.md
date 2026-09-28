@@ -1,32 +1,69 @@
 # agent-env-man
 
-Install and update Git-managed AI agent skills and personal instruction bundles from a local inventory.
-The inventory lists what you want; skill contents stay in their own repositories.
-You do not need to combine those repositories or add a manager manifest to them.
+Install and update AI agent skills and personal instruction bundles from a user-owned local TOML catalog.
+Skills stay in their own Git repositories; instructions can come from Git or an existing local folder.
+Upstream repositories need no AEM manifest.
 
 ```text
-local skills.toml: skills + optional shared repositories
-                |
-             bootstrap: Git clone
-                v
-       device-local checkouts <--- update: Git fetch + fast-forward
-                |
-              apply
-                v
-       installed skills: link or explicit copy
+catalog.toml + machine.toml
+             |
+         bootstrap: clone or validate sources
+             |
+           apply
+             |
+     installed links or explicit skill copies
 ```
 
-Links point directly to checkouts, without a snapshot layer.
-An update immediately changes content visible through links; copies change on apply.
-Once prepared, the local skills remain usable offline.
+Links point directly to source contents, so an update changes them immediately.
+Copies change on apply.
+Prepared sources remain usable offline.
 
-## Install the manager
+- [TOML specification](docs/configuration.md): every field, default, constraint, and path rule.
+- [Command reference](docs/commands.md): complete command and option list.
+- [Instruction walkthrough](docs/instruction-bundles.md): external and Git bundles on Linux/WSL and Windows.
+- [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
+- [Contributing](CONTRIBUTING.md): development and validation contracts.
+
+## Install and connect this machine
 
 Requirements: Python 3.11 or later and Git.
 Linux/WSL and native Windows are supported in the implementation.
-Native Windows tests have run for non-symlink paths; symlink behavior still needs validation on a host with link creation enabled.
+Native Windows tests have covered non-symlink paths; link privileges and real shell/agent hook execution still require platform validation.
+Configure Git credentials separately; AEM uses noninteractive authentication and SSH batch mode.
 
-On Linux/WSL, from this repository:
+With [uv](https://docs.astral.sh/uv/) installed, run from this checkout:
+
+```bash
+python scripts/setup.py --shell bash --agent codex
+```
+
+On Windows:
+
+```powershell
+py -3 scripts/setup.py --shell powershell --agent codex
+```
+
+The installer uses `uv tool install --reinstall` and then `aem setup` to connect startup integrations.
+It does not bind a catalog or install skills/instructions.
+Open a new selected shell to use the updated PATH.
+Bash, Zsh, PowerShell, and Codex are the built-in integrations.
+Repeat `--shell` or `--agent` to add selections; omitted selections remain configured.
+To change integrations without reinstalling:
+
+```bash
+aem setup --shell zsh
+aem setup --remove-shell bash
+aem setup --dry-run
+```
+
+Setup preserves unrelated profile content, hooks, newline style, and permissions.
+It owns an identified block in `.bashrc`, `$ZDOTDIR/.zshrc` (or `~/.zshrc`), or PowerShell's `$PROFILE.CurrentUserAllHosts`.
+PowerShell discovery prefers `pwsh`, then `powershell.exe`.
+Agent hooks use absolute interpreter and machine paths.
+Setup rejects locally edited blocks, duplicate markers, invalid hook JSON, and redirected profiles.
+After a partial failure, fix the error and retry the same setup selections.
+
+For a development installation without startup integrations:
 
 ```bash
 python3 -m venv .venv
@@ -34,357 +71,94 @@ python3 -m venv .venv
 .venv/bin/aem --help
 ```
 
-On Windows PowerShell:
+On Windows use `py -3 -m venv .venv`, then `.\.venv\Scripts\python.exe` and `.\.venv\Scripts\aem.exe`.
+Activate the environment or use the executable's full path for the following examples.
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\aem.exe --help
-```
+## Declare and install content
 
-Examples below use `aem`; activate the environment or use the full executable path.
-Configure Git credentials separately; network commands cannot prompt for authentication.
-SSH uses OpenSSH batch mode.
-
-## Set up this machine
-
-With Python 3.11+, Git, and [uv](https://docs.astral.sh/uv/) available, run from this checkout:
-
-```bash
-python scripts/setup.py --shell bash --agent codex
-```
-
-On Windows use `py -3 scripts/setup.py --shell powershell --agent codex`.
-The script installs the checkout using `uv tool install --reinstall` in a user-level isolated environment, then connects the selected startup hooks.
-It uses a regular installation, so moving the checkout does not break the installed tool.
-It does not install uv, configure Git credentials, register a catalog, clone skills, or run apply.
-Continue with `aem bootstrap /path/to/catalog.toml` and `aem apply` after setup.
-A machine file binds one catalog at a time; registering a different catalog replaces that binding, rather than adding another inventory.
-Combine declarations in one catalog or use separate `--config` files.
-
-Repeat `--shell` and `--agent` to select multiple integrations.
-Bash, Zsh, PowerShell, and Codex are the built-in integrations; other agents are extension points, not supported products yet.
-Selections accumulate across runs, and omitted selections remain configured.
-Running the same setup again preserves existing hooks without duplication.
-The installer refreshes the installed AEM package on each run; to change connections without reinstalling, use:
-
-```bash
-aem setup --shell zsh
-aem setup --remove-shell bash
-aem setup --remove-agent codex
-```
-
-Removing an agent requires detaching its managed content first.
-Removal touches only the recorded startup connection; detached instruction hooks and preserved content remain available.
-Use `uv tool uninstall agent-env-man` only after removing startup connections if you also want to uninstall AEM.
-
-Use `--config PATH` before the `aem` subcommand, or as an argument to the installer, for a separate machine configuration.
-`python scripts/setup.py --dry-run --shell bash --agent codex` prints the installation and configuration commands without installing anything.
-If AEM is already installed, it also invokes the setup preview; otherwise the detailed file preview becomes available after installation through `aem setup --dry-run`.
-Setup previews do not write profiles, machine configuration, ownership records, or lock files.
-
-Setup manages an identified block in `.bashrc`, `$ZDOTDIR/.zshrc` (or `~/.zshrc`), or PowerShell's `$PROFILE.CurrentUserAllHosts` as reported by `pwsh` or `powershell.exe`.
-The block adds the tool executable directory to PATH once and invokes a startup callback for interactive shells.
-Open a new selected shell to use the updated PATH.
-Callbacks use absolute executable/interpreter and machine paths, so agent startup does not depend on shell PATH setup.
-PowerShell discovery prefers `pwsh` when both editions are installed; native Windows and actual Zsh/PowerShell execution need platform-specific validation.
-
-Existing user settings, newline style, and permissions are preserved.
-Locally edited or duplicate AEM blocks, invalid JSON, and redirected profile files stop setup before profile writes.
-Per-target backups and the recovery journal are shared with normal installation; after resolving an error, rerun setup with the same selections.
-Completed steps are retained; this is not a transaction across every profile and the machine file.
-
-### Agent destinations
-
-Setup saves agent paths in machine-local `[agents.codex]` settings (`root` and `skills`).
-Existing `roots.agent` and `roots.skills` are retained when introducing Codex setup to a legacy configuration.
-Without explicit agent selections, existing configurations continue to use the legacy Codex behavior.
-
-Catalog skills that omit `root` deploy to the selected agents' skill directories.
-Instruction bundles may omit `entry_root` and `entry_destination` to use each selected agent's entry location and filename:
-
-```toml
-[instructions.personal]
-repo = "personal"
-entry = "AGENTS.md"
-```
-
-Keep the corresponding `[repositories.personal]` declaration in the same catalog.
-Explicit catalog destinations retain their existing meaning.
-Prepared repositories and update clocks are shared, while separate installation paths retain independent ownership and detach state.
-If agents share the same skill destination, AEM installs it once; detaching that shared target releases all consumers and requires omitting `--agent`.
-
-Use `apply --agent codex`, `status --agent codex`, or `detach --agent codex ITEM` to narrow the deployment target.
-Unqualified item selections include all deployments; added agents use `@AGENT` suffixes for concrete ownership keys, while existing Codex keys remain unchanged.
-Changing an installed destination still requires detach before relocation.
-
-## Write a local skill inventory
-
-Create a `skills.toml` outside managed checkout storage:
+Save a catalog outside managed checkout storage:
 
 ```toml
 version = 1
 
-[repositories.research-tools]
-repository = "https://github.com/OWNER/RESEARCH-TOOLS.git"
+[repositories.tools]
+repository = "https://github.com/OWNER/TOOLS.git"
 
-[skills.report-helper]
-repo = "research-tools"
-subdir = "skills/report-helper"
+[skills.report]
+repo = "tools"
+subdir = "skills/report"
 
-[skills.second-helper]
-repo = "research-tools"
-subdir = "skills/second-helper"
-
-[skills.standalone-skill]
-type = "git"
-repository = "git@github.com:OWNER/STANDALONE-SKILL.git"
-```
-
-Replace the example repository locations with repositories you choose.
-The table key is the skill's registration name and installed directory name; it does not rewrite the name inside SKILL.md.
-
-| Field | Meaning |
-| --- | --- |
-| `type` | Required for a skill-local repository; currently only `git`. A named repository defaults to `git`. |
-| `repository` | Git URL or absolute path to a local Git repository, including a bare repository; required for skill-local and named repository declarations. |
-| `repo` | Reference to a named entry in `repositories`, as an alternative to a skill-local `repository`. |
-| `subdir` | Skill directory inside the repository; defaults to `.` for a root skill. |
-| `branch` | Optional branch on a skill-local or named repository. Otherwise bootstrap discovers and records the remote's default branch. |
-| `root` | Target root name; defaults to `skills`. Its actual path is machine-local. |
-| `mode` | `link` by default, or explicit `copy`. |
-| `update` | Optional per-skill automatic update policy; see below. |
-
-Subdirectories use literal `/`-separated paths without traversal or shell expansion.
-The selected directory must contain a regular SKILL.md tracked by Git.
-The manager does not execute installation scripts or validate skill prose/frontmatter as part of installation.
-Each `[repositories.NAME]` entry accepts `repository` and optional `branch` (and optional `type = "git"`).
-Skills referencing the same name share one checkout and branch; each still has its own installation, mode, and update policy.
-Skill-local `repository` declarations retain separate checkouts even when their URLs match.
-To move an installed skill from a skill-local repository declaration to `repo`, detach it, move the preserved target aside, then bootstrap and explicitly reattach it from the new source path.
-
-## Personal instruction bundles
-
-Start with the [complete instruction-bundle walkthrough](docs/instruction-bundles.md): it shows original files, both configuration files, every field's resolved path, generated output, and detach behavior.
-Use [examples/instructions.toml](examples/instructions.toml) with [examples/instructions-machine.toml](examples/instructions-machine.toml) for instructions only.
-Git skills are optional; [examples/combined-catalog.toml](examples/combined-catalog.toml) demonstrates declaring both in one version 1 catalog.
-A bundle can contain the user's global entry document, development/research/workspace guidance, and reference documents in any directory layout.
-AEM preserves this tree and does not interpret, merge, or author the instructions.
-
-```toml
-# Shared inventory, alongside existing [skills.*] and [repositories.*].
-[externals.personal-documents]
+[externals.documents]
 
 [instructions.personal]
-external = "personal-documents"
-subdir = "guidance"
-entry = "start.md"
+external = "documents"
+entry = "AGENTS.md"
 entry_root = "agent"
-entry_destination = "AGENTS.md"
 ```
 
-| Field | Contract |
-| --- | --- |
-| `repo` / `external` | Exactly one named `repositories` or `externals` declaration. Git bundles use the existing named-repository URL/branch settings. External declarations are empty tables. |
-| `subdir` | Bundle root relative to the source; defaults to `.`. |
-| `entry` | Required regular entry file relative to the bundle root. Its name need not be AGENTS.md. |
-| `root`, `destination` | Optional bundle location overrides. With neither set, AEM links the bundle at `<machine-file>.bundles/<bundle-name>` beside the machine file; no `rules` root is needed. `root` selects a configured machine root, and `destination` defaults to the bundle name. |
-| `entry_root`, `entry_destination` | Codex home root name and relative destination for the direct original-entry link. AEM also merges a SessionStart hook into `hooks.json` at that root. |
-
-Names must be distinct from skill and legacy source names.
-Relative paths use `/`, without traversal, shell expansion, or absolute paths.
-Bundle trees must contain only regular files and directories; symlinks, junctions, and Git submodules are rejected.
-Git bundles require the entry and tree to be tracked; root bundles exclude top-level `.git` from fingerprints and detach copies.
-There is no bundle copy-mode override in this version; link capability is required.
-
-Bind the external folder with an optional bootstrap argument; no hand-written machine file is required:
+Replace the repository with one containing the selected directory and its `SKILL.md`.
+The external folder must contain `AGENTS.md` and any documents it references.
+Skills and instructions are independent; omit either section if it is not needed.
+Start from [skills](examples/skills.toml), [instructions](examples/instructions.toml), or the [combined catalog](examples/combined-catalog.toml).
 
 ```bash
-aem bootstrap ~/ai-config/inventory.toml --external personal-documents=~/Syncthing/agent-documents
+aem bootstrap ~/ai-config/catalog.toml --external documents=~/Synced/agent-documents
 aem apply --dry-run
 aem apply
 aem status
 ```
 
-Repeat `--external NAME=PATH` for multiple external sources.
-AEM expands `~` and resolves relative external paths against the current working directory, then saves absolute paths in its machine configuration.
-On another device, pass its own folder, such as `--external personal-documents=D:/Synced/agent-documents`, with the same catalog.
-Git-only catalogs need no `--external` argument.
-After registration, `aem bootstrap` reuses the saved catalog and bindings.
+Bootstrap binds this catalog, saves device-local paths, and prepares sources.
+It never installs targets, pulls existing checkouts, or modifies the catalog.
+`apply` installs from prepared sources without fetching.
+Adding a catalog declaration registers content; run bootstrap and apply for the new item.
+Removing a declaration never deletes its installed target, hook, or checkout.
 
-The default `agent` root is `CODEX_HOME` when set, otherwise `~/.codex`; the default `skills` root is `~/.agents/skills`.
-Defaults are saved on first registration and do not override existing roots.
-Use `--root agent=/custom/codex` or another named root to override a destination on initial setup, and `--checkout-root /custom/checkouts` to override checkout storage.
-`--config /path/to/machine.toml` remains available before the command for separate installations; continue using it for later commands for that installation.
-`bootstrap --catalog PATH` remains an alias for `bootstrap PATH`.
-Existing installation ownership checks still apply when changing a saved binding.
+One machine file binds one catalog.
+To use a separate configuration, put `--config /path/machine.toml` before each command.
+Bootstrap accepts a positional catalog or `--catalog`, plus `--checkout-root`, repeated `--root NAME=PATH`, and repeated `--external NAME=PATH` bindings.
+Omitted bindings are reused on later runs.
+The [TOML reference](docs/configuration.md#machine-configuration) describes default locations and storage.
 
-External roots must be disjoint from other source roots, managed checkout storage, the inventory, and AEM state/configuration.
-Multiple bundles may explicitly reference the same external declaration or named Git repository.
-AEM never configures or invokes Syncthing or another external synchronization service.
-
-Bootstrap prepares Git checkouts and validates external bundles without installing targets or hooks.
-`bootstrap --item personal` selects the catalog source.
-`apply --item personal:entry` includes the bundle and its hook; plain `apply` installs all declared items.
-AEM links the original entry directly at the global AGENTS.md destination, leaving its text unchanged.
-It merges one SessionStart group into the configured Codex home's `hooks.json`, preserving unrelated hooks and metadata.
-Bundles with distinct entry destinations can share a hook file.
-AEM merges their groups in one file transaction while keeping ownership per group; overlapping entry destinations are still rejected.
-Existing global entries still require explicit `--adopt` or `--replace`, and automatic dependency selection never authorizes replacing an existing bundle directory.
-
-The hook invokes AEM's `codex-hook personal` callback with an absolute interpreter and machine config path.
-That callback uses the local locator to resolve saved installation records and emits only root/entry paths and relative-reference guidance as Codex `additionalContext`.
-It does not inject personal instruction contents, interpret applicability, fetch sources, or load the catalog.
-The entry text therefore contains no script execution instructions and no generated policy.
-The example uses a global Codex home and creates no repository-local AGENTS.md.
-
-Apply reports the registered hook and tells you to open `/hooks` in the next Codex session, review and trust it, then start a new session.
-AEM never grants hook trust, changes Codex feature flags, or claims that a registered hook has run.
-New or changed hooks need Codex trust review; existing approvals are owned by Codex.
-The hook matches session startup, resume, clear, and compaction, with a 10-second timeout.
-Instruction callbacks retry a busy configuration lock for up to 5 seconds so brief overlap with other callbacks or commands does not stop the session.
-If the lock remains busy, or instruction lookup fails, the callback still requests a structured stop; retry after the running AEM command finishes.
-Do not delete the lock file: the operating system releases the lock when its owning process exits.
-See the [official Codex hook documentation](https://learn.chatgpt.com/docs/hooks) for discovery, trust, and event behavior.
-Keep the installation's Python environment, AEM package, machine file, and state available to the hook.
-`aem --config <machine-file> locate personal` remains available for manual diagnostics.
-
-External edits become visible through the bundle link immediately, without apply.
-`status` reports `changed-live`; `update` reports `external-no-fetch` and only checks that the external root exists.
-If an external root, entry, or helper disappears, AEM does not restore it: status reports an unavailable payload or broken link where applicable; neither link is removed.
-If its process starts but root lookup fails, the callback returns a structured stop request and visible error instead of a guessed root.
-Individual helper removal is a live content change, not an error if the bundle and entry still exist; AEM does not parse document references.
-Git update guards active bundles against entry deletion, tree removal/type changes, and unsupported links even after a declaration disappears.
-Other document edits and deletions are visible immediately after a successful update.
-Automatic policies remain skill-only; updating a skill in a shared Git checkout also changes linked bundles in that checkout, subject to the same guard.
-
-```bash
-aem --config ~/ai-config/machine.toml detach personal:bundle personal:entry
-```
-
-Detach materializes the complete bundle and global entry as regular local copies, and automatically releases ownership of the associated hook group.
-It preserves hook registration and other hooks; the callback now locates the detached bundle copy from saved state.
-This preserves usable instructions rather than disabling them: disable the retained hook explicitly through Codex `/hooks` if you no longer want it to run.
-The three items have separate ownership records and tombstones; ordinary apply skips detached items.
-A missing/unreadable source cannot be safely materialized, so detach fails without discarding ownership; restore the source first.
-Detach, locate, and installed-state inspection still work without the catalog.
-Removing a declaration never deletes installed targets or hook registrations.
-Path/mode changes require detach before reconfiguration, except that an unchanged AEM-generated guide from the earlier implementation can migrate to the original-entry link in place.
-Locally edited guides and hook groups remain conflicts; explicit replacement backs up the current target.
-
-Transactions and recovery remain per target, not atomic across the two links and hook file.
-A hook write failure can leave installed links; fix the reported error and retry apply.
-The registered hook runs on root-session events; this version does not register a separate SubagentStart hook.
-Native Windows hook execution and a real model session with trust approval remain integration validation limits.
-There is no snapshot, remote catalog delivery, synchronization-service management, instruction rules language, or additional config.toml management.
-
-## Prepare and install
-
-```bash
-aem bootstrap ~/ai-config/skills.toml
-aem apply --dry-run
-aem apply
-```
-
-Bootstrap saves the local catalog binding, clones the listed repositories, and validates the skill directories.
-It does not install targets or modify the inventory or upstream repositories.
-Failed clones are removed from staging; the saved machine binding lets you fix the repository location or connectivity and rerun `aem bootstrap`.
-Already prepared checkouts are validated but not pulled or reset by bootstrap.
-
-The default skill installation root is `~/.agents/skills`.
-Use `--root skills=/absolute/path` to choose another agent's skill location, and `--checkout-root /absolute/path` to choose checkout storage.
-Neither option belongs in the portable inventory.
-
-Machine configuration defaults to `$XDG_CONFIG_HOME/agent-env-man/machine.toml` or `~/.config/agent-env-man/machine.toml` on Linux/WSL, and `%LOCALAPPDATA%\agent-env-man\machine.toml` on Windows.
-Select a different file with `aem --config /path/machine.toml COMMAND`.
-Bootstrap writes a configuration like:
-
-```toml
-version = 1
-catalog = "/home/me/ai-config/skills.toml"
-
-[roots]
-skills = "/home/me/.agents/skills"
-agent = "/home/me/.codex"
-```
-
-Default checkout storage is the sibling `machine.toml.checkouts/`: skill-local repositories use one child per skill name, while named repositories use `.aem-repositories/NAME`.
-State is in `machine.toml.state/`.
-You can set a top-level `checkout_root` explicitly.
-A relative `catalog` value is interpreted relative to the machine configuration file.
-Other machine paths must be absolute or use `~/`.
-Do not sync machine config, checkouts, or state between devices; distribute the inventory separately and bootstrap it on each device.
-Inventory synchronization itself is not implemented in this iteration.
-
-To use copy explicitly on one device, add:
+Skill links default to `~/.agents/skills`; instruction entries default to the selected Codex home when using agent bindings, or the explicitly declared entry root.
+The instruction bundle directory defaults to `<machine-file>.bundles/NAME`.
+To copy a skill on one device, add to its machine file:
 
 ```toml
 [modes]
-report-helper = "copy"
+report = "copy"
 ```
 
-Copy is never a silent fallback for failed symlinks.
-On Windows, enable Developer Mode/link privileges or explicitly select copy.
-Windows and WSL should have separate machine configurations and checkout/target locations.
+Copy is never a silent fallback when symlink creation fails.
+Windows and WSL should use separate machine configurations, checkouts, and targets.
 
-## Daily commands
+Instruction apply links the original entry and registers one SessionStart hook invoking `agent-hook NAME --agent codex`.
+It preserves unrelated hook groups and reports the required Codex `/hooks` trust review.
+AEM does not grant trust or modify Codex `config.toml`.
+The callback supplies source-root and entry-path metadata, never document contents or applicability rules.
+See the [walkthrough](docs/instruction-bundles.md) for trust, lookup failure, and detach behavior.
 
-| Command | Behavior |
-| --- | --- |
-| `bootstrap [--item NAME ...]` | Prepare missing checkouts using the saved catalog binding. |
-| `update [NAME ...]` | Fetch and fast-forward listed checkouts; existing links change immediately. |
-| `apply [--item NAME ...]` | Install from prepared local checkouts without network access. |
-| `apply --dry-run` | Validate and show planned actions without writing targets or ownership records. |
-| `sync` | Update, then apply only if all updates succeed. |
-| `auto --trigger EVENT [--item NAME ...] [--dry-run]` | Run due catalog skill policies for an external event, or preview them offline. |
-| `status` | Report checkout, remote-observation, and installation states without contacting remotes. |
-| `status --refresh` | Also fetch remote references without moving checkout branches or applying. |
-| `detach NAME ...` | Keep current usable contents and release management; materialize links into directories. |
-| `recover` | Restore a target after an interrupted replacement when recorded contents still match. |
+## Daily work
 
-Outputs are JSON; operation errors exit 1 and command-line usage errors exit 2.
-A successful status report exits 0 even if its observations include conflicts or unavailable sources.
-Read-only commands and dry runs may create a lock directory/file.
+```bash
+aem bootstrap                    # Prepare newly declared content.
+aem update                       # Update sources; links change immediately.
+aem apply                        # Install or refresh from local sources.
+aem sync                         # Update all, then apply if all updates succeed.
+aem status                       # Inspect without network access.
+aem status --refresh             # Fetch observations without advancing checkouts.
+aem locate personal              # Resolve installed instruction paths.
+```
 
-Adding an entry to your local catalog explicitly registers that skill.
-Run bootstrap to prepare its checkout, then apply to install it.
-Updates to a skill repository cannot add entries to the separate inventory.
-Deleting an entry does not delete its target or cached checkout; status reports orphaned ownership, and detach can release it.
-Detach records a tombstone, so a listed skill is not immediately installed again.
-After moving a detached target aside, explicitly reattach with `aem apply --item NAME --reattach`.
+`bootstrap --item NAME` and `update NAME` select skill or instruction source names.
+`apply --item report` selects a skill; `apply --item personal:entry` includes the entry's bundle and hook.
+`sync --item` filters only installation, while its update phase still visits all sources.
+See [Commands](docs/commands.md) for all arguments, previews, callbacks, and exit codes.
 
-## Preservation and conflicts
+## Automatic updates
 
-Existing unmanaged targets and locally changed copies are not overwritten automatically.
-For matching existing content use `aem apply --item NAME --adopt`.
-To replace a conflict while retaining a sibling backup, use `aem apply --item NAME --replace`.
-Backups are named `<target>.aem-backup-<id>` and retained for manual review.
-Directory items own their selected subtree; local additions to a copied skill count as modifications.
-
-Apply validates selected items before writing, stages replacements, and journals each target replacement.
-An ordinary replacement error attempts to restore that target; after interruption, inspect status and run recover.
-Recovery refuses to overwrite later user edits.
-Transactions are per target, so earlier successful items may remain applied if a later one fails.
-Do not delete state to resolve conflicts: it contains ownership and recovery records.
-
-Git operations never stash, reset, rebase, commit, or push automatically.
-Updates refuse dirty/untracked/ignored local files, wrong/detached branches, unfinished Git operations, local-ahead history, and divergence.
-Apply also requires a clean, correctly identified checkout.
-An incoming commit cannot remove or change the type of an active link source, or remove its SKILL.md, without first detaching the skill.
-For a shared checkout, this guard covers active links for every skill referencing that repository, including when `update NAME` selects one skill.
-Changing an inventory repository URL does not silently reuse or repoint an old checkout.
-Ordinary fetch/authentication failures keep the existing installation usable; a timeout/interruption during checkout can require manual repair.
-
-Detach preserves current contents, including edits, instead of restoring an old version.
-Copies remain untouched, and links are replaced only after a verified local copy is ready.
-Root skills link directly to the repository root, so its .git entry is visible through that link; fingerprinting, copy, and detach exclude this top-level Git administration entry.
-Nested symlinks/junctions, special files, and submodules are not supported as payloads in this version.
-Portable copy metadata, including executable bits, is preserved; platform-specific ACLs/alternate streams and power-loss atomicity are outside the current guarantee.
-
-## Automatic update policies
-
-Automatic updates are opt-in and default to `trigger = "manual"`.
-Add policy tables to the skill inventory alongside its existing skill declarations:
+Automatic updates default to disabled (`trigger = "manual"`).
+Opt in through the catalog:
 
 ```toml
 [updates.defaults]
@@ -393,112 +167,58 @@ action = "sync"
 min_interval = 600
 timeout = 5
 
-[updates.policies.observe]
-action = "check"
-
-[skills.report-helper.update]
-policy = "observe"
-min_interval = 3600
-
-[skills.standalone-skill.update]
+[skills.report.update]
 trigger = "manual"
 ```
 
-`updates.defaults` applies to every catalog skill, regardless of its installation mode.
-Settings resolve in this order: built-in defaults, inventory defaults, the skill's named policy, then explicit skill settings.
-Only specified fields override earlier values; trigger lists replace earlier lists.
-Named policies do not inherit other named policies.
-The current catalog loader reads a local file; policy composition does not depend on that transport or on checkout paths.
+Policies apply only to skills and do not install integrations.
+Setup connects interactive shell and agent startup to a fail-open `startup` callback.
+Without setup, external callers can invoke `aem auto --trigger shell-start`, `agent-start`, or `interval`.
+For `interval`, arrange an OS scheduler; AEM does not run a daemon.
+Preview due work with `aem auto --trigger agent-start --dry-run`.
 
-| Field | Values and built-in default |
-| --- | --- |
-| `trigger` | `"manual"` (default), or one or more of `"shell-start"`, `"agent-start"`, `"interval"`. Use a string for one event or an array for several. `manual` cannot be combined with events. |
-| `action` | `"sync"` (default) updates the prepared checkout and applies it; `"check"` only checks for remote changes. |
-| `min_interval` | Minimum seconds between automatic attempts for each skill; default `600`, nonnegative. All its events share the same clock. `0` permits every invocation. |
-| `timeout` | Positive, finite seconds for each Git phase of that skill's operation; default `30`. It is not a total deadline across skills or filesystem copying. |
-| `policy` | Optional named policy selection, allowed only in a skill's `update` table. |
+Each skill has one attempt clock across events; failed attempts are throttled too.
+Automatic sync handles skills independently and preserves conflicts and detached items.
+Explicit `update`, `apply`, `sync`, and `status --refresh` ignore automatic policies.
+Agent startup shows a brief message for completed updates or installations; full outcomes and failures remain in status.
+Instruction location hooks installed by apply do not trigger updates.
+See [policy fields and precedence](docs/configuration.md#update-policies).
 
-With Git, `check` fetches the configured branch and reports its relation to HEAD without moving the checkout or changing installed content.
-`sync` fetches and fast-forwards, then applies: links see the checkout change immediately, and copies are refreshed by apply.
-When skills share a checkout, advancing it changes all their live links at once; applying copies still follows each skill's selection and policy.
-The policy vocabulary describes these outcomes; it does not expose Git commands as general configuration or add new source types.
-Unknown fields, policies, triggers, and unsupported values are errors before any update starts.
+## Conflicts, detach, and recovery
 
-Preview effective policies and which skills are due:
+AEM refuses unmanaged targets and locally modified copies unless explicitly authorized:
 
 ```bash
-aem auto --trigger shell-start --dry-run
-aem auto --trigger agent-start --item report-helper --dry-run
+aem apply --item report --adopt     # Record matching existing content.
+aem apply --item report --replace   # Back up and replace a conflict.
+aem detach report                  # Keep contents and release ownership.
+aem detach personal:bundle personal:entry
 ```
 
-Dry runs neither contact remotes nor record attempts; they may create the configuration lock file.
-Normal output reports each skill as `not-triggered`, `detached`, `throttled`, `checked`, `synced`, or `failed`; dry runs use `planned` for due skills.
-Automatic execution requires prepared checkouts: run bootstrap for newly declared skills first.
-A due `sync` can install a prepared but not yet installed skill, or recreate a missing managed target.
-Detached skills are skipped without fetching and are never automatically reattached.
+Backups are retained as `<target>.aem-backup-<id>`.
+A directory item owns its entire subtree; local additions count as modifications.
+Detach materializes links, preserves copies, and records a tombstone to prevent automatic reinstall.
+After moving the preserved target aside, explicitly reattach with `aem apply --item report --reattach`.
+Detaching instructions retains hook configuration and locator records for the preserved copy; disable the retained hook in Codex if no longer wanted.
 
-Attempts are saved before contacting the remote, including attempts that fail or are interrupted.
-`status` includes each source's `automation` record with its latest attempt and outcome.
-Automatic execution processes skills independently: a failed skill does not prevent another due skill from updating and applying.
-It exits 1 if any attempted skill fails, and 0 if all succeed or are skipped.
-An unresolved recovery journal stops further work until recovered.
-Existing protections for local edits, unmanaged targets, dirty/divergent Git history, live links, and backups still apply.
-There is no automatic adoption, conflict replacement, or global rollback.
+Apply preflights selected items and journals each replacement before renaming targets.
+Transactions are per target: earlier successful items can remain installed if a later item fails.
+After an interruption, inspect `status` and run `recover`.
+Recovery refuses to overwrite later user edits; keep state and backups.
+Never delete state to bypass ownership conflicts or unsupported state versions.
 
-Explicit `update`, `apply`, `sync`, and `status --refresh` keep their existing behavior and do not consult automatic policies or their attempt clocks.
-In particular, explicit `sync` still applies only after all its updates succeed.
-Legacy sources remain managed through those explicit commands; `auto` selects catalog skills only.
+Git updates never stash, reset, rebase, commit, or push automatically.
+They reject dirty/untracked/ignored content, unfinished operations, local-ahead/divergent history, wrong branches, and checkout identity changes.
+Updates also guard active link sources and instruction entries against removal or unsupported type changes, even after declarations disappear.
+Nested payload symlinks/junctions, special files, and submodules are unsupported.
+Portable copy metadata is preserved; platform-specific ACLs, alternate streams, and power-loss atomicity are outside the guarantee.
 
-## Connect triggers
-
-A trigger is an event supplied by a caller, not a background service started by TOML.
-Use the machine setup above to connect shell and agent startup events automatically.
-For manually managed integrations, the underlying commands remain:
-
-| Caller | Command |
-| --- | --- |
-| Interactive shell startup | `aem auto --trigger shell-start` |
-| An agent's supported session-start hook | `aem auto --trigger agent-start` |
-| An OS scheduler, such as Task Scheduler or a Linux timer | `aem auto --trigger interval` |
-
-For example, an interactive Bash startup file can call:
-
-```bash
-if [[ $- == *i* ]] && command -v aem >/dev/null 2>&1; then
-    aem auto --trigger shell-start || true
-fi
-```
-
-Use the installed executable's absolute path and `--config` in hooks or scheduled tasks when their environment differs from your terminal.
-For Windows PowerShell, the invocation can be `& 'C:\path\to\aem.exe' --config 'C:\path\to\machine.toml' auto --trigger shell-start`.
-Configure an agent hook to call the `agent-start` command using that agent's supported mechanism and allow startup to continue if updating fails.
-Automatic update policies do not write hook files, shell profiles, or scheduler registrations.
-Only explicit setup installs startup connections; registering or applying a catalog does not.
-Setup callbacks call `startup`, a fail-open wrapper around the same automatic policy runner.
-With no bound catalog they do no update work; otherwise outcomes and catalog errors appear in `status` under `startup`.
-Agent startup returns a brief `systemMessage` only for completed syncs that advanced a checkout or installed/refreshed a target, listing skill names and short revision changes where available.
-Codex surfaces it as a warning in the UI or event stream; it does not ask the model to announce the update.
-Developers can change `STARTUP_BRIEFING_OUTPUT` in `src/agent_env_man/agents.py` from `"systemMessage"` to `"additionalContext"` to send the same briefing to the model instead.
-This choice is deliberately source-only, with no setup argument or machine setting.
-Unchanged syncs, check-only policies, skipped attempts, and failures return no briefing in either mode; full diagnostics remain in status.
-Failures that prevent acquiring the configuration lock or reading configuration are reported on stderr, and startup still continues.
-The callbacks are synchronous, share the policy throttle, and never grant hook trust.
-The instruction-root SessionStart hook installed by `apply` is separate and never triggers an update.
-For periodic updates, set `trigger = "interval"`, choose `min_interval`, and arrange recurring invocations; the manager checks what is due on each invocation and does not wait or launch a daemon.
-Calls are synchronous, and the configuration lock prevents concurrent manager operations against the same state.
-
-The earlier `aem sync --timeout 5 --min-interval 600` invocation remains supported with its configuration-wide throttle.
-Use `auto` when events and per-skill settings should come from TOML.
-
-## Compatibility
-
-The initial source-local links.conf and Codex partial-merge workflow remains available as [legacy compatibility](docs/legacy-links.md).
-It is not required by the skill catalog workflow.
-Syncthing administration, additional repository types, inventory delivery, generalized merge adapters, and revert are deferred.
+To remove integrations, detach managed agent content first, then use `aem setup --remove-agent codex` and the appropriate `--remove-shell` options.
+Disable any retained detached instruction hooks before uninstalling AEM with `uv tool uninstall agent-env-man`.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE.txt).
+[MIT License](LICENSE.txt).
 
 ## AI disclosure
 

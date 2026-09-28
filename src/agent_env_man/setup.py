@@ -15,9 +15,6 @@ from .model import Config, Error, Item, absolute, overlaps
 from .storage import exists, is_reparse, observation
 
 
-SHELLS = ('bash', 'zsh', 'powershell')
-
-
 def regular(path):
     """Do not follow even an intermediate profile redirect when writing hooks."""
     for part in (path, *path.parents):
@@ -100,11 +97,7 @@ def setup(manager, args):
     config, state = manager.config, manager.state
     document = tomlkit.parse(tomlkit.dumps(config.doc))
     selected = document.setdefault('setup', {})
-    if not isinstance(selected, dict) or set(selected) - {'shells', 'executable'}:
-        raise Error('Machine setup must contain shells and an optional executable')
     values = selected.get('shells', {})
-    if not isinstance(values, dict) or any(n not in SHELLS or not isinstance(p, str) or not Path(p).is_absolute() for n, p in values.items()):
-        raise Error('Setup shells must map supported shell names to absolute profile paths')
     shells = dict(values)
     agents = document.setdefault('agents', {})
     if set(args.shell) & set(args.remove_shell) or set(args.agent) & set(args.remove_agent):
@@ -122,7 +115,7 @@ def setup(manager, args):
         if name not in agents:
             values = adapter.defaults()
             if name == 'codex':
-                # Legacy roots are user-owned machine bindings, not defaults
+                # Explicit roots are user-owned machine bindings, not defaults
                 # that setup may silently relocate.
                 for field, root in (('root', 'agent'), ('skills', 'skills')):
                     if root in config.roots:
@@ -163,7 +156,6 @@ def setup(manager, args):
             path = Path(candidate.agents[name]['root']) / profile(name).hook_name
         regular(path)
         protected = [config.path, config.state_dir, config.checkout_root]
-        protected.extend(s.path for s in config._legacy_sources.values())
         protected.extend(absolute(p) for p in config.doc.get("external_paths", {}).values())
         if config.catalog_path:
             protected.append(config.catalog_path)
@@ -174,11 +166,11 @@ def setup(manager, args):
         for other_key, record in state.data['items'].items():
             if other_key == key or record.get('detached') or not overlaps(path, Path(record['target'])):
                 continue
-            if not (kind == 'agent' and record.get('mode') in ('codex-hook', 'agent-hook')
+            if not (kind == 'agent' and record.get('mode') == 'agent-hook'
                     and record.get('agent', 'codex') == name and record['target'] == str(path)):
                 raise Error(f'Setup target overlaps {other_key}')
         record = {'source_name': 'setup', 'id': f'{kind}-{name}', 'target': str(path), 'source': str(config.path),
-                  'kind': 'setup', 'relative': '.', 'mode': 'setup-shell' if kind == 'shell' else 'codex-hook' if name == 'codex' else 'agent-hook',
+                  'kind': 'setup', 'relative': '.', 'mode': 'setup-shell' if kind == 'shell' else 'agent-hook',
                   'agent': name if kind == 'agent' else '', 'agents': [name] if kind == 'agent' else [],
                   'detached': removing}
         if kind == 'shell':

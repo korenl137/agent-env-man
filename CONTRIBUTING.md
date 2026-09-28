@@ -38,7 +38,7 @@ Keep source roots disjoint, and never nest externally synchronized sources insid
 Targets directly link to local source content.
 Do not add snapshot activation semantics silently: changing this contract requires an explicit design decision and updated user documentation.
 `update` therefore can change live instruction contents without `apply`.
-The incoming-revision guard protects active link source paths, even if the latest manifest no longer declares those items.
+The incoming-revision guard protects active link source paths, even if the latest catalog no longer declares those items.
 
 The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
 The current loader reads a local TOML file; policy composition must remain independent of this transport and any future auxiliary-file layout.
@@ -53,14 +53,16 @@ Validate every skill in a shared checkout before publishing it, and guard all ac
 Keep installation ownership and automatic policies per skill, even when delivery is shared.
 Do not introduce a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
-The previous source-local links.conf workflow is compatibility support, not the model for new skill registration.
-Keep its existing four-field parser and saved ownership records functional when changing the primary workflow.
+The catalog is the only content declaration format.
+Do not restore source-local links.conf parsing, machine sources tables, partial application-config merging, or removed command aliases.
+State version 2 is a deliberate compatibility boundary; reject older state without conversion or deletion.
+Keep the breaking-change instructions in docs/removed-interfaces.md aligned with this boundary.
 
 Instruction bundles select a named Git repository or a logical external source without source-local manifests.
 Keep external path bindings in machine configuration and shared source/root/entry selections in the catalog.
 Bootstrap accepts a positional catalog and repeated optional --external NAME=PATH bindings, persists them in the selected/default machine file, and reuses omitted bindings.
 Default agent and skills roots only when absent; validate declarations and existing ownership before saving bindings or contacting repositories.
-Keep explicit --config, --catalog, root/storage overrides, and legacy NAME --path bootstrap compatible.
+Support explicit --config, --catalog, and root/storage overrides.
 Do not parse document policy, applicability, or reading order.
 A Codex instruction bundle owns a directory link, a direct original-entry link, and one SessionStart group in the entry root's hooks.json.
 Bootstrap only prepares and validates sources; apply installs links and merges the hook without granting Codex trust or modifying config.toml.
@@ -96,12 +98,13 @@ Under the existing configuration lock, persist each skill's attempt before netwo
 Preview must not fetch or record attempts.
 Automatic sync applies each successfully updated skill independently; this intentionally differs from explicit sync's all-updates-before-apply gate.
 Preserve existing per-target transactions, stop if recovery is pending, and never adopt, replace conflicts, or reattach detached skills automatically.
-Automatic policies cover catalog skills; legacy sources remain available through explicit commands.
+Automatic policies cover catalog skills; explicit sync is unthrottled.
 
 ## Ownership and safety
 
-Only declared catalog skills/instruction bundles or explicitly registered legacy items may be installed; a content repository update cannot expand the local catalog.
-Catalog skill names identify ownership independently of repository URLs and paths; legacy items retain `(source ID, item ID)` identities.
+Only declared catalog skills/instruction bundles may be installed; a content repository update cannot expand the local catalog.
+Catalog skill names identify ownership independently of repository URLs and paths.
+Instruction ownership uses the bundle name and bundle/entry/hook component.
 Do not infer ownership from an existing file or delete targets when declarations disappear.
 Reject overlapping target trees and require detach before changing an existing item's path or mode.
 A directory item owns its entire subtree, so extra local files are meaningful modifications.
@@ -109,12 +112,9 @@ Repository-root skills are valid and use direct links, not an extra content laye
 Exclude only their top-level .git administration entry from content fingerprints, copies, and materializing detach; never duplicate a repository database or worktree pointer into an unmanaged skill.
 Git identity checks still validate the managed checkout's origin and expected branch before applying or updating.
 
-Link, copy, and merge have different contracts.
+Link and copy have different contracts.
 Never silently fall back from link to copy.
 Copy conflict detection uses the last applied content, desired content, and actual target; Git revision alone is insufficient.
-Merge ownership is per explicit leaf key, never an entire application config tree.
-Do not replace a table to install a scalar or drop undeclared keys/comments.
-This version restricts one merge item to a target file; do not extend that without resolving cross-item key ownership.
 
 Prepare and verify a replacement before moving the current target.
 Write the recovery journal before the first rename and commit the ownership record only after installation succeeds.
@@ -123,7 +123,7 @@ The process lock serializes commands for one configuration, not arbitrary editor
 Retain the documented per-target transaction boundary instead of claiming global atomicity.
 
 Detach preserves the current usable contents, then releases ownership and records a tombstone to prevent automatic reinstallation.
-It does not restore a pre-install value or delete merge keys.
+It does not restore pre-installation contents.
 Do not discard state when a target is missing, unreadable, or cannot be safely materialized.
 
 ## Validation expectations
@@ -131,11 +131,14 @@ Do not discard state when a target is missing, unreadable, or cannot be safely m
 Changes to delivery must exercise clone, fast-forward, dirty/divergent histories, network/remote failures, and live-link removal guards using local Git fixtures.
 Catalog tests must start with repositories lacking links.conf, exercise root and nested skills, and keep the inventory independent of both checkouts and installation roots.
 Verify that missing inventory files do not prevent status from observing installed contents or detach from preserving them.
-Changes to installation must exercise unmanaged targets, local edits, directory contents, partial config preservation, detach, and failure recovery.
+Changes to installation must exercise unmanaged targets, local edits, directory contents, unrelated hook preservation, detach, and failure recovery.
 Policy changes must cover precedence, manual opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
-Keep command contracts, examples, and platform limitations in the README aligned with behavior.
-Agent profiles are the internal extension boundary for paths, hook syntax, callback output, notices, and supported config merge operations.
+Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
+Keep the README focused on user workflows and link to those references.
+Validate unknown fields and types instead of silently accepting misspelled or removed settings.
+Update examples and platform limitations with interface changes.
+Agent profiles are the internal extension boundary for paths, hook syntax, callback output, and notices.
 Do not add a dynamic plugin loader or additional source providers without a demonstrated use case.
 
 ## Machine setup and agent integration
@@ -151,9 +154,9 @@ A retry must recognize completed ownership records after a partial failure.
 Setup removal must not delete user content or silently detach installed skills and instructions.
 Do not grant agent hook trust or rewrite user execution policies.
 
-Resolve product-specific defaults, hook serialization, callback output, and merge capabilities through internal agent profiles.
+Resolve product-specific defaults, hook serialization, and callback output through internal agent profiles.
 Codex remains the only shipped profile; use a fake profile to validate injection and multiple destinations without claiming support for another product.
-Preserve legacy Codex item identities and command aliases.
+Generate instruction callbacks through agent-hook NAME --agent AGENT and the internal profile.
 Store per-target ownership and shared consumers independently from per-skill Git delivery and automatic attempt clocks.
 A shared target has one owner, and cannot be materialized for just one of its consumers.
 Explicit catalog roots retain their meaning; omitted destinations use selected agent defaults.
