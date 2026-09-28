@@ -111,10 +111,14 @@ def bootstrap_skills(config, state, args):
     if args.path or args.git or args.branch or args.attach or args.manifest != "links.conf":
         raise Error("Declare Git repositories, skills, and optional branches/subdirectories in the local catalog")
     document = tomlkit.parse(tomlkit.dumps(config.doc))
+    if args.name is not None:
+        if args.catalog is not None:
+            raise Error("Specify the catalog either positionally or with --catalog, not both")
+        args.catalog = Path(args.name)
     if args.catalog is not None:
         document["catalog"] = str(args.catalog.expanduser().resolve())
     if "catalog" not in document:
-        raise Error("Use bootstrap --catalog /path/to/skills.toml")
+        raise Error("Use bootstrap /path/to/catalog.toml")
     if args.checkout_root is not None:
         document["checkout_root"] = str(args.checkout_root.expanduser().resolve())
     roots = document.setdefault("roots", {})
@@ -128,31 +132,45 @@ def bootstrap_skills(config, state, args):
             raise Error(f"Root {key} is already configured; detach before relocating installed skills")
         roots[key] = resolved
     roots.setdefault("skills", str(Path.home() / ".agents/skills"))
+    roots.setdefault("agent", str(Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve()))
+    external_names = set()
+    for value in args.external:
+        key, separator, location = value.partition("=")
+        if not separator or not location:
+            raise Error("--external expects NAME=PATH")
+        identifier(key)
+        if key in external_names:
+            raise Error(f"Duplicate --external binding: {key}")
+        external_names.add(key)
+        document.setdefault("external_paths", {})[key] = str(Path(location).expanduser().resolve())
     candidate = Config(config.path, document=document)
-    if set(args.item) - candidate.catalog().keys():
+    if external_names - candidate.external_names:
+        raise Error("--external must name an external declared in the catalog")
+    if set(args.item) - candidate.sources.keys():
         raise Error("Unknown catalog skill selection")
     manager = Manager(candidate, state)
     # Validate all declarations/ownership before saving a machine binding or
     # contacting any repository. Failed downloads can then be retried in place.
-    manager.selected(args.item)
+    manager.selected([i.key for name in args.item for i in candidate.declarations(candidate.sources[name])])
     atomic_write(config.path, tomlkit.dumps(document).encode("utf-8"))
     report, failed = manager.prepare_skills(args.item, timeout=args.timeout)
     return {"skills": report, "config": str(config.path), "next": "apply --dry-run"}, failed
 
 
 def parser():
-    result = argparse.ArgumentParser(prog="aem", description="Install Git-managed skills from an independent inventory")
+    result = argparse.ArgumentParser(prog="aem", description="Install skills and personal instruction bundles from an independent inventory")
     result.add_argument("--config", type=Path, default=default_config(), help="machine-local TOML file")
     commands = result.add_subparsers(dest="command", required=True)
-    boot = commands.add_parser("bootstrap", help="prepare Git skills from a local catalog; never install targets")
-    boot.add_argument("name", nargs="?", help="legacy links.conf source name")
-    boot.add_argument("--catalog", type=Path, help="local inventory of skills and optional shared Git repositories")
+    boot = commands.add_parser("bootstrap", help="prepare Git skills and Git/external instruction bundles; never install targets")
+    boot.add_argument("name", nargs="?", metavar="CATALOG", help="local catalog path, or legacy source name when using --path")
+    boot.add_argument("--catalog", type=Path, help="local inventory of skills, instruction bundles, and sources")
     boot.add_argument("--checkout-root", type=Path, help="device-local storage for managed skill checkouts")
     boot.add_argument("--path", help="legacy source checkout path")
     boot.add_argument("--git")
     boot.add_argument("--branch", help="legacy source branch (default: main)")
     boot.add_argument("--manifest", default="links.conf")
     boot.add_argument("--root", action="append", default=[], metavar="NAME=PATH")
+    boot.add_argument("--external", action="append", default=[], metavar="NAME=PATH", help="bind a catalog external source to a device-local folder; repeat for multiple sources")
     boot.add_argument("--item", action="append", default=[], metavar="ID")
     boot.add_argument("--attach", action="store_true")
     boot.add_argument("--timeout", type=float, default=30)
@@ -181,6 +199,10 @@ def parser():
     detach = commands.add_parser("detach", help="preserve current contents and release ownership")
     detach.add_argument("item", nargs="+", metavar="NAME")
     detach.add_argument("--dry-run", action="store_true")
+    locate = commands.add_parser("locate", help="resolve an installed instruction bundle root and entry as JSON without fetching")
+    locate.add_argument("name", help="instruction bundle name")
+    hook = commands.add_parser("codex-hook", help="emit Codex SessionStart location context from saved installation state")
+    hook.add_argument("name", help="instruction bundle name")
     commands.add_parser("recover", help="restore the previous target after an interrupted replacement")
     return result
 
@@ -198,9 +220,9 @@ def main(argv=None):
             manager = Manager(config, state)
             failed = False
             if args.command == "bootstrap":
-                if args.name:
-                    if not args.path or args.catalog or args.checkout_root:
-                        raise Error("Legacy bootstrap needs NAME --path PATH; catalog bootstrap does not take NAME")
+                if args.path:
+                    if not args.name or args.catalog or args.checkout_root or args.external:
+                        raise Error("Legacy bootstrap needs NAME --path PATH and cannot use catalog options")
                     report = bootstrap_legacy(config, state, args)
                 else:
                     report, failed = bootstrap_skills(config, state, args)
@@ -211,6 +233,10 @@ def main(argv=None):
                                        reattach=args.reattach, dry_run=args.dry_run, timeout=args.timeout)
             elif args.command == "auto":
                 report, failed = run_updates(manager, args.trigger, args.item, dry_run=args.dry_run)
+            elif args.command == "codex-hook":
+                report = manager.hook_context(args.name)
+            elif args.command == "locate":
+                report = manager.locate(args.name)
             elif args.command == "status":
                 report = manager.status(refresh=args.refresh, timeout=args.timeout)
             elif args.command == "detach":
@@ -235,6 +261,12 @@ def main(argv=None):
             print(json.dumps(report, indent=2, ensure_ascii=True))
             return 1 if failed else 0
     except (Error, OSError, ValueError) as exc:
+        if args.command == "codex-hook":
+            # A hook failure must be visible instead of silently omitting root
+            # context. Return Codex's structured stop request, not a plain error.
+            message = f"AEM instruction root lookup failed: {exc}"
+            print(json.dumps({"continue": False, "stopReason": message, "systemMessage": message}))
+            return 0
         print(f"aem: {exc}", file=sys.stderr)
         return 1
 

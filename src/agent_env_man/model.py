@@ -59,6 +59,7 @@ class Source:
     items: tuple[str, ...]
     modes: dict[str, str]
     repository: bool = False
+    instruction: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class Item:
     target: Path
     mode: str
     kind: str = "payload"
+    entry: str | None = None
 
     @property
     def key(self) -> str:
@@ -97,6 +99,7 @@ class Config:
         self.catalog_path = None
         self._catalog = None
         self._repositories = {}
+        self._instructions = {}
         self._update_policies = {}
         self.checkout_root = absolute(self.doc["checkout_root"]) if "checkout_root" in self.doc else self.path.parent / (self.path.name + ".checkouts")
         if overlaps(self.checkout_root, self.path) or overlaps(self.checkout_root, self.state_dir):
@@ -149,6 +152,12 @@ class Config:
             if any(overlaps(path, other) for other in paths[:i]):
                 raise Error("Source roots must not overlap")
 
+    @property
+    def external_names(self) -> set[str]:
+        """Return the logical external sources declared by the bound catalog."""
+        self.catalog()
+        return set(getattr(self, "_external_names", ()))
+
     def catalog(self) -> dict:
         """Load lazily so detach/recovery remain usable when inventory is missing."""
         if self._catalog is not None:
@@ -159,7 +168,7 @@ class Config:
             document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
-        if document.get("version") != 1 or set(document) - {"version", "skills", "repositories", "updates"}:
+        if document.get("version") != 1 or set(document) - {"version", "skills", "repositories", "updates", "instructions", "externals"}:
             raise Error("Skill catalog needs version = 1 and a skills table")
         skills = document.get("skills", {})
         if not isinstance(skills, dict):
@@ -198,6 +207,48 @@ class Config:
                 raise Error(f"Skill {name}: missing target root {root!r}")
             if data.get("mode", "link") not in ("link", "copy"):
                 raise Error(f"Skill {name}: expected link or copy mode")
+        externals = document.get("externals", {})
+        instructions = document.get("instructions", {})
+        bindings = self.doc.get("external_paths", {})
+        if not all(isinstance(x, dict) for x in (externals, instructions, bindings)):
+            raise Error("externals, instructions and external_paths must be tables")
+        for name, data in externals.items():
+            identifier(name)
+            if not isinstance(data, dict) or data:
+                raise Error(f"External {name}: declare an empty table; paths belong in machine external_paths")
+        for name, data in instructions.items():
+            identifier(name)
+            if name in skills or name in self._legacy_sources:
+                raise Error(f"Instruction name collides with another source: {name}")
+            if not isinstance(data, dict) or set(data) - {"repo", "external", "subdir", "entry", "root", "destination", "entry_root", "entry_destination"}:
+                raise Error(f"Invalid instruction declaration: {name}")
+            if ("repo" in data) == ("external" in data):
+                raise Error(f"Instruction {name}: select exactly one repo or external")
+            field = "repo" if "repo" in data else "external"
+            choices = repositories if field == "repo" else externals
+            if not isinstance(data[field], str) or data[field] not in choices:
+                raise Error(f"Instruction {name}: unknown {field}")
+            if field == "external" and data[field] not in bindings:
+                raise Error(f"Instruction {name}: missing machine external_paths.{data[field]}")
+            if data.get("subdir", ".") != ".":
+                relative(data["subdir"])
+            relative(data.get("entry"))
+            for field in (("root", "entry_root") if "root" in data else ("entry_root",)):
+                if not isinstance(data.get(field), str) or data[field] not in self.roots:
+                    raise Error(f"Instruction {name}: missing target root {field}")
+            relative(data.get("destination", name))
+            relative(data.get("entry_destination"))
+        external_paths = {identifier(k): absolute(v) for k, v in bindings.items()}
+        protected = [self.path, self.state_dir, self.checkout_root, *[s.path for s in self._legacy_sources.values()]]
+        if self.catalog_path:
+            protected.append(self.catalog_path)
+        paths = list(external_paths.values())
+        for i, path in enumerate(paths):
+            if any(overlaps(path, other) for other in protected + paths[:i]):
+                raise Error("External source roots must be disjoint from other sources, checkouts, inventory and state")
+        self._external_paths = external_paths
+        self._external_names = set(externals)
+        self._instructions = instructions
         if self.modes.keys() - skills.keys():
             raise Error("Machine mode override does not name a skill in the catalog")
         from .updates import resolve_policies
@@ -226,7 +277,11 @@ class Config:
     def sources(self) -> dict[str, Source]:
         """Derive checkout paths; the inventory never needs device-local bindings."""
         result = dict(self._legacy_sources)
-        for name, data in self.catalog().items():
+        declarations = {**self.catalog(), **self._instructions}
+        for name, data in declarations.items():
+            if "external" in data:
+                result[name] = Source(name, self._external_paths[data["external"]], None, None, None, ("bundle", "entry", "hook"), {}, instruction=True)
+                continue
             shared = data.get("repo")
             settings = self._repositories[shared] if shared else data
             repository = settings["repository"]
@@ -235,10 +290,23 @@ class Config:
             path = self.checkout_root / ".aem-repositories" / shared if shared else self.checkout_root / name
             if path.resolve() != path:
                 raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
-            result[name] = Source(name, path, None, repository, settings.get("branch"), (), {}, True)
+            result[name] = Source(name, path, None, repository, settings.get("branch"), ("bundle", "entry", "hook") if name in self._instructions else (), {}, True, name in self._instructions)
         return result
 
     def declarations(self, source: Source) -> list[Item]:
+        self.catalog()
+        if source.name in self._instructions:
+            data = self._instructions[source.name]
+            subdir = data.get("subdir", ".")
+            payload = source.path / subdir
+            target = self.target(data.get("root"), relative(data.get("destination", source.name)))
+            entry_target = self.target(data["entry_root"], relative(data["entry_destination"]))
+            entry_relative = data["entry"] if subdir == "." else subdir + "/" + data["entry"]
+            hook_target = self.target(data["entry_root"], Path("hooks.json"))
+            return [Item(source.name, "bundle", subdir, payload, target, "link", "instruction", data["entry"]),
+                    Item(source.name, "entry", entry_relative, payload / data["entry"], entry_target,
+                         "link", "instruction-entry", data["entry"]),
+                    Item(source.name, "hook", subdir, payload, hook_target, "codex-hook", "instruction-hook", data["entry"])]
         if not source.repository:
             return self.manifest(source)
         data = self.catalog()[source.name]
@@ -248,11 +316,13 @@ class Config:
         mode = self.modes.get(source.name, data.get("mode", "link"))
         return [Item(source.name, source.name, relative_path, payload, target, mode, "skill")]
 
-    def target(self, root: str, destination: Path) -> Path:
-        target = self.roots[root] / destination
+    def target(self, root: str | None, destination: Path) -> Path:
+        # Instruction bundles default to per-configuration storage, like checkouts.
+        base = self.roots[root] if root is not None else (self.path.parent / (self.path.name + ".bundles")).resolve()
+        target = base / destination
         # Resolve ancestors but never follow an existing target symlink.
         target = target.parent.resolve() / target.name
-        if self.roots[root] not in target.parents:
+        if base not in target.parents:
             raise Error(f"Target escapes its root: {target}")
         if any(target == r for r in self.roots.values()):
             raise Error(f"Cannot own an entire configured target root: {target}")

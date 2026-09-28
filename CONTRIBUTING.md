@@ -40,7 +40,7 @@ Do not add snapshot activation semantics silently: changing this contract requir
 `update` therefore can change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest manifest no longer declares those items.
 
-The primary input is a user-owned skill catalog, independent of the repositories it lists.
+The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
 The current loader reads a local TOML file; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name and selects one Git repository and optional subdirectory.
 Named repository declarations let related skills share one URL, branch, and checkout; direct per-skill repository declarations remain supported.
@@ -55,6 +55,28 @@ Do not introduce a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
 The previous source-local links.conf workflow is compatibility support, not the model for new skill registration.
 Keep its existing four-field parser and saved ownership records functional when changing the primary workflow.
+
+Instruction bundles select a named Git repository or a logical external source without source-local manifests.
+Keep external path bindings in machine configuration and shared source/root/entry selections in the catalog.
+Bootstrap accepts a positional catalog and repeated optional --external NAME=PATH bindings, persists them in the selected/default machine file, and reuses omitted bindings.
+Default agent and skills roots only when absent; validate declarations and existing ownership before saving bindings or contacting repositories.
+Keep explicit --config, --catalog, root/storage overrides, and legacy NAME --path bootstrap compatible.
+Do not parse document policy, applicability, or reading order.
+A Codex instruction bundle owns a directory link, a direct original-entry link, and one SessionStart group in the entry root's hooks.json.
+Bootstrap only prepares and validates sources; apply installs links and merges the hook without granting Codex trust or modifying config.toml.
+Preserve unrelated JSON events, groups and metadata; malformed or redirected hook files must fail preflight.
+Own the complete AEM group identified by its saved marker, not the whole hooks file, while retaining one hook item per target file to avoid competing transactions.
+Entry selection includes bundle and hook installation, but never extends replacement permission to an implicitly selected bundle.
+Report the required /hooks trust review after apply; preview must show the planned group without registering it.
+Detach materializes both links and releases hook ownership while retaining its configuration, so saved locator records still support preserved documents.
+Default bundle installation to `<machine-file>.bundles/<bundle-name>` without requiring a configured rules root; preserve explicit location overrides and relocation guards.
+Resolve roots from saved installation records and actual filesystem links, not from prompt text or the current catalog.
+The locator must remain offline, avoid updating ownership records, work for detached copies without a catalog, and reject missing or redirected entries and replaced active links.
+Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
+The callback emits only path metadata as additionalContext, never document contents, and requests a structured stop on lookup failure.
+Preserve original documents and use the existing per-target conflict/recovery machinery.
+Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
+Instruction automatic policies are not supported; skill policies may still advance shared checkouts.
 
 ## Automatic update contracts
 
@@ -76,7 +98,7 @@ Automatic policies cover catalog skills; legacy sources remain available through
 
 ## Ownership and safety
 
-Only declared catalog skills or explicitly registered legacy items may be installed; a content repository update cannot expand the local catalog.
+Only declared catalog skills/instruction bundles or explicitly registered legacy items may be installed; a content repository update cannot expand the local catalog.
 Catalog skill names identify ownership independently of repository URLs and paths; legacy items retain `(source ID, item ID)` identities.
 Do not infer ownership from an existing file or delete targets when declarations disappear.
 Reject overlapping target trees and require detach before changing an existing item's path or mode.

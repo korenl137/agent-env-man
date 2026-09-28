@@ -100,16 +100,18 @@ class Git:
 
     def guard_links(self, source: Source, revision: str, records: dict):
         for key, record in records.items():
-            shared_skill = (record.get("kind") == "skill"
+            shared_item = (record.get("kind") in ("skill", "instruction", "instruction-entry")
                             and record.get("source") == str(source.path / record["relative"]))
-            if (record.get("source_name") != source.name and not shared_skill) or record.get("detached") or record["mode"] != "link":
+            if (record.get("source_name") != source.name and not shared_item) or record.get("detached") or record["mode"] != "link":
                 continue
             if str(source.path / record["relative"]) != record["source"]:
                 raise Error(f"{key}: source path moved; detach before reconfiguration")
             relative = record["relative"]
             if record.get("kind") == "skill":
                 self.skill_descriptor(source, relative, revision)
-            if relative == "." and record.get("kind") == "skill":
+            if record.get("kind") == "instruction":
+                self.instruction_descriptor(source, relative, record["entry"], revision)
+            if relative == "." and record.get("kind") in ("skill", "instruction"):
                 mode = "040000"
             else:
                 listing = self.run(source.path, "ls-tree", "-z", revision, "--", relative).stdout
@@ -122,6 +124,17 @@ class Git:
                 tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
                 if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
                     raise Error(f"{key}: incoming linked directory contains a symlink or submodule")
+
+    def instruction_descriptor(self, source, relative, entry, revision="HEAD"):
+        """Validate the entry and complete regular-file tree before publishing Git content."""
+        descriptor = entry if relative == "." else relative + "/" + entry
+        listing = self.run(source.path, "ls-tree", "-z", revision, "--", descriptor).stdout
+        if not listing or listing.split(" ", 1)[0] not in ("100644", "100755"):
+            raise Error(f"{source.name}: instruction needs a tracked regular entry: {descriptor}")
+        pathspec = () if relative == "." else (relative,)
+        tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
+        if any(e.split(" ", 1)[0] not in ("100644", "100755") for e in tree.split("\0") if e):
+            raise Error(f"{source.name}: instruction bundle contains a Git symlink or submodule")
 
     def skill_descriptor(self, source: Source, relative: str, revision: str = "HEAD"):
         """Require a tracked descriptor and a skill tree of regular Git files.

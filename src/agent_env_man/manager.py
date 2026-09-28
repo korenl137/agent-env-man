@@ -4,13 +4,14 @@ from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 import shutil
+import json
 import stat
 import tempfile
 import uuid
 
-from . import codex
+from . import codex, hooks
 from .git_source import Git, now
-from .model import Config, Error, Item, overlaps
+from .model import Config, Error, Item, identifier, overlaps, relative
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove
 
 
@@ -43,7 +44,7 @@ class Manager:
         in place and never reset or pulled by bootstrap.
         """
         self.state.ready()
-        sources = {name: s for name, s in self.config.sources.items() if s.repository}
+        sources = {name: s for name, s in self.config.sources.items() if s.repository or s.instruction}
         if set(names) - sources.keys():
             raise Error("Unknown catalog skill selection")
         self.check_destinations([i for s in sources.values() for i in self.config.declarations(s)])
@@ -58,6 +59,12 @@ class Manager:
             name, source = members[0]
             temporary = None
             try:
+                if not source.git:
+                    for _, member in members:
+                        for item in self.config.declarations(member):
+                            self.payload(item)
+                    report.extend({"source": n, "status": "external-ready", "path": str(source.path)} for n, _ in selected)
+                    continue
                 git = Git(timeout)
                 created = not exists(source.path)
                 source_state = self.state.data["sources"].setdefault(name, {})
@@ -76,9 +83,12 @@ class Manager:
                 # A shared checkout is published only when every declared skill is valid.
                 for skill_name, skill_source in members:
                     item = self.config.declarations(skill_source)[0]
-                    git.skill_descriptor(prepared, item.relative)
+                    if item.kind == "skill":
+                        git.skill_descriptor(prepared, item.relative)
+                    else:
+                        git.instruction_descriptor(prepared, item.relative, item.entry)
                     payload = local_path / item.relative
-                    if not (payload / "SKILL.md").is_file():
+                    if item.kind == "skill" and not (payload / "SKILL.md").is_file():
                         raise Error(f"{skill_name}: skill path must contain SKILL.md")
                     cursor = payload
                     while cursor != local_path:
@@ -127,6 +137,12 @@ class Manager:
 
     def selected(self, requested=(), *, reattach=False):
         all_items = self.items()
+        # Entry installation includes its directory and hook; selecting a hook
+        # likewise needs a usable entry. Flags still require explicit selection.
+        requested = set(requested)
+        for item in all_items:
+            if item.key in requested and item.kind in ("instruction-entry", "instruction-hook"):
+                requested.update(f"{item.source_name}:{part}" for part in ("bundle", "entry", "hook"))
         registered = {f"{s.name}:{i}" for s in self.config.sources.values() for i in s.items}
         registered.update(i.key for i in all_items if i.kind == "skill")
         available = {i.key for i in all_items}
@@ -152,7 +168,7 @@ class Manager:
         for item in items:
             old = self.state.data["items"].get(item.key)
             if old and not old.get("detached") and (old["target"] != str(item.target) or old["mode"] != item.mode
-                                                    or old["source"] != str(item.source)):
+                                                    or old["source"] != str(item.source)) and not self.entry_migration(old, item):
                 raise Error(f"{item.key}: path or mode changed; detach before reconfiguration")
             for key, target in owners.items():
                 if key != item.key and overlaps(item.target, target):
@@ -169,7 +185,88 @@ class Manager:
             cursor = cursor.parent
         if item.kind == "skill" and (not item.source.is_dir() or not (item.source / "SKILL.md").is_file()):
             raise Error(f"{item.key}: skill path must be a directory containing SKILL.md")
-        return fingerprint(item.source, exclude_git=item.kind == "skill" and item.relative == ".")
+        if item.kind in ("instruction", "instruction-hook"):
+            if not item.source.is_dir() or not (item.source / item.entry).is_file():
+                raise Error(f"{item.key}: instruction bundle needs a regular entry document: {item.entry}")
+        if item.kind == "instruction-entry" and not item.source.is_file():
+            raise Error(f"{item.key}: instruction entry must be a regular file")
+        return fingerprint(item.source, exclude_git=item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".")
+
+    def locate(self, name):
+        """Resolve a saved installation without loading its catalog or fetching sources.
+
+        Detached bundles resolve to their preserved directory; active bundles
+        must still have the recorded link so an unrelated replacement is not read.
+        """
+        self.state.ready()
+        key = f"{identifier(name)}:bundle"
+        record = self.state.data["items"].get(key)
+        if not record or record.get("kind") != "instruction":
+            raise Error(f"{name}: instruction bundle has not been installed")
+        target = Path(record["target"])
+        if record.get("detached"):
+            if target.is_symlink() or is_reparse(target):
+                raise Error(f"{name}: detached bundle directory was replaced by a link")
+        elif not target.is_symlink() or os.readlink(target) != record["source"]:
+            raise Error(f"{name}: installed bundle link was replaced; inspect status")
+        root = target.resolve(strict=True)
+        if not root.is_dir():
+            raise Error(f"{name}: installed bundle root is not a directory")
+        entry = root / relative(record["entry"])
+        # Refuse redirected entry paths, including intermediate links/junctions.
+        cursor = entry
+        while cursor != root:
+            if cursor.is_symlink() or is_reparse(cursor):
+                raise Error(f"{name}: entry path contains a symlink/junction")
+            cursor = cursor.parent
+        if not entry.is_file():
+            raise Error(f"{name}: original entry document is missing: {entry}")
+        return {"root": str(root), "entry": str(entry), "installed_root": str(target),
+                "detached": bool(record.get("detached"))}
+
+    @staticmethod
+    def entry_migration(old, item):
+        """Only the former AEM-generated guide can migrate in place to a source link."""
+        return (old.get("kind") == "instruction-entry" and old.get("mode") == "entry"
+                and item.kind == "instruction-entry" and old["target"] == str(item.target)
+                and old.get("entry") == item.entry
+                and str(Path(old["source"]) / item.entry) == str(item.source))
+
+    def hook_context(self, name):
+        """Return location metadata only; personal instruction text stays in AGENTS.md."""
+        found = self.locate(name)
+        record = self.state.data["items"].get(f"{name}:entry")
+        if not record or record.get("kind") != "instruction-entry" or record["mode"] != "link":
+            raise Error(f"{name}: original instruction entry link is not installed")
+        target = Path(record["target"])
+        if not target.is_file():
+            raise Error(f"{name}: installed global entry is unavailable")
+        if record.get("detached") and (target.is_symlink() or is_reparse(target)):
+            raise Error(f"{name}: detached global entry was replaced by a link")
+        if not record.get("detached") and observation(target) != {"kind": "link", "to": record["source"]}:
+            raise Error(f"{name}: global entry link was replaced; inspect status")
+        if found["detached"] and not record.get("detached"):
+            # A directory can be detached independently while AGENTS.md still
+            # links to the live original. Its references must use that original
+            # tree until the entry is materialized too, not the frozen copy.
+            source_entry = Path(record["source"])
+            source_root = source_entry
+            for _ in relative(record["entry"]).parts:
+                source_root = source_root.parent
+            cursor = source_entry
+            while True:
+                if cursor.is_symlink() or is_reparse(cursor):
+                    raise Error(f"{name}: live entry source was redirected")
+                if cursor == source_root:
+                    break
+                cursor = cursor.parent
+            found.update(root=str(source_root.resolve(strict=True)), entry=str(source_entry.resolve(strict=True)))
+        context = ("AEM instruction document locations (not instruction contents):\n"
+                   + json.dumps({**found, "global_entry": str(target)}, ensure_ascii=True)
+                   + "\nFor relative document references in this global entry, use the original entry's "
+                   "directory as the base unless the user documents specify another base. "
+                   "Follow those documents for applicability and reading order.")
+        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
 
     def plan(self, item, *, adopt=False, replace=False, reattach=False):
         payload_hash = self.payload(item)
@@ -178,16 +275,27 @@ class Manager:
         if old and old.get("detached"):
             if not reattach:
                 raise Error(f"{item.key}: detached; use --reattach")
-            old = None
+            if item.mode != "codex-hook":
+                old = None
         record = {"source_name": item.source_name, "relative": item.relative, "source": str(item.source),
                   "id": item.id,
                   "target": str(item.target), "mode": item.mode, "hash": payload_hash,
                   "directory": item.source.is_dir(), "detached": False, "kind": item.kind,
-                  "exclude_git": item.kind == "skill" and item.relative == "."}
+                  "exclude_git": item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".",
+                  "entry": item.entry}
         present = before["kind"] != "missing"
+        if item.mode == "codex-hook":
+            marker, group = hooks.definition(self.config.path, item.source_name)
+            content = hooks.render(item.target, marker, group, old, adopt=adopt, replace=replace)
+            record.update(hook_marker=marker, hook_group=group)
+            changed = not present or item.target.read_bytes() != content
+            return Plan(item, before, record, changed, content=content)
         if item.mode == "link":
             correct = before == {"kind": "link", "to": str(item.source)}
-            if old:
+            if old and self.entry_migration(old, item):
+                safe = not present or (before["kind"] == "file"
+                       and item.target.read_bytes() == old["content"].encode("utf-8"))
+            elif old:
                 safe = correct or not present
             else:
                 safe = not present or (adopt and correct)
@@ -339,12 +447,23 @@ class Manager:
                 for item in [i for i in items if i.source_name == name]:
                     if item.kind == "skill":
                         git.skill_descriptor(source, item.relative)
+                    elif item.kind in ("instruction", "instruction-hook"):
+                        git.instruction_descriptor(source, item.relative, item.entry)
                     else:
                         git.tracked_payload(source, item.relative)
-        plans = [self.plan(i, adopt=adopt, replace=replace, reattach=reattach) for i in items]
+        def explicit(item):
+            return item.key in requested or (item.kind == "instruction-hook"
+                                              and f"{item.source_name}:entry" in requested)
+        plans = [self.plan(i, adopt=adopt and explicit(i), replace=replace and explicit(i), reattach=reattach)
+                 for i in items]
         for plan in plans:
             plan.record["revision"] = revisions.get(plan.item.source_name)
         report = [{"item": p.item.key, "action": "install" if p.change else "record", "target": str(p.item.target)} for p in plans]
+        for entry, plan in zip(report, plans):
+            if plan.item.mode == "codex-hook":
+                entry.update(hook="would-register" if dry_run and plan.change else "registered" if plan.change else "unchanged",
+                             trust="not-managed-by-aem", notice=hooks.TRUST_NOTICE,
+                             hook_group=plan.record["hook_group"])
         if not dry_run:
             for plan in plans:
                 self.install(plan)
@@ -352,8 +471,16 @@ class Manager:
 
     def detach(self, keys, *, dry_run=False):
         self.state.ready()
+        keys = list(dict.fromkeys(keys))
+        # Preserve the registered hook on detach, but release its ownership with
+        # the entry. Saved bundle records let it locate materialized contents.
+        for key in list(keys):
+            old = self.state.data["items"].get(key, {})
+            hook_key = f"{old.get('source_name')}:hook"
+            if old.get("kind") == "instruction-entry" and hook_key in self.state.data["items"] and hook_key not in keys:
+                keys.append(hook_key)
         plans, untouched = [], []
-        for key in dict.fromkeys(keys):
+        for key in keys:
             old = self.state.data["items"].get(key)
             if old is None:
                 raise Error(f"Not a managed item: {key}")
@@ -436,6 +563,12 @@ class Manager:
             return "configuration-changed", None
         if current["kind"] == "missing":
             return "missing", None
+        if item.mode == "codex-hook":
+            marker, group = hooks.definition(self.config.path, item.source_name)
+            if hooks.current(item.target, marker, group):
+                return "current", None
+            return ("stale" if hooks.current(item.target, old["hook_marker"], old["hook_group"])
+                    else "modified-locally"), None
         if item.mode == "link":
             good = current == {"kind": "link", "to": str(item.source)}
             return ("current" if good else "modified-locally"), ("changed-live" if desired != old["hash"] else None)
@@ -539,7 +672,11 @@ class Manager:
                 if actual != {"kind": "link", "to": record["source"]}:
                     return "modified-locally"
                 return "linked" if target.exists() else "broken-link"
-            if record["mode"] == "copy":
+            if record["mode"] == "entry":
+                matches = actual["kind"] == "file" and target.read_bytes() == record["content"].encode("utf-8")
+            elif record["mode"] == "codex-hook":
+                matches = hooks.current(target, record["hook_marker"], record["hook_group"])
+            elif record["mode"] == "copy":
                 matches = actual.get("hash") == record["hash"]
             else:
                 document = codex.read(target)

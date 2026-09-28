@@ -1,0 +1,21 @@
+version = 1
+
+[repositories.tools]
+repository = "https://github.com/OWNER/TOOLS.git"
+
+[skills.report]
+repo = "tools"
+subdir = "skills/report"
+
+# External paths belong in machine.toml, never in this shared declaration.
+[externals.personal-documents]
+
+[instructions.personal]
+external = "personal-documents"
+subdir = "guidance"
+entry = "start.md"
+entry_root = "agent"
+entry_destination = "AGENTS.md"
+
+# For a Git bundle, replace external with repo = "tools" (or another named repo).
+# No source-local manifest or fixed document layout is required.

@@ -1,0 +1,10 @@
+# Optional manual equivalent; bootstrap CATALOG --external NAME=PATH creates this binding automatically.
+# Use --config with this file if choosing a nondefault location.
+version = 1
+catalog = "/home/me/ai-config/instructions.toml"
+
+[external_paths]
+personal-documents = "/home/me/Syncthing/agent-documents"
+
+[roots]
+agent = "/home/me/.codex"
