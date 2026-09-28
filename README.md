@@ -242,6 +242,9 @@ Apply reports the registered hook and tells you to open `/hooks` in the next Cod
 AEM never grants hook trust, changes Codex feature flags, or claims that a registered hook has run.
 New or changed hooks need Codex trust review; existing approvals are owned by Codex.
 The hook matches session startup, resume, clear, and compaction, with a 10-second timeout.
+Instruction callbacks retry a busy configuration lock for up to 5 seconds so brief overlap with other callbacks or commands does not stop the session.
+If the lock remains busy, or instruction lookup fails, the callback still requests a structured stop; retry after the running AEM command finishes.
+Do not delete the lock file: the operating system releases the lock when its owning process exits.
 See the [official Codex hook documentation](https://learn.chatgpt.com/docs/hooks) for discovery, trust, and event behavior.
 Keep the installation's Python environment, AEM package, machine file, and state available to the hook.
 `aem --config <machine-file> locate personal` remains available for manual diagnostics.

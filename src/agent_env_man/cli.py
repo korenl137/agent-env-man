@@ -235,7 +235,11 @@ def main(argv=None):
         if hasattr(args, "timeout") and (not math.isfinite(args.timeout) or args.timeout <= 0):
             raise Error("--timeout must be positive and finite")
         config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
-        with (nullcontext() if args.command == "setup" and args.dry_run else lock(config.state_dir)):
+        # SessionStart callbacks can overlap each other or startup updates.
+        # Leave time for lookup/output within the installed 10-second hook limit.
+        lock_timeout = 5 if args.command in ("codex-hook", "agent-hook") else 0
+        with (nullcontext() if args.command == "setup" and args.dry_run
+              else lock(config.state_dir, timeout=lock_timeout)):
             # Read again under the lock: another process may just have registered a source.
             config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
             state = State(config.state_dir)

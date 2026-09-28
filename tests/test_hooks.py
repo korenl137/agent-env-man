@@ -1,6 +1,7 @@
 """Offline Codex hook installation preserves other hooks and never grants trust."""
 
 import base64
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ from unittest.mock import patch
 from agent_env_man import hooks
 from agent_env_man.manager import Manager
 from agent_env_man.model import Config
-from agent_env_man.storage import State
+from agent_env_man.storage import State, lock
 from test_instructions import InstructionFixture
 
 
@@ -134,6 +135,48 @@ class HookInstallation(InstructionFixture):
         result = self.run_cli("codex-hook", "personal")
         self.assertIs(result["continue"], False)
         self.assertIn("recover", result["stopReason"])
+
+    def test_instruction_callbacks_retry_contention_and_read_state_after_acquiring(self):
+        self.configure()
+        self.run_cli("apply")
+        directory = Config(self.config).state_dir
+        for command in (("codex-hook",), ("agent-hook", "--agent", "codex")):
+            for pending in (False, True):
+                with self.subTest(command=command, pending=pending), ExitStack() as holder:
+                    state = State(directory)
+                    state.data["pending"] = None
+                    state.save()
+                    holder.enter_context(lock(directory))
+
+                    def finish_writer(_delay):
+                        if pending:
+                            state.data["pending"] = {"example": "interrupted transaction"}
+                            state.save()
+                        holder.close()
+
+                    with patch("agent_env_man.storage.time.sleep", side_effect=finish_writer) as retry:
+                        result = self.run_cli(*command, "personal")
+                    retry.assert_called_once()
+                    if pending:
+                        self.assertIs(result["continue"], False)
+                        self.assertIn("recover", result["stopReason"])
+                    else:
+                        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+
+    def test_instruction_callbacks_stop_when_contention_outlasts_wait_budget(self):
+        self.configure()
+        self.run_cli("apply")
+        directory = Config(self.config).state_dir
+        before = (directory / "state.json").read_bytes()
+        for command in (("codex-hook",), ("agent-hook", "--agent", "codex")):
+            with self.subTest(command=command), lock(directory):
+                with patch("agent_env_man.storage.time.monotonic", side_effect=[0, 0, 5]), \
+                        patch("agent_env_man.storage.time.sleep") as retry:
+                    result = self.run_cli(*command, "personal")
+                retry.assert_called_once()
+                self.assertIs(result["continue"], False)
+                self.assertIn("holds this config's lock", result["stopReason"])
+        self.assertEqual((directory / "state.json").read_bytes(), before)
 
     def test_hook_transaction_failure_restores_existing_hooks_and_can_retry(self):
         self.configure()
