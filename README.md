@@ -46,6 +46,78 @@ Examples below use `aem`; activate the environment or use the full executable pa
 Configure Git credentials separately; network commands cannot prompt for authentication.
 SSH uses OpenSSH batch mode.
 
+## Set up this machine
+
+With Python 3.11+, Git, and [uv](https://docs.astral.sh/uv/) available, run from this checkout:
+
+```bash
+python scripts/setup.py --shell bash --agent codex
+```
+
+On Windows use `py -3 scripts/setup.py --shell powershell --agent codex`.
+The script installs the checkout using `uv tool install --reinstall` in a user-level isolated environment, then connects the selected startup hooks.
+It uses a regular installation, so moving the checkout does not break the installed tool.
+It does not install uv, configure Git credentials, register a catalog, clone skills, or run apply.
+Continue with `aem bootstrap /path/to/catalog.toml` and `aem apply` after setup.
+A machine file binds one catalog at a time; registering a different catalog replaces that binding, rather than adding another inventory.
+Combine declarations in one catalog or use separate `--config` files.
+
+Repeat `--shell` and `--agent` to select multiple integrations.
+Bash, Zsh, PowerShell, and Codex are the built-in integrations; other agents are extension points, not supported products yet.
+Selections accumulate across runs, and omitted selections remain configured.
+Running the same setup again preserves existing hooks without duplication.
+The installer refreshes the installed AEM package on each run; to change connections without reinstalling, use:
+
+```bash
+aem setup --shell zsh
+aem setup --remove-shell bash
+aem setup --remove-agent codex
+```
+
+Removing an agent requires detaching its managed content first.
+Removal touches only the recorded startup connection; detached instruction hooks and preserved content remain available.
+Use `uv tool uninstall agent-env-man` only after removing startup connections if you also want to uninstall AEM.
+
+Use `--config PATH` before the `aem` subcommand, or as an argument to the installer, for a separate machine configuration.
+`python scripts/setup.py --dry-run --shell bash --agent codex` prints the installation and configuration commands without installing anything.
+If AEM is already installed, it also invokes the setup preview; otherwise the detailed file preview becomes available after installation through `aem setup --dry-run`.
+Setup previews do not write profiles, machine configuration, ownership records, or lock files.
+
+Setup manages an identified block in `.bashrc`, `$ZDOTDIR/.zshrc` (or `~/.zshrc`), or PowerShell's `$PROFILE.CurrentUserAllHosts` as reported by `pwsh` or `powershell.exe`.
+The block adds the tool executable directory to PATH once and invokes a startup callback for interactive shells.
+Open a new selected shell to use the updated PATH.
+Callbacks use absolute executable/interpreter and machine paths, so agent startup does not depend on shell PATH setup.
+PowerShell discovery prefers `pwsh` when both editions are installed; native Windows and actual Zsh/PowerShell execution need platform-specific validation.
+
+Existing user settings, newline style, and permissions are preserved.
+Locally edited or duplicate AEM blocks, invalid JSON, and redirected profile files stop setup before profile writes.
+Per-target backups and the recovery journal are shared with normal installation; after resolving an error, rerun setup with the same selections.
+Completed steps are retained; this is not a transaction across every profile and the machine file.
+
+### Agent destinations
+
+Setup saves agent paths in machine-local `[agents.codex]` settings (`root` and `skills`).
+Existing `roots.agent` and `roots.skills` are retained when introducing Codex setup to a legacy configuration.
+Without explicit agent selections, existing configurations continue to use the legacy Codex behavior.
+
+Catalog skills that omit `root` deploy to the selected agents' skill directories.
+Instruction bundles may omit `entry_root` and `entry_destination` to use each selected agent's entry location and filename:
+
+```toml
+[instructions.personal]
+repo = "personal"
+entry = "AGENTS.md"
+```
+
+Keep the corresponding `[repositories.personal]` declaration in the same catalog.
+Explicit catalog destinations retain their existing meaning.
+Prepared repositories and update clocks are shared, while separate installation paths retain independent ownership and detach state.
+If agents share the same skill destination, AEM installs it once; detaching that shared target releases all consumers and requires omitting `--agent`.
+
+Use `apply --agent codex`, `status --agent codex`, or `detach --agent codex ITEM` to narrow the deployment target.
+Unqualified item selections include all deployments; added agents use `@AGENT` suffixes for concrete ownership keys, while existing Codex keys remain unchanged.
+Changing an installed destination still requires detach before relocation.
+
 ## Write a local skill inventory
 
 Create a `skills.toml` outside managed checkout storage:
@@ -156,7 +228,8 @@ Bootstrap prepares Git checkouts and validates external bundles without installi
 `apply --item personal:entry` includes the bundle and its hook; plain `apply` installs all declared items.
 AEM links the original entry directly at the global AGENTS.md destination, leaving its text unchanged.
 It merges one SessionStart group into the configured Codex home's `hooks.json`, preserving unrelated hooks and metadata.
-Each Codex home can have one AEM instruction bundle per machine configuration; overlapping hook-file ownership is rejected.
+Bundles with distinct entry destinations can share a hook file.
+AEM merges their groups in one file transaction while keeping ownership per group; overlapping entry destinations are still rejected.
 Existing global entries still require explicit `--adopt` or `--replace`, and automatic dependency selection never authorizes replacing an existing bundle directory.
 
 The hook invokes AEM's `codex-hook personal` callback with an absolute interpreter and machine config path.
@@ -376,7 +449,8 @@ Legacy sources remain managed through those explicit commands; `auto` selects ca
 ## Connect triggers
 
 A trigger is an event supplied by a caller, not a background service started by TOML.
-Connect the event you configured to the corresponding command:
+Use the machine setup above to connect shell and agent startup events automatically.
+For manually managed integrations, the underlying commands remain:
 
 | Caller | Command |
 | --- | --- |
@@ -396,6 +470,11 @@ Use the installed executable's absolute path and `--config` in hooks or schedule
 For Windows PowerShell, the invocation can be `& 'C:\path\to\aem.exe' --config 'C:\path\to\machine.toml' auto --trigger shell-start`.
 Configure an agent hook to call the `agent-start` command using that agent's supported mechanism and allow startup to continue if updating fails.
 Automatic update policies do not write hook files, shell profiles, or scheduler registrations.
+Only explicit setup installs startup connections; registering or applying a catalog does not.
+Setup callbacks call `startup`, a fail-open wrapper around the same automatic policy runner.
+With no bound catalog they do no update work; otherwise outcomes and catalog errors appear in `status` under `startup`.
+Failures that prevent acquiring the configuration lock or reading configuration are reported on stderr, and startup still continues.
+The callbacks are synchronous, share the policy throttle, and never grant hook trust.
 The instruction-root SessionStart hook installed by `apply` is separate and never triggers an update.
 For periodic updates, set `trigger = "interval"`, choose `min_interval`, and arrange recurring invocations; the manager checks what is due on each invocation and does not wait or launch a daemon.
 Calls are synchronous, and the configuration lock prevents concurrent manager operations against the same state.

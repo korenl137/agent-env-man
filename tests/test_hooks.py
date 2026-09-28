@@ -173,15 +173,30 @@ class HookInstallation(InstructionFixture):
         self.run_cli("apply", "--item", "personal:entry", "--replace", code=1)
         self.assertEqual((target / "local.txt").read_text(), "Keep")
 
-    def test_other_bundle_cannot_share_owned_hook_file(self):
+    def test_other_bundle_shares_one_hook_file_transaction(self):
         self.configure()
         import tomlkit
         doc = tomlkit.parse(self.catalog.read_text())
         doc["instructions"]["other"] = dict(doc["instructions"]["personal"],
             destination="other", entry_destination="OTHER.md")
         self.catalog.write_text(tomlkit.dumps(doc))
-        self.run_cli("apply", code=1)
+        original = os.replace
+        def fail_hook(src, dst):
+            if Path(src).name.startswith(".aem-stage-") and Path(dst) == self.hook_file():
+                raise OSError("Grouped hook failure")
+            return original(src, dst)
+        with patch("agent_env_man.manager.os.replace", side_effect=fail_hook):
+            self.run_cli("apply", code=1)
+        state = State(Config(self.config).state_dir).data
+        self.assertIsNone(state["pending"])
+        self.assertNotIn("personal:hook", state["items"])
+        self.assertNotIn("other:hook", state["items"])
         self.assertFalse(self.hook_file().exists())
+        self.run_cli("apply")
+        before = self.hook_file().read_bytes()
+        self.assertEqual(len(json.loads(before)["hooks"]["SessionStart"]), 2)
+        self.run_cli("apply")
+        self.assertEqual(self.hook_file().read_bytes(), before)
 
     def test_windows_command_encodes_literal_arguments(self):
         # Verify platform-independent encoding without claiming a Windows run.

@@ -96,7 +96,8 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
         current = time.time()
         if trigger not in policy["trigger"]:
             entry["status"] = "not-triggered"
-        elif manager.state.data["items"].get(name, {}).get("detached"):
+        elif all(manager.state.data["items"].get(item.key, {}).get("detached")
+                 for item in manager.config.declarations(sources[name])):
             entry["status"] = "detached"
         elif "last_attempt" in previous and current - previous["last_attempt"] < policy["min_interval"]:
             entry["status"] = "throttled"

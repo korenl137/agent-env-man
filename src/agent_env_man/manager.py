@@ -1,6 +1,6 @@
 """Explicit ownership and per-target transactions; delivery lives elsewhere."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 import os
 from pathlib import Path
 import shutil
@@ -9,7 +9,7 @@ import stat
 import tempfile
 import uuid
 
-from . import codex, hooks
+from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, Error, Item, identifier, overlaps, relative
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove
@@ -23,6 +23,8 @@ class Plan:
     change: bool
     content: bytes | None = None
     materialize: Path | None = None
+    records: dict = field(default_factory=dict)
+    peers: list = field(default_factory=list)
 
 
 class Manager:
@@ -135,14 +137,22 @@ class Manager:
             result.extend(self.config.declarations(source))
         return result
 
-    def selected(self, requested=(), *, reattach=False):
+    @staticmethod
+    def matches(item, requested):
+        logical = item.source_name if item.kind == "skill" else f"{item.source_name}:{item.id.split('@')[0]}"
+        return item.key in requested or logical in requested
+
+    def selected(self, requested=(), *, reattach=False, agent=None):
         all_items = self.items()
         # Entry installation includes its directory and hook; selecting a hook
         # likewise needs a usable entry. Flags still require explicit selection.
         requested = set(requested)
+        expanded = {i.key for i in all_items if self.matches(i, requested)}
+        logical = {i.source_name if i.kind == "skill" else f"{i.source_name}:{i.id.split('@')[0]}" for i in all_items}
+        requested = expanded | (requested - logical - {i.key for i in all_items})
         for item in all_items:
             if item.key in requested and item.kind in ("instruction-entry", "instruction-hook"):
-                requested.update(f"{item.source_name}:{part}" for part in ("bundle", "entry", "hook"))
+                requested.update(f"{item.source_name}:{part}{suffix(item.agent)}" for part in ("bundle", "entry", "hook"))
         registered = {f"{s.name}:{i}" for s in self.config.sources.values() for i in s.items}
         registered.update(i.key for i in all_items if i.kind == "skill")
         available = {i.key for i in all_items}
@@ -159,6 +169,9 @@ class Manager:
         items = [i for i in all_items if i.key in registered and (not requested or i.key in requested)]
         items = [i for i in items if reattach or not self.state.data["items"].get(i.key, {}).get("detached")]
         self.check_destinations([i for i in all_items if i.key in registered and i.key not in detached])
+        if agent is not None:
+            profile(agent)
+            items = [i for i in items if agent in (i.agents or (i.agent,))]
         self.check_destinations(items)
         return items
 
@@ -172,6 +185,13 @@ class Manager:
                 raise Error(f"{item.key}: path or mode changed; detach before reconfiguration")
             for key, target in owners.items():
                 if key != item.key and overlaps(item.target, target):
+                    other = next((i for i in items if i.key == key), None)
+                    old_other = self.state.data["items"].get(key, {})
+                    if (item.target == target and item.mode in ("codex-hook", "agent-hook")
+                            and ((other and other.mode in ("codex-hook", "agent-hook") and other.agent == item.agent)
+                                 or (old_other.get("mode") in ("codex-hook", "agent-hook")
+                                     and old_other.get("agent", "codex") == item.agent))):
+                        continue
                     raise Error(f"Overlapping targets: {item.key} and {key}")
             owners[item.key] = item.target
 
@@ -192,14 +212,14 @@ class Manager:
             raise Error(f"{item.key}: instruction entry must be a regular file")
         return fingerprint(item.source, exclude_git=item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".")
 
-    def locate(self, name):
+    def locate(self, name, agent="codex"):
         """Resolve a saved installation without loading its catalog or fetching sources.
 
         Detached bundles resolve to their preserved directory; active bundles
         must still have the recorded link so an unrelated replacement is not read.
         """
         self.state.ready()
-        key = f"{identifier(name)}:bundle"
+        key = f"{identifier(name)}:bundle{suffix(agent)}"
         record = self.state.data["items"].get(key)
         if not record or record.get("kind") != "instruction":
             raise Error(f"{name}: instruction bundle has not been installed")
@@ -232,10 +252,10 @@ class Manager:
                 and old.get("entry") == item.entry
                 and str(Path(old["source"]) / item.entry) == str(item.source))
 
-    def hook_context(self, name):
+    def hook_context(self, name, agent="codex"):
         """Return location metadata only; personal instruction text stays in AGENTS.md."""
-        found = self.locate(name)
-        record = self.state.data["items"].get(f"{name}:entry")
+        found = self.locate(name, agent)
+        record = self.state.data["items"].get(f"{name}:entry{suffix(agent)}")
         if not record or record.get("kind") != "instruction-entry" or record["mode"] != "link":
             raise Error(f"{name}: original instruction entry link is not installed")
         target = Path(record["target"])
@@ -269,7 +289,7 @@ class Manager:
                    + "\nFor relative document references in this global entry, use the original entry's "
                    "directory as the base unless the user documents specify another base. "
                    "Follow those documents for applicability and reading order.")
-        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
+        return profile(agent).context(context)
 
     def plan(self, item, *, adopt=False, replace=False, reattach=False):
         payload_hash = self.payload(item)
@@ -278,18 +298,18 @@ class Manager:
         if old and old.get("detached"):
             if not reattach:
                 raise Error(f"{item.key}: detached; use --reattach")
-            if item.mode != "codex-hook":
+            if item.mode not in ("codex-hook", "agent-hook"):
                 old = None
         record = {"source_name": item.source_name, "relative": item.relative, "source": str(item.source),
                   "id": item.id,
                   "target": str(item.target), "mode": item.mode, "hash": payload_hash,
                   "directory": item.source.is_dir(), "detached": False, "kind": item.kind,
                   "exclude_git": item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".",
-                  "entry": item.entry}
+                  "entry": item.entry, "agent": item.agent, "agents": list(item.agents or (item.agent,))}
         present = before["kind"] != "missing"
-        if item.mode == "codex-hook":
-            marker, group = hooks.definition(self.config.path, item.source_name)
-            content = hooks.render(item.target, marker, group, old, adopt=adopt, replace=replace)
+        if item.mode in ("codex-hook", "agent-hook"):
+            marker, group = profile(item.agent).definition(self.config.path, item.source_name)
+            content = profile(item.agent).render(item.target, marker, group, old, adopt=adopt, replace=replace)
             record.update(hook_marker=marker, hook_group=group)
             changed = not present or item.target.read_bytes() != content
             return Plan(item, before, record, changed, content=content)
@@ -315,22 +335,23 @@ class Manager:
             if not safe and not replace:
                 raise Error(f"{item.key}: existing or locally modified copy; use explicit --adopt or --replace")
             return Plan(item, before, record, not desired)
-        desired = codex.declarations(item.source)
-        document = codex.read(item.target)
+        merger = profile(item.agent).merger(item.mode)
+        desired = merger.declarations(item.source)
+        document = merger.read(item.target)
         baseline = old.get("values", {}) if old else {}
         if set(baseline) - set(desired):
             raise Error(f"{item.key}: managed keys were removed; detach before changing the owned key set")
         for path, value in desired.items():
-            found, current = codex.get(document, path)
+            found, current = merger.get(document, path)
             if path in baseline:
-                safe = found and (codex.equal(current, baseline[path]) or codex.equal(current, value))
+                safe = found and (merger.equal(current, baseline[path]) or merger.equal(current, value))
                 # A missing file can be re-created; a removed key in a present file is a local edit.
                 safe = safe or not present
             else:
-                safe = not found or (adopt and codex.equal(current, value))
+                safe = not found or (adopt and merger.equal(current, value))
             if not safe and not replace:
                 raise Error(f"{item.key}: unmanaged or locally modified key {path}; use explicit --adopt or --replace")
-        content = codex.render(document, desired)
+        content = merger.render(document, desired)
         record["values"] = desired
         changed = not present or item.target.read_bytes() != content
         return Plan(item, before, record, changed, content=content)
@@ -341,10 +362,13 @@ class Manager:
             raise Error(f"{item.key}: target ancestry changed after preflight")
         if observation(item.target) != plan.before:
             raise Error(f"{item.key}: target changed after preflight")
-        if plan.materialize is None and self.payload(item) != plan.record["hash"]:
+        if plan.materialize is None and item.kind != "setup" and self.payload(item) != plan.record["hash"]:
             raise Error(f"{item.key}: source changed after preflight")
+        for peer in plan.peers:
+            if self.payload(peer.item) != peer.record["hash"]:
+                raise Error(f"{peer.item.key}: source changed after preflight")
         if not plan.change:
-            self.state.data["items"][item.key] = plan.record
+            self.state.data["items"].update({item.key: plan.record, **plan.records})
             self.state.save()
             return
         item.target.parent.mkdir(parents=True, exist_ok=True)
@@ -387,16 +411,13 @@ class Manager:
             os.replace(stage, item.target)
             if observation(item.target) != after:
                 raise Error(f"{item.key}: installed target changed before commit")
-            old_record = self.state.data["items"].get(item.key)
-            self.state.data["items"][item.key] = plan.record
+            old_records = dict(self.state.data["items"])
+            self.state.data["items"].update({item.key: plan.record, **plan.records})
             self.state.data["pending"] = None
             try:
                 self.state.save()
             except Exception:
-                if old_record is None:
-                    self.state.data["items"].pop(item.key, None)
-                else:
-                    self.state.data["items"][item.key] = old_record
+                self.state.data["items"] = old_records
                 # Reload the durable journal for recovery after a failed commit.
                 self.state.data["pending"] = State(self.config.state_dir).data["pending"]
                 raise
@@ -434,11 +455,11 @@ class Manager:
         self.state.data["pending"] = None
         self.state.save()
 
-    def apply(self, requested=(), *, adopt=False, replace=False, reattach=False, dry_run=False, timeout=30):
+    def apply(self, requested=(), *, adopt=False, replace=False, reattach=False, dry_run=False, timeout=30, agent=None):
         self.state.ready()
         if (adopt or replace) and not requested:
             raise Error("--adopt and --replace require explicit --item selections")
-        items = self.selected(requested, reattach=reattach)
+        items = self.selected(requested, reattach=reattach, agent=agent)
         revisions = {}
         for name in {i.source_name for i in items}:
             source = self.config.sources[name]
@@ -455,31 +476,72 @@ class Manager:
                     else:
                         git.tracked_payload(source, item.relative)
         def explicit(item):
-            return item.key in requested or (item.kind == "instruction-hook"
-                                              and f"{item.source_name}:entry" in requested)
+            return self.matches(item, requested) or (item.kind == "instruction-hook" and
+                (f"{item.source_name}:entry" in requested or f"{item.source_name}:entry{suffix(item.agent)}" in requested))
         plans = [self.plan(i, adopt=adopt and explicit(i), replace=replace and explicit(i), reattach=reattach)
                  for i in items]
         for plan in plans:
             plan.record["revision"] = revisions.get(plan.item.source_name)
         report = [{"item": p.item.key, "action": "install" if p.change else "record", "target": str(p.item.target)} for p in plans]
         for entry, plan in zip(report, plans):
-            if plan.item.mode == "codex-hook":
+            if plan.item.mode in ("codex-hook", "agent-hook"):
                 entry.update(hook="would-register" if dry_run and plan.change else "registered" if plan.change else "unchanged",
-                             trust="not-managed-by-aem", notice=hooks.TRUST_NOTICE,
+                             trust="not-managed-by-aem", notice=profile(plan.item.agent).notice,
                              hook_group=plan.record["hook_group"])
+        grouped = self.group_hooks(plans)
         if not dry_run:
-            for plan in plans:
+            for plan in grouped:
                 self.install(plan)
         return report
 
-    def detach(self, keys, *, dry_run=False):
+    def group_hooks(self, plans):
+        """Preflight each group, but commit one replacement per hook file."""
+        grouped = {}
+        result = []
+        for plan in plans:
+            if plan.item.mode not in ("codex-hook", "agent-hook"):
+                result.append(plan)
+                continue
+            grouped.setdefault(plan.item.target, []).append(plan)
+        for target, group in grouped.items():
+            first = group[0]
+            if len(group) > 1:
+                with tempfile.TemporaryDirectory() as directory:
+                    shadow = Path(directory) / "hooks.json"
+                    if exists(target):
+                        shadow.write_bytes(target.read_bytes())
+                    for plan in group:
+                        old = self.state.data["items"].get(plan.item.key)
+                        shadow.write_bytes(profile(plan.item.agent).render(shadow, plan.record["hook_marker"],
+                                           plan.record["hook_group"], old, adopt=True, replace=True))
+                    first.content = shadow.read_bytes()
+                first.change = not exists(target) or first.content != target.read_bytes()
+                first.records = {p.item.key: p.record for p in group[1:]}
+                first.peers = group[1:]
+            result.append(first)
+        return result
+
+    def detach(self, keys, *, dry_run=False, agent=None):
         self.state.ready()
-        keys = list(dict.fromkeys(keys))
+        requested = set(keys)
+        records = self.state.data["items"]
+        def logical(key, record):
+            return record.get("source_name") if record.get("kind") == "skill" else key.split('@')[0]
+        expanded = [k for k, r in records.items() if k in requested or logical(k, r) in requested]
+        unknown = requested - records.keys() - {logical(k, r) for k, r in records.items()}
+        if unknown:
+            raise Error(f"Not a managed item: {sorted(unknown)}")
+        keys = [k for k in expanded if agent is None or agent in records[k].get("agents", [records[k].get("agent", "codex")])]
+        if agent:
+            profile(agent)
+            for key in keys:
+                if len(records[key].get("agents", [])) > 1:
+                    raise Error(f"{key}: shared target; detach without --agent to release all consumers")
         # Preserve the registered hook on detach, but release its ownership with
         # the entry. Saved bundle records let it locate materialized contents.
         for key in list(keys):
             old = self.state.data["items"].get(key, {})
-            hook_key = f"{old.get('source_name')}:hook"
+            hook_key = f"{old.get('source_name')}:hook{suffix(old.get('agent', 'codex'))}"
             if old.get("kind") == "instruction-entry" and hook_key in self.state.data["items"] and hook_key not in keys:
                 keys.append(hook_key)
         plans, untouched = [], []
@@ -497,7 +559,7 @@ class Manager:
                 if target.is_symlink():
                     content = target.resolve(strict=True)
                     record["hash"] = fingerprint(content, exclude_git=old.get("exclude_git", False))
-                    item = Item(old["source_name"], old.get("id", key.split(":")[-1]), old["relative"], Path(old["source"]), target, "link", old.get("kind", "payload"))
+                    item = Item(old["source_name"], old.get("id", key.split(":")[-1]), old["relative"], Path(old["source"]), target, "link", old.get("kind", "payload"), agent=old.get("agent", "codex"))
                     plans.append(Plan(item, observation(target), record, True, materialize=content))
                 else:
                     # An editor may already have replaced the link. Keep its
@@ -566,11 +628,11 @@ class Manager:
             return "configuration-changed", None
         if current["kind"] == "missing":
             return "missing", None
-        if item.mode == "codex-hook":
-            marker, group = hooks.definition(self.config.path, item.source_name)
-            if hooks.current(item.target, marker, group):
+        if item.mode in ("codex-hook", "agent-hook"):
+            marker, group = profile(item.agent).definition(self.config.path, item.source_name)
+            if profile(item.agent).current(item.target, marker, group):
                 return "current", None
-            return ("stale" if hooks.current(item.target, old["hook_marker"], old["hook_group"])
+            return ("stale" if profile(item.agent).current(item.target, old["hook_marker"], old["hook_group"])
                     else "modified-locally"), None
         if item.mode == "link":
             good = current == {"kind": "link", "to": str(item.source)}
@@ -584,28 +646,31 @@ class Manager:
             if actual == old["hash"]:
                 return "stale", None
             return ("conflict" if desired != old["hash"] else "modified-locally"), None
-        values, baseline = codex.declarations(item.source), old["values"]
+        merger = profile(item.agent).merger(item.mode)
+        values, baseline = merger.declarations(item.source), old["values"]
         if set(baseline) - set(values):
             return "ownership-change", None
-        document = codex.read(item.target)
+        document = merger.read(item.target)
         statuses = []
         for path, value in values.items():
-            found, actual = codex.get(document, path)
+            found, actual = merger.get(document, path)
             if path not in baseline:
                 statuses.append("conflict" if found else "stale")
-            elif found and codex.equal(actual, value):
+            elif found and merger.equal(actual, value):
                 statuses.append("current")
-            elif found and codex.equal(actual, baseline[path]):
+            elif found and merger.equal(actual, baseline[path]):
                 statuses.append("stale")
             else:
-                statuses.append("modified-locally" if codex.equal(value, baseline[path]) else "conflict")
+                statuses.append("modified-locally" if merger.equal(value, baseline[path]) else "conflict")
         for status in ("conflict", "modified-locally", "stale"):
             if status in statuses:
                 return status, None
         return "current", None
 
-    def status(self, *, refresh=False, timeout=30):
+    def status(self, *, refresh=False, timeout=30, agent=None):
         report = {"sources": [], "items": [], "pending": self.state.data.get("pending")}
+        if "startup" in self.state.data:
+            report["startup"] = self.state.data["startup"]
         try:
             sources = self.config.sources
         except Error as exc:
@@ -640,6 +705,8 @@ class Manager:
             try:
                 for item in self.config.declarations(source):
                     seen.add(item.key)
+                    if agent and agent not in (item.agents or (item.agent,)):
+                        continue
                     item_entry = {"item": item.key, "target": str(item.target), "mode": item.mode}
                     old = self.state.data["items"].get(item.key)
                     if old:
@@ -656,10 +723,12 @@ class Manager:
                 entry["error"] = str(exc)
             report["sources"].append(entry)
         for key, old in self.state.data["items"].items():
-            if key not in seen:
+            if old.get("mode") == "setup-config":
+                continue
+            if key not in seen and (agent is None or agent in old.get("agents", [old.get("agent", "codex")])):
                 report["items"].append({"item": key, "target": old["target"],
                                         "installation": self.installed_status(old),
-                                        "status": "detached" if old.get("detached") else "orphaned-or-source-unavailable"})
+                                        "status": "detached" if old.get("detached") else "setup" if old.get("kind") == "setup" else "orphaned-or-source-unavailable"})
         return report
 
     def installed_status(self, record):
@@ -677,15 +746,19 @@ class Manager:
                 return "linked" if target.exists() else "broken-link"
             if record["mode"] == "entry":
                 matches = actual["kind"] == "file" and target.read_bytes() == record["content"].encode("utf-8")
-            elif record["mode"] == "codex-hook":
-                matches = hooks.current(target, record["hook_marker"], record["hook_group"])
+            elif record["mode"] in ("codex-hook", "agent-hook"):
+                matches = profile(record.get("agent", "codex")).current(target, record["hook_marker"], record["hook_group"])
+            elif record.get("kind") == "setup":
+                block = record.get("block")
+                matches = bool(block) and target.read_bytes().decode("utf-8").count(block) == 1
             elif record["mode"] == "copy":
                 matches = actual.get("hash") == record["hash"]
             else:
-                document = codex.read(target)
-                matches = all(found and codex.equal(value, expected)
+                merger = profile(record.get("agent", "codex")).merger(record["mode"])
+                document = merger.read(target)
+                matches = all(found and merger.equal(value, expected)
                               for key, expected in record["values"].items()
-                              for found, value in [codex.get(document, key)])
+                              for found, value in [merger.get(document, key)])
             return "matches-last-apply" if matches else "modified-locally"
         except (Error, OSError, ValueError):
             return "unreadable"

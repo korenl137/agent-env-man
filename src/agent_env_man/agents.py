@@ -1,0 +1,89 @@
+"""Built-in agent capabilities injected at the machine boundary.
+
+Profiles own product syntax; the manager owns delivery and installation safety.
+The registry is intentionally internal, not a user-loadable plugin mechanism.
+"""
+from dataclasses import dataclass
+import os
+from pathlib import Path
+
+from . import hooks
+from .model import Error
+
+
+@dataclass(frozen=True)
+class Codex:
+    name: str = 'codex'
+    entry_name: str = 'AGENTS.md'
+    hook_name: str = 'hooks.json'
+    merge_mode: str = 'codex-merge'
+    notice: str = hooks.TRUST_NOTICE
+
+    def defaults(self):
+        return {'root': str(Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').expanduser().resolve()),
+                'skills': str(Path.home() / '.agents/skills')}
+
+    def merger(self, mode):
+        if mode != self.merge_mode:
+            raise Error(f"{self.name} does not support configuration mode {mode}")
+        from . import codex
+        return codex
+
+    def definition(self, config, name, *, startup=False):
+        if not startup and self.name == 'codex':
+            return hooks.definition(config, name)
+        identity = f'{self.name}:startup' if startup else f'{self.name}:{name}'
+        args = ['startup', '--trigger', 'agent-start', '--agent', self.name] if startup else ['agent-hook', name, '--agent', self.name]
+        marker = hooks.marker(config, identity, 'startup' if startup else 'instruction roots')
+        return marker, {'matcher': '^(startup|resume|clear|compact)$', 'hooks': [
+            {'type': 'command', 'command': hooks.command(config, args), 'timeout': 10,
+             'statusMessage': marker, 'additionalContextLimit': 1000}]}
+
+    def render(self, path, marker, group, old, **options):
+        return hooks.render(path, marker, group, old, **options)
+
+    def current(self, path, marker, group):
+        return hooks.current(path, marker, group)
+
+    def remove(self, path, record):
+        return hooks.remove(path, record)
+
+    def context(self, text):
+        return {'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': text}}
+
+    def failure(self, message):
+        return {'continue': False, 'stopReason': message, 'systemMessage': message}
+
+    def startup_result(self):
+        return {}
+
+
+PROFILES = {'codex': Codex()}
+
+
+def profile(name):
+    try:
+        return PROFILES[name]
+    except KeyError:
+        raise Error(f'Unsupported agent: {name}') from None
+
+
+def bindings(document):
+    values = document.get('agents', {})
+    if not isinstance(values, dict):
+        raise Error('Machine agents must be a table')
+    result = {}
+    for name, value in values.items():
+        adapter = profile(name)
+        if not isinstance(value, dict) or set(value) - {'root', 'skills'}:
+            raise Error(f'Invalid agent binding: {name}')
+        result[name] = {**adapter.defaults(), **value}
+        for path in result[name].values():
+            if not isinstance(path, str) or not Path(path).expanduser().is_absolute():
+                raise Error(f'Agent {name} paths must be absolute')
+    return result
+
+
+def suffix(name):
+    # Existing Codex ownership keys are public and must survive setup adoption.
+    return '' if name == 'codex' else '@' + name

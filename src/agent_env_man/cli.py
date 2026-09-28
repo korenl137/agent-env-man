@@ -1,18 +1,21 @@
 """Command boundaries, source registration, and optional trigger throttling."""
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import replace
 import json
 import math
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
 
 import tomlkit
 
+from .agents import PROFILES, profile
 from .git_source import Git, now
 from .manager import Manager
 from .model import Config, Error, absolute, default_config, identifier, overlaps, relative
@@ -131,8 +134,11 @@ def bootstrap_skills(config, state, args):
         if key in config.roots and config.roots[key] != Path(resolved):
             raise Error(f"Root {key} is already configured; detach before relocating installed skills")
         roots[key] = resolved
-    roots.setdefault("skills", str(Path.home() / ".agents/skills"))
-    roots.setdefault("agent", str(Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve()))
+        if key in ("agent", "skills") and "codex" in document.get("agents", {}):
+            document["agents"]["codex"]["root" if key == "agent" else "skills"] = resolved
+    defaults = next(iter(config.agents.values())) if config.agents else profile("codex").defaults()
+    roots.setdefault("skills", defaults["skills"])
+    roots.setdefault("agent", defaults["root"])
     external_names = set()
     for value in args.external:
         key, separator, location = value.partition("=")
@@ -161,6 +167,18 @@ def parser():
     result = argparse.ArgumentParser(prog="aem", description="Install skills and personal instruction bundles from an independent inventory")
     result.add_argument("--config", type=Path, default=default_config(), help="machine-local TOML file")
     commands = result.add_subparsers(dest="command", required=True)
+    setup_parser = commands.add_parser("setup", help="connect selected shells and agents; never bootstrap or apply")
+    for flag, choices in (("shell", ("bash", "zsh", "powershell")), ("agent", tuple(PROFILES))):
+        setup_parser.add_argument("--" + flag, action="append", default=[], choices=choices)
+        setup_parser.add_argument("--remove-" + flag, action="append", default=[], choices=choices)
+    setup_parser.add_argument("--executable", help="absolute installed aem executable")
+    setup_parser.add_argument("--dry-run", action="store_true")
+    startup = commands.add_parser("startup", help="fail-open startup callback; policies still select the work")
+    startup.add_argument("--trigger", required=True, choices=TRIGGERS)
+    startup.add_argument("--agent", choices=tuple(PROFILES))
+    agent_hook = commands.add_parser("agent-hook", help="emit agent-specific instruction location context")
+    agent_hook.add_argument("name")
+    agent_hook.add_argument("--agent", required=True, choices=tuple(PROFILES))
     boot = commands.add_parser("bootstrap", help="prepare Git skills and Git/external instruction bundles; never install targets")
     boot.add_argument("name", nargs="?", metavar="CATALOG", help="local catalog path, or legacy source name when using --path")
     boot.add_argument("--catalog", type=Path, help="local inventory of skills, instruction bundles, and sources")
@@ -179,6 +197,7 @@ def parser():
     update.add_argument("--timeout", type=float, default=30)
     for name in ("apply", "sync"):
         command = commands.add_parser(name, help="install registered local items" if name == "apply" else "update, then apply only if all updates succeed")
+        command.add_argument("--agent", choices=tuple(PROFILES))
         command.add_argument("--item", action="append", default=[], metavar="NAME")
         command.add_argument("--timeout", type=float, default=30)
         if name == "apply":
@@ -194,12 +213,15 @@ def parser():
     auto.add_argument("--item", action="append", default=[], metavar="NAME")
     auto.add_argument("--dry-run", action="store_true", help="show effective policies and due skills without fetching")
     status = commands.add_parser("status", help="inspect local state; network is opt-in")
+    status.add_argument("--agent", choices=tuple(PROFILES))
     status.add_argument("--refresh", action="store_true")
     status.add_argument("--timeout", type=float, default=30)
     detach = commands.add_parser("detach", help="preserve current contents and release ownership")
+    detach.add_argument("--agent", choices=tuple(PROFILES))
     detach.add_argument("item", nargs="+", metavar="NAME")
     detach.add_argument("--dry-run", action="store_true")
     locate = commands.add_parser("locate", help="resolve an installed instruction bundle root and entry as JSON without fetching")
+    locate.add_argument("--agent", default="codex", choices=tuple(PROFILES))
     locate.add_argument("name", help="instruction bundle name")
     hook = commands.add_parser("codex-hook", help="emit Codex SessionStart location context from saved installation state")
     hook.add_argument("name", help="instruction bundle name")
@@ -212,14 +234,25 @@ def main(argv=None):
     try:
         if hasattr(args, "timeout") and (not math.isfinite(args.timeout) or args.timeout <= 0):
             raise Error("--timeout must be positive and finite")
-        config = Config(args.config, missing_ok=args.command == "bootstrap")
-        with lock(config.state_dir):
+        config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
+        with (nullcontext() if args.command == "setup" and args.dry_run else lock(config.state_dir)):
             # Read again under the lock: another process may just have registered a source.
-            config = Config(args.config, missing_ok=args.command == "bootstrap")
+            config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
             state = State(config.state_dir)
             manager = Manager(config, state)
             failed = False
-            if args.command == "bootstrap":
+            if args.command == "setup":
+                from .setup import setup
+                report = setup(manager, args)
+            elif args.command == "startup":
+                try:
+                    outcomes, failed = run_updates(manager, args.trigger)
+                    state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": failed, "outcomes": outcomes}
+                except (Error, OSError, ValueError) as exc:
+                    state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": True, "error": str(exc)}
+                state.save()
+                report, failed = (profile(args.agent).startup_result() if args.agent else {}), False
+            elif args.command == "bootstrap":
                 if args.path:
                     if not args.name or args.catalog or args.checkout_root or args.external:
                         raise Error("Legacy bootstrap needs NAME --path PATH and cannot use catalog options")
@@ -230,17 +263,17 @@ def main(argv=None):
                 report, failed = manager.update(args.source, timeout=args.timeout)
             elif args.command == "apply":
                 report = manager.apply(args.item, adopt=args.adopt, replace=args.replace,
-                                       reattach=args.reattach, dry_run=args.dry_run, timeout=args.timeout)
+                                       reattach=args.reattach, dry_run=args.dry_run, timeout=args.timeout, agent=args.agent)
             elif args.command == "auto":
                 report, failed = run_updates(manager, args.trigger, args.item, dry_run=args.dry_run)
-            elif args.command == "codex-hook":
-                report = manager.hook_context(args.name)
+            elif args.command in ("codex-hook", "agent-hook"):
+                report = manager.hook_context(args.name, getattr(args, "agent", "codex"))
             elif args.command == "locate":
-                report = manager.locate(args.name)
+                report = manager.locate(args.name, args.agent)
             elif args.command == "status":
-                report = manager.status(refresh=args.refresh, timeout=args.timeout)
+                report = manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent)
             elif args.command == "detach":
-                report = manager.detach(args.item, dry_run=args.dry_run)
+                report = manager.detach(args.item, dry_run=args.dry_run, agent=args.agent)
             elif args.command == "recover":
                 manager.recover()
                 report = {"status": "recovered"}
@@ -257,17 +290,20 @@ def main(argv=None):
                     updates, failed = manager.update(timeout=args.timeout)
                     report = {"updates": updates, "apply": "skipped"}
                     if not failed:
-                        report["apply"] = manager.apply(args.item, timeout=args.timeout)
+                        report["apply"] = manager.apply(args.item, timeout=args.timeout, agent=args.agent)
             print(json.dumps(report, indent=2, ensure_ascii=True))
             return 1 if failed else 0
-    except (Error, OSError, ValueError) as exc:
-        if args.command == "codex-hook":
+    except (Error, OSError, ValueError, subprocess.SubprocessError) as exc:
+        if args.command in ("codex-hook", "agent-hook"):
             # A hook failure must be visible instead of silently omitting root
-            # context. Return Codex's structured stop request, not a plain error.
+            # context. Let the selected agent encode its structured stop request.
             message = f"AEM instruction root lookup failed: {exc}"
-            print(json.dumps({"continue": False, "stopReason": message, "systemMessage": message}))
+            print(json.dumps(profile(getattr(args, "agent", "codex")).failure(message)))
             return 0
         print(f"aem: {exc}", file=sys.stderr)
+        if args.command == "startup":
+            print(json.dumps(profile(args.agent).startup_result() if args.agent else {}))
+            return 0
         return 1
 
 

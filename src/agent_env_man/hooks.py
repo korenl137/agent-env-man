@@ -17,20 +17,27 @@ TRUST_NOTICE = ("Codex hook trust must be reviewed separately: in the next Codex
                 "AEM does not grant trust or enable disabled hooks.")
 
 
+def marker(config_path, identity, purpose):
+    digest = hashlib.sha256(f"{config_path}\0{identity}".encode()).hexdigest()[:20]
+    return f"AEM {purpose} [{digest}]"
+
+
+def command(config_path, arguments):
+    args = [sys.executable, "-m", "agent_env_man", "--config", str(config_path), *arguments]
+    result = ("& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
+              if os.name == "nt" else shlex.join(args))
+    if os.name == "nt":
+        encoded = base64.b64encode(result.encode("utf-16le")).decode("ascii")
+        return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + encoded
+    return result
+
+
 def definition(config_path: Path, name: str) -> tuple[str, dict]:
     """Use a stable marker for ownership and an absolute interpreter for runtime lookup."""
-    identity = hashlib.sha256(f"{config_path}\0{name}".encode()).hexdigest()[:20]
-    marker = f"AEM instruction roots [{identity}]"
-    args = [sys.executable, "-m", "agent_env_man", "--config", str(config_path), "codex-hook", name]
-    command = ("& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
-               if os.name == "nt" else shlex.join(args))
-    if os.name == "nt":
-        # Explicit PowerShell invocation avoids relying on Codex's outer shell.
-        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-        command = "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + encoded
-    return marker, {"matcher": "^(startup|resume|clear|compact)$", "hooks": [
-        {"type": "command", "command": command, "timeout": 10,
-         "statusMessage": marker, "additionalContextLimit": 1000}]}
+    identity = marker(config_path, name, "instruction roots")
+    return identity, {"matcher": "^(startup|resume|clear|compact)$", "hooks": [
+        {"type": "command", "command": command(config_path, ["codex-hook", name]), "timeout": 10,
+         "statusMessage": identity, "additionalContextLimit": 1000}]}
 
 
 def read(path: Path) -> dict:
@@ -94,3 +101,13 @@ def render(path: Path, marker: str, desired: dict, old: dict | None, *, adopt=Fa
     if exists(path) and read(path) == doc:
         return path.read_bytes()
     return (json.dumps(doc, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+
+
+def remove(path, record):
+    """Release just the recorded group; local edits require manual reconciliation."""
+    doc = read(path)
+    indices = matching(doc, record["hook_marker"])
+    if len(indices) != 1 or doc["hooks"]["SessionStart"][indices[0]] != record["hook_group"]:
+        raise Error("Managed hook changed or disappeared; reconcile before removal")
+    del doc["hooks"]["SessionStart"][indices[0]]
+    return (json.dumps(doc, indent=2, ensure_ascii=True) + "\n").encode()

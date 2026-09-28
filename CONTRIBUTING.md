@@ -65,7 +65,7 @@ Do not parse document policy, applicability, or reading order.
 A Codex instruction bundle owns a directory link, a direct original-entry link, and one SessionStart group in the entry root's hooks.json.
 Bootstrap only prepares and validates sources; apply installs links and merges the hook without granting Codex trust or modifying config.toml.
 Preserve unrelated JSON events, groups and metadata; malformed or redirected hook files must fail preflight.
-Own the complete AEM group identified by its saved marker, not the whole hooks file, while retaining one hook item per target file to avoid competing transactions.
+Own the complete AEM group identified by its saved marker, not the whole hooks file, and aggregate selected groups into one replacement per target file to avoid competing transactions.
 Entry selection includes bundle and hook installation, but never extends replacement permission to an implicitly selected bundle.
 Report the required /hooks trust review after apply; preview must show the planned group without registering it.
 Detach materializes both links and releases hook ownership while retaining its configuration, so saved locator records still support preserved documents.
@@ -134,4 +134,29 @@ Changes to installation must exercise unmanaged targets, local edits, directory 
 Policy changes must cover precedence, manual opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 Keep command contracts, examples, and platform limitations in the README aligned with behavior.
-Do not add an application-specific adapter framework or additional source providers without a demonstrated use case.
+Agent profiles are the internal extension boundary for paths, hook syntax, callback output, notices, and supported config merge operations.
+Do not add a dynamic plugin loader or additional source providers without a demonstrated use case.
+
+## Machine setup and agent integration
+
+The repository installer uses uv to install this checkout as a user tool, then delegates integration to `aem setup`.
+Keep the installer standard-library-only; configuration and ownership logic belong in the package.
+Setup owns machine selection and startup registration, while bootstrap prepares content and apply installs it.
+Catalog update policies must never register hooks implicitly.
+
+Selections accumulate, and repeated setup must preserve unrelated content and avoid duplicate groups or blocks.
+Preflight all profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection last.
+A retry must recognize completed ownership records after a partial failure.
+Setup removal must not delete user content or silently detach installed skills and instructions.
+Do not grant agent hook trust or rewrite user execution policies.
+
+Resolve product-specific defaults, hook serialization, callback output, and merge capabilities through internal agent profiles.
+Codex remains the only shipped profile; use a fake profile to validate injection and multiple destinations without claiming support for another product.
+Preserve legacy Codex item identities and command aliases.
+Store per-target ownership and shared consumers independently from per-skill Git delivery and automatic attempt clocks.
+A shared target has one owner, and cannot be materialized for just one of its consumers.
+Explicit catalog roots retain their meaning; omitted destinations use selected agent defaults.
+
+Test setup with temporary homes and fake installer subprocesses, never actual user profiles or live remote repositories.
+Exercise repeat/add/remove, edited blocks, invalid hook files, redirected paths, grouped hook writes, partial failure/retry, offline previews, and fail-open startup.
+Shell quoting and PowerShell serialization tests do not establish native shell or Windows readiness.

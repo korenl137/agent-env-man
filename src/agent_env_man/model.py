@@ -72,6 +72,8 @@ class Item:
     mode: str
     kind: str = "payload"
     entry: str | None = None
+    agent: str = "codex"
+    agents: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -96,6 +98,14 @@ class Config:
         if not isinstance(self.doc.get("roots", {}), dict) or not isinstance(self.doc.get("sources", {}), dict):
             raise Error("roots and sources must be TOML tables")
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
+        from .agents import bindings
+        self.agents = bindings(self.doc)
+        for name, paths in self.agents.items():
+            for category, field in (("agent", "root"), ("skills", "skills")):
+                key, path = f"aem-{category}-{name}", absolute(paths[field])
+                if key in self.roots and self.roots[key] != path:
+                    raise Error(f"Root {key} conflicts with the agent binding")
+                self.roots[key] = path
         self.catalog_path = None
         self._catalog = None
         self._repositories = {}
@@ -203,7 +213,7 @@ class Config:
             if path != ".":
                 relative(path)
             root = data.get("root", "skills")
-            if not isinstance(root, str) or root not in self.roots:
+            if not isinstance(root, str) or (root not in self.roots and not ("root" not in data and self.agents)):
                 raise Error(f"Skill {name}: missing target root {root!r}")
             if data.get("mode", "link") not in ("link", "copy"):
                 raise Error(f"Skill {name}: expected link or copy mode")
@@ -233,11 +243,14 @@ class Config:
             if data.get("subdir", ".") != ".":
                 relative(data["subdir"])
             relative(data.get("entry"))
-            for field in (("root", "entry_root") if "root" in data else ("entry_root",)):
+            for field in (f for f in ("root", "entry_root") if f in data):
                 if not isinstance(data.get(field), str) or data[field] not in self.roots:
                     raise Error(f"Instruction {name}: missing target root {field}")
             relative(data.get("destination", name))
-            relative(data.get("entry_destination"))
+            if "entry_destination" in data:
+                relative(data["entry_destination"])
+            if "entry_root" not in data and not self.agents:
+                raise Error(f"Instruction {name}: missing target root entry_root")
         external_paths = {identifier(k): absolute(v) for k, v in bindings.items()}
         protected = [self.path, self.state_dir, self.checkout_root, *[s.path for s in self._legacy_sources.values()]]
         if self.catalog_path:
@@ -280,7 +293,7 @@ class Config:
         declarations = {**self.catalog(), **self._instructions}
         for name, data in declarations.items():
             if "external" in data:
-                result[name] = Source(name, self._external_paths[data["external"]], None, None, None, ("bundle", "entry", "hook"), {}, instruction=True)
+                result[name] = Source(name, self._external_paths[data["external"]], None, None, None, self.instruction_ids(data), {}, instruction=True)
                 continue
             shared = data.get("repo")
             settings = self._repositories[shared] if shared else data
@@ -290,31 +303,67 @@ class Config:
             path = self.checkout_root / ".aem-repositories" / shared if shared else self.checkout_root / name
             if path.resolve() != path:
                 raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
-            result[name] = Source(name, path, None, repository, settings.get("branch"), ("bundle", "entry", "hook") if name in self._instructions else (), {}, True, name in self._instructions)
+            result[name] = Source(name, path, None, repository, settings.get("branch"), self.instruction_ids(data) if name in self._instructions else (), {}, True, name in self._instructions)
         return result
 
+    def instruction_agents(self, data):
+        # Explicit legacy destinations remain single-target. Match their binding
+        # when possible, rather than interpreting one path as several agents.
+        if "entry_root" in data:
+            root = self.roots[data["entry_root"]]
+            matches = [n for n, p in self.agents.items() if absolute(p["root"]) == root]
+            if len(matches) > 1:
+                raise Error("Explicit entry_root matches multiple agents")
+            if matches:
+                return matches
+            if len(self.agents) == 1:
+                return list(self.agents)
+            if not self.agents or "codex" in self.agents:
+                return ["codex"]  # Preserve the explicit legacy destination.
+            raise Error("Explicit entry_root must match one selected agent")
+        return sorted(self.agents, key=lambda n: (n != "codex", n))
+
+    def instruction_ids(self, data):
+        from .agents import suffix
+        return tuple(part + suffix(n) for n in self.instruction_agents(data) for part in ("bundle", "entry", "hook"))
+
     def declarations(self, source: Source) -> list[Item]:
+        from .agents import profile, suffix
         self.catalog()
         if source.name in self._instructions:
             data = self._instructions[source.name]
             subdir = data.get("subdir", ".")
             payload = source.path / subdir
-            target = self.target(data.get("root"), relative(data.get("destination", source.name)))
-            entry_target = self.target(data["entry_root"], relative(data["entry_destination"]))
             entry_relative = data["entry"] if subdir == "." else subdir + "/" + data["entry"]
-            hook_target = self.target(data["entry_root"], Path("hooks.json"))
-            return [Item(source.name, "bundle", subdir, payload, target, "link", "instruction", data["entry"]),
-                    Item(source.name, "entry", entry_relative, payload / data["entry"], entry_target,
-                         "link", "instruction-entry", data["entry"]),
-                    Item(source.name, "hook", subdir, payload, hook_target, "codex-hook", "instruction-hook", data["entry"])]
+            result = []
+            for agent in self.instruction_agents(data):
+                adapter, tail = profile(agent), suffix(agent)
+                destination = data.get("destination", source.name) + (tail if "entry_root" not in data else "")
+                target = self.target(data.get("root"), relative(destination))
+                root = data.get("entry_root", f"aem-agent-{agent}")
+                entry_target = self.target(root, relative(data.get("entry_destination", adapter.entry_name)))
+                hook_target = self.target(root, relative(adapter.hook_name))
+                result.extend([
+                    Item(source.name, "bundle" + tail, subdir, payload, target, "link", "instruction", data["entry"], agent),
+                    Item(source.name, "entry" + tail, entry_relative, payload / data["entry"], entry_target,
+                         "link", "instruction-entry", data["entry"], agent),
+                    Item(source.name, "hook" + tail, subdir, payload, hook_target, "codex-hook" if agent == "codex" else "agent-hook",
+                         "instruction-hook", data["entry"], agent)])
+            return result
         if not source.repository:
             return self.manifest(source)
         data = self.catalog()[source.name]
         relative_path = data.get("subdir", ".")
         payload = source.path if relative_path == "." else source.path / relative(relative_path)
-        target = self.target(data.get("root", "skills"), Path(source.name))
         mode = self.modes.get(source.name, data.get("mode", "link"))
-        return [Item(source.name, source.name, relative_path, payload, target, mode, "skill")]
+        names = sorted(self.agents, key=lambda n: (n != "codex", n)) if self.agents else ["codex"]
+        by_target = {}
+        for agent in names:
+            root = data.get("root", f"aem-skills-{agent}" if self.agents else "skills")
+            target = self.target(root, Path(source.name))
+            by_target.setdefault(target, []).append(agent)
+        return [Item(source.name, source.name + suffix(names[0]), relative_path, payload, target, mode, "skill",
+                     agent=names[0], agents=tuple(names)) for target, names in by_target.items()]
 
     def target(self, root: str | None, destination: Path) -> Path:
         # Instruction bundles default to per-configuration storage, like checkouts.
