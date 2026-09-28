@@ -11,8 +11,8 @@ import uuid
 
 from .agents import profile, suffix
 from .git_source import Git, now
-from .model import Config, Error, Item, identifier, overlaps, relative
-from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove
+from .model import MachineFile, Error, Item, identifier, overlaps, relative
+from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path
 
 
 @dataclass
@@ -28,7 +28,7 @@ class Plan:
 
 
 class Manager:
-    def __init__(self, config: Config, state: State):
+    def __init__(self, config: MachineFile, state: State):
         self.config, self.state = config, state
 
     def delivery_source(self, source):
@@ -382,7 +382,7 @@ class Manager:
             except Exception:
                 self.state.data["items"] = old_records
                 # Reload the durable journal for recovery after a failed commit.
-                self.state.data["pending"] = State(self.config.state_dir).data["pending"]
+                self.state.data["pending"] = State(self.config.state_dir, maintenance=self.state.maintenance).data["pending"]
                 raise
         except Exception:
             if self.state.data.get("pending"):
@@ -394,9 +394,19 @@ class Manager:
 
     def recover(self):
         pending = self.state.data.get("pending")
-        if not pending:
+        if pending is None:
             return
-        target, backup, stage = (Path(pending[k]) for k in ("target", "backup", "stage"))
+        if not all(k in pending for k in ("target", "backup", "stage", "before", "after")):
+            raise Error("Incomplete recovery journal; cannot safely recover")
+        target, backup, stage = (saved_path(pending[k]) for k in ("target", "backup", "stage"))
+        if len({target, backup, stage}) != 3 or any(p.parent != target.parent for p in (backup, stage)):
+            raise Error("Recovery paths must be distinct siblings")
+        for field in ("before", "after"):
+            value = pending[field]
+            if (not isinstance(value, dict) or value.get("kind") not in ("missing", "link", "file", "directory")
+                    or (value["kind"] == "link" and not isinstance(value.get("to"), str))
+                    or (value["kind"] in ("file", "directory") and not isinstance(value.get("hash"), str))):
+                raise Error("Invalid recovery observation; cannot safely recover")
         current = observation(target)
         before, after = pending["before"], pending["after"]
         if exists(backup):
@@ -514,22 +524,24 @@ class Manager:
                 raise Error(f"Not a managed item: {key}")
             if old.get("detached"):
                 continue
-            target = Path(old["target"])
+            target = saved_path(old.get("target"))
             if not exists(target):
                 raise Error(f"{key}: target is missing; cannot preserve usable contents")
             record = dict(old, detached=True)
-            if old["mode"] == "link":
-                if target.is_symlink():
-                    content = target.resolve(strict=True)
-                    record["hash"] = fingerprint(content, exclude_git=old.get("exclude_git", False))
-                    item = Item(old["source_name"], old["id"], old["relative"], Path(old["source"]), target, "link", old["kind"], agent=old.get("agent", "codex"))
-                    plans.append(Plan(item, observation(target), record, True, materialize=content))
-                else:
-                    # An editor may already have replaced the link. Keep its
-                    # current regular contents, not the old source or baseline.
-                    fingerprint(target)
-                    untouched.append((key, record))
+            if target.is_symlink():
+                content = target.resolve(strict=True)
+                exclude_git = old.get("exclude_git", False)
+                if not isinstance(exclude_git, bool):
+                    raise Error(f"{key}: invalid saved copy exclusion")
+                record["hash"] = fingerprint(content, exclude_git=exclude_git)
+                # Use the saved key as an opaque transaction identity. No old
+                # source declaration or install-mode interpreter is needed.
+                item = Item("", key, ".", content, target, "link", "skill")
+                plans.append(Plan(item, observation(target), record, True, materialize=content))
             else:
+                # Preserve regular contents for any recorded mode, including
+                # opaque partial ownership. Never release unreadable payloads.
+                fingerprint(target)
                 untouched.append((key, record))
         if not dry_run:
             for plan in plans:
@@ -671,6 +683,27 @@ class Manager:
                 report["items"].append({"item": key, "target": old["target"],
                                         "installation": self.installed_status(old),
                                         "status": "detached" if old.get("detached") else "setup" if old.get("kind") == "setup" else "orphaned-or-source-unavailable"})
+        return report
+
+    def saved_status(self, *, agent=None, error=None):
+        """Inspect recorded targets without interpreting source declarations or modes."""
+        report = {"sources": [], "items": [], "pending": self.state.data["pending"],
+                  "state_version": self.state.data["version"], "saved_only": True}
+        if error:
+            report["configuration_error"] = str(error)
+        for key, record in self.state.data["items"].items():
+            if agent and agent not in record.get("agents", [record.get("agent", "codex")]):
+                continue
+            item = {"item": key, "target": record.get("target"), "mode": record.get("mode"),
+                    "status": "detached" if record.get("detached") else "recorded"}
+            try:
+                target = saved_path(record.get("target"))
+                item["observation"] = observation(target)
+                if target.is_symlink():
+                    item["link_available"] = target.exists()
+            except (Error, OSError, ValueError) as exc:
+                item["error"] = str(exc)
+            report["items"].append(item)
         return report
 
     def installed_status(self, record):

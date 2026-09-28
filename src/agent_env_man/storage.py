@@ -143,24 +143,45 @@ def lock(directory: Path, *, timeout: float = 0):
 
 
 class State:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, *, maintenance=False):
+        self.maintenance = maintenance
         self.path = directory / "state.json"
         if self.path.exists():
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
         else:
             self.data = {"version": 2, "items": {}, "sources": {}, "pending": None}
-        # Version 2 has only catalog ownership and agent-neutral hook modes;
-        # old recovery journals must never be interpreted as current records.
-        if not isinstance(self.data.get("version"), int) or self.data["version"] != 2:
-            raise Error("Unsupported state version; use the matching older AEM to release the installation "
-                        "before creating a new configuration; do not delete ownership records")
-        for record in self.data["items"].values():
-            if record.get("mode") not in ("link", "copy", "agent-hook", "setup-shell", "setup-config"):
-                raise Error("Unsupported installation mode in saved state; do not edit ownership records")
+        # Versions 1 and 2 share the ownership/journal envelope. Maintenance
+        # preserves their version and opaque fields; it never migrates them.
+        versions = (1, 2) if maintenance else (2,)
+        if (not isinstance(self.data, dict) or isinstance(self.data.get("version"), bool)
+                or not isinstance(self.data.get("version"), int) or self.data["version"] not in versions):
+            requirement = ("maintenance requires state version 1 or 2" if maintenance else
+                           "installation requires version 2; use status, detach, recover, or removal-only setup for old state")
+            raise Error(f"Unsupported state version; {requirement}; do not delete ownership records")
+        if (not isinstance(self.data.get("items"), dict)
+                or any(not isinstance(r, dict) for r in self.data["items"].values())
+                or not isinstance(self.data.get("sources"), dict)
+                or "pending" not in self.data
+                or (self.data["pending"] is not None and not isinstance(self.data["pending"], dict))):
+            raise Error("Invalid ownership state envelope; do not delete ownership records")
+        if not maintenance:
+            for record in self.data["items"].values():
+                if record.get("mode") not in ("link", "copy", "agent-hook", "setup-shell", "setup-config"):
+                    raise Error("Unsupported installation mode in saved state; use maintenance commands to release it")
 
     def save(self):
         atomic_write(self.path, (json.dumps(self.data, indent=2, ensure_ascii=True) + "\n").encode())
 
     def ready(self):
-        if self.data.get("pending"):
+        if self.data["pending"] is not None:
             raise Error("An interrupted replacement needs `aem recover`; inspect `aem status` first")
+
+
+def saved_path(value):
+    """Validate a recorded mutation path without resolving its final symlink."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise Error("Saved target/recovery path must be absolute")
+    path = Path(value)
+    if ".." in path.parts or path == path.parent or path.parent.resolve() != path.parent:
+        raise Error(f"Saved path has redirected or invalid ancestry: {path}")
+    return path

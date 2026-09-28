@@ -3,7 +3,8 @@
 AEM reads two independent UTF-8 TOML documents, both with integer `version = 1`.
 Filenames are arbitrary: the CLI selects a machine file, and its `catalog` field selects the catalog.
 The catalog declares reusable content and update policies; the machine file binds them to this device.
-Unknown fields are errors in the catalog and machine configuration.
+Installation and update commands reject unknown fields in the catalog and machine configuration.
+Maintenance commands can ignore unrelated fields; see [validation boundaries](#storage-and-validation-boundaries).
 For the command interface, see [Commands](commands.md).
 
 ## Paths and identifiers
@@ -215,7 +216,15 @@ Targets may not overlap sources, manager storage, or another owned target tree.
 
 The catalog is loaded lazily so status, detach, locate, recover, and setup can still operate when it is unavailable.
 Status reports catalog errors alongside saved installation observations.
-Machine syntax must remain valid for these commands.
+The machine file must still be parseable TOML.
+`detach`, `recover`, `locate`, `agent-hook`, and removal-only `setup` use its location and saved ownership without interpreting installation fields or the machine schema version.
+They preserve unknown fields; setup removal only edits requested saved selections.
+Offline `status` falls back to saved target observations when strict machine or state validation fails.
+`status --refresh` still requires valid installation configuration.
 Automatic policy attempts and ownership are generated state, not user-editable TOML settings.
-State now uses version `2`; older installation records are rejected without conversion.
+New installations use state version `2`.
+Maintenance accepts the common ownership/journal structure of versions `1` and `2` and retains its version and opaque fields on save.
+It validates only the records and operations needed for the requested cleanup; it does not restore legacy installation behavior.
+Unknown state versions or malformed ownership/journal structures are still rejected.
+Regular setup, bootstrap, apply, update, sync, automatic updates, and refreshed status continue to require current configuration and state.
 See [Removed interfaces](removed-interfaces.md) before upgrading an existing installation.

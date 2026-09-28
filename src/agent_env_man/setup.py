@@ -1,5 +1,6 @@
 """Explicit, repeatable machine integration; catalog policy never edits profiles."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import shlex
@@ -205,3 +206,110 @@ def setup(manager, args):
     return {'integrations': report, 'agents': list(agents), 'shells': list(shells),
             'notices': [profile(n).notice for n in agents],
             'next': 'Run bootstrap CATALOG, then apply; restart selected shells and review agent hook trust.'}
+
+
+def remove_integrations(manager, args):
+    """Remove only requested saved integrations without rebuilding remaining ones.
+
+    Saved blocks/groups establish ownership; current profiles, executable paths,
+    and catalog syntax are irrelevant. Keep opaque document/state fields and the
+    original state version, and save selection changes after target transactions.
+    """
+    from . import hooks
+    from .storage import saved_path
+
+    config, state = manager.config, manager.state
+    state.ready()
+    regular(config.path)
+    before_config = observation(config.path)
+    if config.path.read_bytes() != config.raw:
+        raise Error('Machine configuration changed after reading; retry removal')
+    document = tomlkit.parse(tomlkit.dumps(config.doc))
+    records = state.data['items']
+    requested = [('shell', n) for n in args.remove_shell] + [('agent', n) for n in args.remove_agent]
+    plans, report, hook_targets = [], [], {}
+    for kind, name in dict.fromkeys(requested):
+        key = f'setup:{kind}-{name}'
+        if kind == 'agent':
+            active = [k for k, r in records.items() if r.get('kind') != 'setup' and not r.get('detached')
+                      and name in r.get('agents', [r.get('agent', 'codex')])]
+            if active:
+                raise Error(f'{name}: detach managed content before removing agent: {active}')
+            selections = document.get('agents', {})
+        else:
+            settings = document.get('setup', {})
+            if not isinstance(settings, dict):
+                raise Error('Cannot remove a shell selection from a non-table setup field')
+            selections = settings.get('shells', {})
+        if not isinstance(selections, dict):
+            raise Error(f'Cannot remove {kind} selection from a non-table field')
+        selections.pop(name, None)
+        old = records.get(key)
+        if not old or old.get('detached'):
+            continue
+        if old.get('kind') != 'setup':
+            raise Error(f'{key}: not a saved setup integration')
+        path = saved_path(old.get('target'))
+        regular(path)
+        if overlaps(path, config.path) or overlaps(path, config.state_dir):
+            raise Error(f'{key}: integration overlaps machine configuration or state')
+        record = dict(old, detached=True)
+        before = observation(path)
+        if kind == 'shell':
+            block = old.get('block')
+            if not isinstance(block, str) or len(block.splitlines()) < 2:
+                raise Error(f'{key}: no usable saved shell block')
+            lines = block.splitlines()
+            content, _ = render_shell(path, lines[0], lines[-1], None, old)
+            record['block'] = None
+        else:
+            marker, group = old.get('hook_marker'), old.get('hook_group')
+            if not isinstance(marker, str) or not marker or not isinstance(group, dict):
+                raise Error(f'{key}: no usable saved hook ownership')
+            entry = hook_targets.setdefault(path, {'document': hooks.read(path), 'records': {}, 'before': before})
+            indices = hooks.matching(entry['document'], marker)
+            if len(indices) != 1 or entry['document']['hooks']['SessionStart'][indices[0]] != group:
+                raise Error(f'{key}: managed hook changed or disappeared; reconcile before removal')
+            del entry['document']['hooks']['SessionStart'][indices[0]]
+            entry['records'][key] = record
+        report.append({'integration': f'{kind}:{name}', 'target': str(path), 'action': 'remove'})
+        if kind == 'shell':
+            record['hash'] = hashlib.sha256(content).hexdigest()
+            item = Item('setup', f'{kind}-{name}', '.', config.path, path, 'setup-shell', 'setup')
+            plans.append(Plan(item, before, record, True, content))
+    for path, group in hook_targets.items():
+        content = (json.dumps(group['document'], indent=2, ensure_ascii=True) + '\n').encode('utf-8')
+        for record in group['records'].values():
+            record['hash'] = hashlib.sha256(content).hexdigest()
+        key, record = next(iter(group['records'].items()))
+        item = Item('setup', key.removeprefix('setup:'), '.', config.path, path, 'agent-hook', 'setup')
+        plans.append(Plan(item, group['before'], record, True, content, records=group['records']))
+    for index, plan in enumerate(plans):
+        if observation(plan.item.target) != plan.before:
+            raise Error(f'{plan.item.key}: removal target changed during preflight')
+        if any(overlaps(plan.item.target, other.item.target) for other in plans[:index]):
+            raise Error('Selected removals have overlapping targets')
+        for key, old in records.items():
+            if key == plan.item.key or key in plan.records or old.get('detached'):
+                continue
+            value = old.get('target')
+            if not isinstance(value, str) or not overlaps(plan.item.target, Path(value)):
+                continue
+            # Hook files support group ownership; other active directory/file
+            # ownership must never be modified by an integration removal.
+            if (plan.item.target == Path(value) and plan.item.mode == 'agent-hook'
+                    and isinstance(old.get('hook_marker'), str) and isinstance(old.get('hook_group'), dict)):
+                continue
+            raise Error(f'Removal target overlaps {key}')
+    if observation(config.path) != before_config:
+        raise Error('Machine configuration changed during removal preflight')
+    content = tomlkit.dumps(document).encode('utf-8')
+    record = dict(records.get('setup:machine', {}), source_name='setup', id='machine', kind='setup',
+                  mode='setup-config', source=str(config.path), target=str(config.path), relative='.',
+                  hash=hashlib.sha256(content).hexdigest(), detached=False, agents=[], agent='')
+    plans.append(Plan(Item('setup', 'machine', '.', config.path, config.path, 'setup-config', 'setup'),
+                      before_config, record, content != config.raw, content))
+    if not args.dry_run:
+        for plan in plans:
+            manager.install(plan)
+    return {'integrations': report, 'next': 'Requested integrations removed; other selections were preserved.'}

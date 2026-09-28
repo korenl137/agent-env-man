@@ -73,19 +73,31 @@ class Item:
         return self.id if self.kind == "skill" else f"{self.source_name}:{self.id}"
 
 
-class Config:
+class MachineFile:
+    """Read the machine document without interpreting installation declarations.
+
+    Teardown needs its location and, for setup removal, a lossless document to
+    edit. Unknown fields and schema versions are deliberately left untouched.
+    """
     def __init__(self, path: Path, *, missing_ok: bool = False, document=None):
         self.path = path.expanduser().resolve()
         self.state_dir = self.path.parent / (self.path.name + ".state")
+        self.raw = None
         if document is not None:
             self.doc = document
         elif not self.path.exists() and missing_ok:
             self.doc = tomlkit.parse('version = 1\n')
         else:
             try:
-                self.doc = tomlkit.parse(self.path.read_text(encoding="utf-8"))
+                self.raw = self.path.read_bytes()
+                self.doc = tomlkit.parse(self.raw.decode("utf-8"))
             except (OSError, ValueError) as exc:
                 raise Error(f"Cannot read machine config {self.path}: {exc}") from exc
+
+
+class Config(MachineFile):
+    def __init__(self, path: Path, *, missing_ok: bool = False, document=None):
+        super().__init__(path, missing_ok=missing_ok, document=document)
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")

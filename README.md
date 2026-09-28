@@ -206,6 +206,9 @@ Transactions are per target: earlier successful items can remain installed if a 
 After an interruption, inspect `status` and run `recover`.
 Recovery refuses to overwrite later user edits; keep state and backups.
 Never delete state to bypass ownership conflicts or unsupported state versions.
+Even when old or unknown machine fields block installation, `detach`, `recover`, `locate`, and removal-only `setup --remove-*` use saved ownership independently.
+Offline `status` falls back to saved IDs and target observations.
+These maintenance paths support state versions 1 and 2, preserving the original version and unknown fields without automatic migration.
 
 Git updates never stash, reset, rebase, commit, or push automatically.
 They reject dirty/untracked/ignored content, unfinished operations, local-ahead/divergent history, wrong branches, and checkout identity changes.

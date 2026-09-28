@@ -55,7 +55,11 @@ Do not introduce a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
 The catalog is the only content declaration format.
 Do not restore source-local links.conf parsing, machine sources tables, partial application-config merging, or removed command aliases.
-State version 2 is a deliberate compatibility boundary; reject older state without conversion or deletion.
+Installation requires state version 2; maintenance may read the shared ownership/journal envelope of versions 1 and 2 without conversion.
+Keep detach, recover, saved-state lookup, offline status fallback, and removal-only setup independent of installation declarations.
+These paths may ignore unknown machine fields and opaque modes, but must validate the specific saved paths, blocks, groups, and observations they consume.
+Preserve unknown fields, unselected records, and the original state version when saving maintenance results.
+Reject unknown state envelopes instead of guessing how to undo them.
 Keep the breaking-change instructions in docs/removed-interfaces.md aligned with this boundary.
 
 Instruction bundles select a named Git repository or a logical external source without source-local manifests.
@@ -136,7 +140,7 @@ Policy changes must cover precedence, manual opt-out, event selection, offline p
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
 Keep the README focused on user workflows and link to those references.
-Validate unknown fields and types instead of silently accepting misspelled or removed settings.
+Installation and update paths must reject unknown fields and invalid types instead of silently accepting misspelled or removed settings.
 Update examples and platform limitations with interface changes.
 Agent profiles are the internal extension boundary for paths, hook syntax, callback output, and notices.
 Do not add a dynamic plugin loader or additional source providers without a demonstrated use case.
@@ -152,6 +156,9 @@ Selections accumulate, and repeated setup must preserve unrelated content and av
 Preflight all profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection last.
 A retry must recognize completed ownership records after a partial failure.
 Setup removal must not delete user content or silently detach installed skills and instructions.
+A setup invocation containing only removals must touch only requested saved integrations, without rebuilding remaining integrations or consulting current profile defaults.
+Use saved shell blocks and hook groups, including retired integration names; ignore an executable override on removal-only calls.
+Preflight selected removals and machine-document edits before writing, detect concurrent edits, group removals sharing a hook file, and retain the same journal/retry boundaries as setup installation.
 Do not grant agent hook trust or rewrite user execution policies.
 
 Resolve product-specific defaults, hook serialization, and callback output through internal agent profiles.

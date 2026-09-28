@@ -57,7 +57,7 @@ class Interfaces(unittest.TestCase):
             with self.assertRaises(Error):
                 config.catalog()
 
-    def test_old_state_is_rejected_and_left_intact_by_every_boundary(self):
+    def test_old_state_remains_rejected_by_installation_commands(self):
         state_dir = Path(str(self.machine) + ".state")
         state_dir.mkdir()
         target = self.root / "preserved.txt"
@@ -67,10 +67,9 @@ class Interfaces(unittest.TestCase):
         path = state_dir / "state.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         before = path.read_bytes()
-        for args, code in ((["status"], 1), (["detach", "personal:entry"], 1), (["recover"], 1),
-                           (["apply"], 1), (["bootstrap"], 1), (["setup", "--dry-run"], 1),
-                           (["locate", "personal"], 1),
-                           (["agent-hook", "personal", "--agent", "codex"], 0),
+        for args, code in ((["apply"], 1), (["bootstrap"], 1), (["setup", "--dry-run"], 1),
+                           (["status", "--refresh"], 1), (["update"], 1), (["sync"], 1),
+                           (["auto", "--trigger", "shell-start"], 1),
                            (["startup", "--trigger", "agent-start"], 0)):
             with self.subTest(args=args), redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
                 self.assertEqual(main(["--config", str(self.machine), *args]), code)
@@ -82,7 +81,7 @@ class Interfaces(unittest.TestCase):
         directory = self.root / "state"
         directory.mkdir()
         for mode in ("entry", "codex-merge", "codex-hook"):
-            (directory / "state.json").write_text(json.dumps({"version": 2, "items": {"item": {"mode": mode}}}), encoding="utf-8")
+            (directory / "state.json").write_text(json.dumps({"version": 2, "items": {"item": {"mode": mode}}, "sources": {}, "pending": None}), encoding="utf-8")
             with self.subTest(mode=mode), self.assertRaisesRegex(Error, "Unsupported installation mode"):
                 State(directory)
 

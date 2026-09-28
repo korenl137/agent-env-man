@@ -13,9 +13,16 @@ import tomlkit
 from .agents import PROFILES, profile
 from .git_source import now
 from .manager import Manager
-from .model import Config, Error, absolute, default_config, identifier
+from .model import Config, MachineFile, Error, absolute, default_config, identifier
 from .storage import State, atomic_write, lock
 from .updates import TRIGGERS, run_updates, startup_briefing
+
+
+def argument_identifier(value):
+    try:
+        return identifier(value)
+    except Error as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def bootstrap_skills(config, state, args):
@@ -77,7 +84,8 @@ def parser():
     setup_parser = commands.add_parser("setup", help="connect selected shells and agents; never bootstrap or apply")
     for flag, choices in (("shell", ("bash", "zsh", "powershell")), ("agent", tuple(PROFILES))):
         setup_parser.add_argument("--" + flag, action="append", default=[], choices=choices)
-        setup_parser.add_argument("--remove-" + flag, action="append", default=[], choices=choices)
+        setup_parser.add_argument("--remove-" + flag, action="append", default=[], type=argument_identifier,
+                                 metavar="NAME", help="remove a saved integration, including retired names")
     setup_parser.add_argument("--executable", help="absolute installed aem executable")
     setup_parser.add_argument("--dry-run", action="store_true")
     boot = commands.add_parser("bootstrap", help="prepare Git skills and Git/external instruction bundles; never install targets")
@@ -132,20 +140,39 @@ def main(argv=None):
     try:
         if hasattr(args, "timeout") and (not math.isfinite(args.timeout) or args.timeout <= 0):
             raise Error("--timeout must be positive and finite")
-        config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
+        remove_only = (args.command == "setup" and (args.remove_shell or args.remove_agent)
+                       and not (args.shell or args.agent))
+        maintenance = args.command in ("detach", "recover", "locate", "agent-hook") or remove_only
+        missing_ok = args.command in ("bootstrap", "setup", "startup")
+        # Find the lock without requiring installation declarations to be valid.
+        config = MachineFile(args.config, missing_ok=missing_ok)
         # SessionStart callbacks can overlap each other or startup updates.
         # Leave time for lookup/output within the installed 10-second hook limit.
         lock_timeout = 5 if args.command == "agent-hook" else 0
         with (nullcontext() if args.command == "setup" and args.dry_run
               else lock(config.state_dir, timeout=lock_timeout)):
             # Read again under the lock: another process may just have registered a source.
-            config = Config(args.config, missing_ok=args.command in ("bootstrap", "setup", "startup"))
-            state = State(config.state_dir)
+            saved_error = None
+            if maintenance:
+                config = MachineFile(args.config, missing_ok=missing_ok)
+                state = State(config.state_dir, maintenance=True)
+            else:
+                try:
+                    config = Config(args.config, missing_ok=missing_ok)
+                    state = State(config.state_dir)
+                except Error as exc:
+                    if args.command != "status" or args.refresh:
+                        raise
+                    # An offline status remains a way to discover IDs to release
+                    # when installation declarations or old modes are unusable.
+                    config = MachineFile(args.config)
+                    state = State(config.state_dir, maintenance=True)
+                    saved_error = exc
             manager = Manager(config, state)
             failed = False
             if args.command == "setup":
-                from .setup import setup
-                report = setup(manager, args)
+                from .setup import setup, remove_integrations
+                report = remove_integrations(manager, args) if remove_only else setup(manager, args)
             elif args.command == "startup":
                 outcomes = []
                 try:
@@ -169,7 +196,8 @@ def main(argv=None):
             elif args.command == "locate":
                 report = manager.locate(args.name, args.agent)
             elif args.command == "status":
-                report = manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent)
+                report = (manager.saved_status(agent=args.agent, error=saved_error) if saved_error
+                          else manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent))
             elif args.command == "detach":
                 report = manager.detach(args.item, dry_run=args.dry_run, agent=args.agent)
             elif args.command == "recover":
