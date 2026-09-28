@@ -20,7 +20,7 @@ from .git_source import Git, now
 from .manager import Manager
 from .model import Config, Error, absolute, default_config, identifier, overlaps, relative
 from .storage import State, atomic_write, exists, lock
-from .updates import TRIGGERS, run_updates
+from .updates import TRIGGERS, run_updates, startup_briefing
 
 
 def bootstrap_legacy(config, state, args):
@@ -245,13 +245,14 @@ def main(argv=None):
                 from .setup import setup
                 report = setup(manager, args)
             elif args.command == "startup":
+                outcomes = []
                 try:
                     outcomes, failed = run_updates(manager, args.trigger)
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": failed, "outcomes": outcomes}
                 except (Error, OSError, ValueError) as exc:
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": True, "error": str(exc)}
                 state.save()
-                report, failed = (profile(args.agent).startup_result() if args.agent else {}), False
+                report, failed = (profile(args.agent).startup_result(startup_briefing(outcomes)) if args.agent else {}), False
             elif args.command == "bootstrap":
                 if args.path:
                     if not args.name or args.catalog or args.checkout_root or args.external:

@@ -473,6 +473,11 @@ Automatic update policies do not write hook files, shell profiles, or scheduler 
 Only explicit setup installs startup connections; registering or applying a catalog does not.
 Setup callbacks call `startup`, a fail-open wrapper around the same automatic policy runner.
 With no bound catalog they do no update work; otherwise outcomes and catalog errors appear in `status` under `startup`.
+Agent startup returns a brief `systemMessage` only for completed syncs that advanced a checkout or installed/refreshed a target, listing skill names and short revision changes where available.
+Codex surfaces it as a warning in the UI or event stream; it does not ask the model to announce the update.
+Developers can change `STARTUP_BRIEFING_OUTPUT` in `src/agent_env_man/agents.py` from `"systemMessage"` to `"additionalContext"` to send the same briefing to the model instead.
+This choice is deliberately source-only, with no setup argument or machine setting.
+Unchanged syncs, check-only policies, skipped attempts, and failures return no briefing in either mode; full diagnostics remain in status.
 Failures that prevent acquiring the configuration lock or reading configuration are reported on stderr, and startup still continues.
 The callbacks are synchronous, share the policy throttle, and never grant hook trust.
 The instruction-root SessionStart hook installed by `apply` is separate and never triggers an update.

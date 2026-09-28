@@ -11,6 +11,12 @@ from . import hooks
 from .model import Error
 
 
+# Source-level choice for Codex startup briefings, independent of machine setup.
+# systemMessage displays a UI warning; additionalContext informs the model.
+# Neither mode asks the model to announce the update in its response.
+STARTUP_BRIEFING_OUTPUT = "systemMessage"
+
+
 @dataclass(frozen=True)
 class Codex:
     name: str = 'codex'
@@ -54,8 +60,14 @@ class Codex:
     def failure(self, message):
         return {'continue': False, 'stopReason': message, 'systemMessage': message}
 
-    def startup_result(self):
-        return {}
+    def startup_result(self, briefing=""):
+        if not briefing:
+            return {}
+        if STARTUP_BRIEFING_OUTPUT == "systemMessage":
+            return {"systemMessage": briefing}
+        if STARTUP_BRIEFING_OUTPUT == "additionalContext":
+            return self.context(briefing)
+        raise Error(f"Unsupported startup briefing output: {STARTUP_BRIEFING_OUTPUT}")
 
 
 PROFILES = {'codex': Codex()}

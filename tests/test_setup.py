@@ -145,10 +145,14 @@ class MachineSetup(SetupFixture):
         self.commit(self.repo)
         self.run_cli('startup', '--trigger', 'shell-start')
         self.assertEqual(self.state()['startup']['outcomes'][0]['status'], 'not-triggered')
-        self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
+        result = self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
+        context = result['systemMessage']
+        self.assertNotIn('hookSpecificOutput', result)
+        self.assertIn('report:', context)
+        self.assertIn(' -> ', context)
         self.assertEqual((self.home / '.agents/skills/report/helper.py').read_text(), 'updated locally\n')
         self.assertEqual(self.state()['startup']['outcomes'][0]['status'], 'synced')
-        self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
+        self.assertEqual(self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex'), {})
         self.assertEqual(self.state()['startup']['outcomes'][0]['status'], 'throttled')
         self.catalog.write_text('broken TOML [')
         self.run_cli('startup', '--trigger', 'shell-start')
@@ -179,6 +183,59 @@ class MachineSetup(SetupFixture):
         self.assertTrue((self.agent / 'AGENTS.md').is_symlink())
         self.assertTrue(self.state()['items']['report']['detached'])
         self.assertNotIn('personal:entry@codex', self.state()['items'])
+
+    def test_startup_briefing_only_reports_actual_changes(self):
+        self.require_links()
+        self.setup_cli('--agent', 'codex')
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['updates'] = {'defaults': {'trigger': 'agent-start', 'min_interval': 0}}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        self.run_cli('bootstrap', self.catalog)
+        first = self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
+        self.assertIn('report: installed/refreshed', first['systemMessage'])
+        self.assertEqual(self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex'), {})
+        self.assertEqual(self.state()['startup']['outcomes'][0]['status'], 'synced')
+        doc['updates']['defaults']['action'] = 'check'
+        self.catalog.write_text(tomlkit.dumps(doc))
+        (self.repo / 'skills/report/helper.py').write_text('pending update')
+        self.commit(self.repo)
+        self.assertEqual(self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex'), {})
+        self.assertEqual(self.state()['startup']['outcomes'][0]['remote_relation'], 'behind')
+        self.catalog.write_text('broken TOML [')
+        self.assertEqual(self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex'), {})
+
+    def test_source_selected_context_briefing_and_silent_empty_result(self):
+        adapter = agents.profile('codex')
+        with patch.object(agents, 'STARTUP_BRIEFING_OUTPUT', 'additionalContext'):
+            self.assertEqual(adapter.startup_result('AEM skill updates: report'), {
+                'hookSpecificOutput': {'hookEventName': 'SessionStart',
+                                       'additionalContext': 'AEM skill updates: report'}})
+            self.assertEqual(adapter.startup_result(), {})
+        with patch.object(agents, 'STARTUP_BRIEFING_OUTPUT', 'systemMessage'):
+            self.assertEqual(adapter.startup_result('AEM skill updates: report'),
+                             {'systemMessage': 'AEM skill updates: report'})
+            self.assertEqual(adapter.startup_result(), {})
+
+    def test_shared_checkout_briefing_keeps_initial_revision_for_each_skill(self):
+        self.require_links()
+        self.setup_cli('--agent', 'codex')
+        self.catalog.write_text(tomlkit.dumps({'version': 1,
+            'repositories': {'shared': {'repository': str(self.repo)}},
+            'skills': {name: {'repo': 'shared', 'subdir': 'skills/report'} for name in ('first', 'second')},
+            'updates': {'defaults': {'trigger': 'agent-start', 'min_interval': 0}}}))
+        self.run_cli('bootstrap', self.catalog)
+        self.run_cli('apply')
+        (self.repo / 'skills/report/helper.py').write_text('new shared revision')
+        self.commit(self.repo)
+        result = self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
+        context = result['systemMessage']
+        self.assertNotIn('hookSpecificOutput', result)
+        self.assertIn('first:', context)
+        self.assertIn('second:', context)
+        first, second = self.state()['startup']['outcomes']
+        self.assertEqual(first['previous_revision'], second['previous_revision'])
+        self.assertNotEqual(first['previous_revision'], first['revision'])
+        self.assertEqual(self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex'), {})
 
     def test_powershell_discovery_and_literal_rendering(self):
         path = self.home / 'PowerShell/Microsoft.PowerShell_profile.ps1'

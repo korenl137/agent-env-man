@@ -87,6 +87,7 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
     manager.state.ready()
     sources = manager.config.sources
     report, failed = [], False
+    initial_revisions = {}
     for name, policy in policies.items():
         if names and name not in names:
             continue
@@ -120,9 +121,16 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
                 source_state.update(last_fetch=now(), observed_revision=revision)
                 entry.update(status="checked", remote_relation=git.relation(source))
             else:
+                # Keep the first observed HEAD for shared checkouts: an earlier
+                # skill in this invocation may already have advanced the branch.
+                git = Git(policy["timeout"])
+                if source.path not in initial_revisions:
+                    initial_revisions[source.path] = git.run(source.path, "rev-parse", "HEAD").stdout
+                entry["previous_revision"] = initial_revisions[source.path]
                 outcomes, update_failed = manager.update([name], timeout=policy["timeout"])
                 if update_failed:
                     raise Error(outcomes[0]["error"])
+                entry["revision"] = git.run(source.path, "rev-parse", "HEAD").stdout
                 entry["apply"] = manager.apply([name], timeout=policy["timeout"])
                 entry["status"] = "synced"
             attempt.update(status=entry["status"], last_success=time.time())
@@ -132,3 +140,29 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
             attempt.update(status="failed", error=str(exc))
         manager.state.save()
     return report, failed
+
+
+def startup_briefing(outcomes):
+    """Summarize completed changes, not successful but unchanged sync attempts.
+
+    Use manager-owned metadata only, keeping repository text out of hook context.
+    A bounded list fits the existing startup hook's context allowance.
+    """
+    changes = []
+    for outcome in outcomes:
+        if outcome.get("status") != "synced":
+            continue
+        before, after = outcome.get("previous_revision"), outcome.get("revision")
+        if before and after and before != after:
+            detail = f"{before[:8]} -> {after[:8]}"
+        elif any(item["action"] == "install" for item in outcome.get("apply", [])):
+            detail = "installed/refreshed"
+        else:
+            continue
+        changes.append(f"{outcome['skill']}: {detail}")
+    if not changes:
+        return ""
+    summary = "AEM skill updates: " + "; ".join(changes[:10])
+    if len(changes) > 10:
+        summary += f"; +{len(changes) - 10} more (see aem status)"
+    return summary
