@@ -214,13 +214,14 @@ For the external example, the callback's `hookSpecificOutput.additionalContext` 
 {
   "root": "/home/me/Syncthing/agent-documents/guidance",
   "entry": "/home/me/Syncthing/agent-documents/guidance/start.md",
-  "installed_root": "/home/me/.config/agent-env-man/machine.toml.bundles/personal",
-  "detached": false,
   "global_entry": "/home/me/.codex/AGENTS.md"
 }
 ```
 
-`root` is the resolved content directory and `installed_root` is AEM's stable link location.
+`global_entry` identifies the global instruction file to which these locations apply.
+`entry` identifies the entry document whose parent directory is the default base for relative references, and `root` identifies the content directory.
+The hook omits installation diagnostics: `aem locate personal` still reports `installed_root` (AEM's installed bundle path) and `detached` (bundle ownership released).
+After detaching only the bundle directory, that installed path holds a preserved copy while the global entry still links to the live source; the hook continues to supply the live source's `root` and `entry` until the global entry is detached too.
 The callback reads saved installation records without fetching, loading the catalog, or rewriting ownership records.
 If lookup fails, it returns a structured `continue: false` stop request and visible error instead of a guessed path.
 Codex cannot receive that response if the interpreter itself is missing or the hook is disabled/untrusted; verify registration and trust through `/hooks`.

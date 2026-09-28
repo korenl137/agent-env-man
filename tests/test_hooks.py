@@ -249,8 +249,15 @@ class HookInstallation(InstructionFixture):
         (self.bundle / "development/rules.md").write_text("Live source change")
         context = self.run_cli("codex-hook", "personal")["hookSpecificOutput"]["additionalContext"]
         metadata = json.loads(context.split("\n")[1])
+        self.assertEqual(metadata, {"root": str(self.bundle), "entry": str(self.bundle / "start.md"),
+                                    "global_entry": str(self.agent / "AGENTS.md")})
+        diagnostic = self.run_cli("locate", "personal")
+        self.assertEqual(diagnostic["installed_root"], str(self.rules / "personal"))
+        self.assertTrue(diagnostic["detached"])
         self.assertEqual(metadata["root"], str(self.bundle))
         self.assertEqual(Path(metadata["root"], "development/rules.md").read_text(), "Live source change")
         self.run_cli("detach", "personal:entry")
         context = self.run_cli("codex-hook", "personal")["hookSpecificOutput"]["additionalContext"]
-        self.assertEqual(json.loads(context.split("\n")[1])["root"], str(self.rules / "personal"))
+        self.assertEqual(json.loads(context.split("\n")[1]), {
+            "root": str(self.rules / "personal"), "entry": str(self.rules / "personal/start.md"),
+            "global_entry": str(self.agent / "AGENTS.md")})

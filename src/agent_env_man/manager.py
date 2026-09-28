@@ -261,8 +261,11 @@ class Manager:
                     break
                 cursor = cursor.parent
             found.update(root=str(source_root.resolve(strict=True)), entry=str(source_entry.resolve(strict=True)))
+        # Expose reading locations only: after partial detach, installed_root
+        # can name a preserved copy that no longer matches the live entry.
+        locations = {"root": found["root"], "entry": found["entry"], "global_entry": str(target)}
         context = ("AEM instruction document locations (not instruction contents):\n"
-                   + json.dumps({**found, "global_entry": str(target)}, ensure_ascii=True)
+                   + json.dumps(locations, ensure_ascii=True)
                    + "\nFor relative document references in this global entry, use the original entry's "
                    "directory as the base unless the user documents specify another base. "
                    "Follow those documents for applicability and reading order.")

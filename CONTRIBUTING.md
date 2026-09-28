@@ -74,6 +74,7 @@ Resolve roots from saved installation records and actual filesystem links, not f
 The locator must remain offline, avoid updating ownership records, work for detached copies without a catalog, and reject missing or redirected entries and replaced active links.
 Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
 The callback emits only path metadata as additionalContext, never document contents, and requests a structured stop on lookup failure.
+Limit callback metadata to the effective root, entry, and global_entry reading locations; keep installed_root and detached in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
 Instruction automatic policies are not supported; skill policies may still advance shared checkouts.
