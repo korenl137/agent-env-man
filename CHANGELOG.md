@@ -11,6 +11,8 @@ During 0.x development, minor releases may break compatibility; patch releases p
 ### Added
 
 - Changelog with release history and contributor guidance for maintaining release notes.
+- Git-delivered catalogs registered through bootstrap repository/path arguments, with automatic machine binding and separate checkouts.
+- Explicit `catalog status`, `locate`, `update`, and `publish` commands, including validation before catalog updates and offline publication previews.
 
 ### Changed
 

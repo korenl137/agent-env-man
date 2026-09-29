@@ -18,7 +18,7 @@ class Git:
     def __init__(self, timeout: float = 30):
         self.deadline = time.monotonic() + timeout
 
-    def run(self, path: Path | None, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    def run(self, path: Path | None, *args: str, check: bool = True, strict_utf8: bool = False) -> subprocess.CompletedProcess:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise Error("Git operation timed out")
@@ -47,7 +47,7 @@ class Git:
             process.communicate()
             raise Error("Git operation timed out; checkout may need inspection") from exc
         result = subprocess.CompletedProcess(command, process.returncode,
-                                             stdout.decode("utf-8", errors="replace").strip(),
+                                             stdout.decode("utf-8", errors="strict" if strict_utf8 else "replace").strip(),
                                              stderr.decode("utf-8", errors="replace").strip())
         if check and result.returncode:
             raise Error(f"Git {args[0]} failed: {result.stderr or result.stdout}")

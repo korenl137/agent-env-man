@@ -92,7 +92,7 @@ Do not add snapshot activation semantics silently: changing this contract requir
 The incoming-revision guard protects active link source paths, even if the latest catalog no longer declares those items.
 
 The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
-The current loader reads a local TOML file; policy composition must remain independent of this transport and any future auxiliary-file layout.
+The loader reads a local TOML file supplied directly or prepared through Git catalog delivery; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name and selects one Git repository and optional subdirectory.
 Named repository declarations let related skills share one URL, branch, and checkout; direct per-skill repository declarations remain supported.
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
@@ -116,7 +116,7 @@ Keep the breaking-change instructions in docs/removed-interfaces.md aligned with
 Instruction bundles select a named Git repository or a logical external source without source-local manifests.
 Keep external path bindings in machine configuration and shared source/root/entry selections in the catalog.
 Bootstrap accepts a positional catalog and repeated optional --external NAME=PATH bindings, persists them in the selected/default machine file, and reuses omitted bindings.
-Default agent and skills roots only when absent; validate declarations and existing ownership before saving bindings or contacting repositories.
+Default agent and skills roots only when absent; validate declarations and existing ownership before saving bindings or contacting content repositories.
 Support explicit --config, --catalog, and root/storage overrides.
 Do not parse document policy, applicability, or reading order.
 A Codex instruction bundle owns a directory link, a direct original-entry link, and one SessionStart group in the entry root's hooks.json.
@@ -140,6 +140,28 @@ Limit callback metadata to the effective root, entry, and global_entry reading l
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
 Instruction automatic policies are not supported; skill policies may still advance shared checkouts.
+
+## Catalog delivery contracts
+
+Keep local catalog strings backward compatible and Git bindings machine-owned.
+Bootstrap accepts the catalog repository, relative entry path, and optional branch without requiring a hand-written machine file; persist the resolved branch for subsequent operations.
+Catalog delivery precedes content delivery and must not depend on declarations inside the catalog itself.
+Use a separate checkout even when catalog and content share a remote, so content updates cannot implicitly change the inventory or automatic policies.
+Do not merge checkout identities by URL.
+
+A missing remote catalog is the explicit exception to declaration validation before network access: clone it to temporary storage, then validate its tracked regular UTF-8 entry, declarations, machine bindings, and existing ownership before publishing the checkout or saving the binding.
+Content repositories must remain untouched until preflight succeeds.
+Validate candidate revisions against final machine paths without temporarily changing the active binding or checkout.
+Catalog updates fast-forward only after the candidate passes the same declaration and ownership checks.
+Preserve the old catalog on validation failure, local edits on delivery failure, and installed ownership when declarations disappear.
+Do not reset mismatching checkouts on rebind.
+
+Only explicit catalog update/publication commands contact an existing catalog's remote.
+Ordinary content update, sync, automatic policies, and refreshed content status must not fetch or advance it.
+Keep catalog inspection/location offline and usable for repairing malformed catalog contents, and retain catalog-independent maintenance paths.
+Catalog publication selects the whole repository and follows the existing publication contracts; it never installs declarations or changes content attempt clocks.
+Keep catalog delivery observations separate from item/source names and protect the whole catalog checkout from targets and external sources.
+Verify registration, saved-binding reuse, update/bootstrap/apply and locate/edit/publish workflows, invalid incoming catalogs, ownership conflicts, offline maintenance, local edits, and remote failures with local Git fixtures.
 
 ## Publication contracts
 

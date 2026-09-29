@@ -1,6 +1,6 @@
 # agent-env-man
 
-Install and update AI agent skills and personal instruction bundles from a user-owned local TOML catalog.
+Install and update AI agent skills and personal instruction bundles from a user-owned TOML catalog, supplied as a local file or delivered through Git.
 Skills stay in their own Git repositories; instructions can come from Git or an existing local folder.
 Upstream repositories need no AEM manifest.
 
@@ -133,6 +133,37 @@ To use a separate configuration, put `--config /path/machine.toml` before each c
 Bootstrap accepts a positional catalog or `--catalog`, plus `--checkout-root`, repeated `--root NAME=PATH`, and repeated `--external NAME=PATH` bindings.
 Omitted bindings are reused on later runs.
 The [TOML reference](docs/configuration.md#machine-configuration) describes default locations and storage.
+
+If the catalog lives in Git, supply its repository and relative file path instead of a local file:
+
+```bash
+aem bootstrap --catalog-repository git@github.com:OWNER/environment.git --catalog-path catalogs/personal.toml
+aem apply --dry-run
+aem apply
+```
+
+No hand-written machine file is needed.
+AEM clones and validates the catalog, records its repository, file path, and branch in `machine.toml`, then prepares its declared content.
+Use `--catalog-branch NAME` to select a branch; otherwise AEM records the remote default.
+Include any required `--external` bindings just as with a local catalog.
+Later `aem bootstrap` calls reuse these settings without pulling the catalog.
+
+Catalog changes are explicit:
+
+```bash
+aem catalog update               # Validate and fast-forward the catalog only.
+aem bootstrap                    # Prepare newly declared sources.
+aem apply --dry-run
+aem apply
+aem catalog locate               # Find the catalog checkout for editing.
+aem catalog publish --dry-run
+aem catalog publish -m "Update catalog"
+```
+
+`aem catalog status` inspects the catalog offline.
+Publishing includes all nonignored changes in its repository, not just the TOML file.
+Content `update`, `sync`, and automatic policies never refresh the catalog itself.
+The catalog has a separate checkout even when it shares a remote repository with content.
 
 Skill links default to `~/.agents/skills`; instruction entries default to the selected Codex home when using agent bindings, or the explicitly declared entry root.
 The instruction bundle directory defaults to `<machine-file>.bundles/NAME`.

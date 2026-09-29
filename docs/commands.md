@@ -20,6 +20,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | --- | --- | --- |
 | `setup` | Connect or remove machine startup integrations. | None. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
+| `catalog` | Inspect, update, or publish the catalog itself. | Update/publish only; publication dry run is offline. |
 | `update` | Fetch and fast-forward prepared sources. | Yes for Git. |
 | `publish` | Commit local changes and push selected checkouts. | Fetch and push; none in dry run. |
 | `apply` | Install from local prepared sources. | None. |
@@ -65,20 +66,78 @@ The repository installer `python scripts/setup.py` installs AEM using uv and del
 
 ```text
 aem bootstrap [CATALOG | --catalog PATH] [--checkout-root PATH]
+              [--catalog-repository URL --catalog-path RELATIVE_PATH [--catalog-branch BRANCH]]
               [--root NAME=PATH ...] [--external NAME=PATH ...]
               [--item NAME ...] [--timeout TIMEOUT]
 ```
 
 Omit the catalog argument to reuse the saved binding.
 A positional catalog and `--catalog` cannot both be supplied.
+Git catalog registration requires `--catalog-repository` and `--catalog-path` together, optionally with `--catalog-branch`; these cannot be combined with a local catalog argument.
+`--catalog-path` is relative to the repository root, not the working directory, and must identify a tracked regular TOML file.
+Repository syntax matches catalog repository declarations: a URL, SSH location, or absolute local repository path.
+The default branch is discovered and written to the machine binding; repeating registration for the same repository without `--catalog-branch` retains the recorded branch.
 Catalog, checkout-root, and external CLI paths resolve relative to the working directory and are saved as absolute paths.
 Root paths must be absolute or begin with `~/`.
 Repeated `--external` binds declared external names; duplicate names in one invocation are invalid, and omitted saved bindings remain.
 `--item` selects catalog skill or instruction names for preparation, not ownership IDs or repository names.
 No selection prepares all declared sources.
 Missing repositories are cloned and validated; existing checkouts are validated without pulling or resetting.
-A failed download leaves the machine binding saved so bootstrap can be retried.
-Declaration and ownership preflight failures do not save a new binding or contact repositories.
+A failed content download leaves the machine binding saved so bootstrap can be retried.
+For a local catalog, declaration and ownership preflight failures do not save a new binding or contact repositories.
+For a missing Git catalog, bootstrap must clone the catalog into a temporary directory before validating its declarations and current ownership.
+It publishes that checkout and saves the binding only after preflight succeeds, then prepares content repositories.
+Failed catalog download or validation preserves the previous binding and leaves no new catalog checkout; fix the input or remote and repeat the registration command.
+An interrupted machine-file save may leave a validated checkout that the same registration can reuse.
+Existing machine settings and omitted external/root bindings are preserved.
+
+The JSON result retains `skills`, `config`, and `next`.
+For Git bindings it also includes `catalog`, with `status` (`cloned` or `already-prepared`), absolute `checkout` and `entry` paths, `repository`, resolved `branch`, and `revision`.
+
+## catalog
+
+```text
+aem catalog status [--timeout TIMEOUT]
+aem catalog locate [--timeout TIMEOUT]
+aem catalog update [--timeout TIMEOUT]
+aem catalog publish [-m MESSAGE | --message MESSAGE] [--dry-run] [--timeout TIMEOUT]
+```
+
+These commands select the bound catalog, independently of the skill/instruction namespace.
+They never install content or run content automatic policies.
+`status` and `locate` are offline and do not change saved state; their Git subprocesses still respect `--timeout`.
+`status` reports the entry, checkout, repository, and `status` (`ready`, `unavailable`, or `unbound`).
+For Git catalogs it also reports the branch, current revision, local changes, tracked diff, outgoing commits, and remote relation at the last fetch, using the same fields as publication inspection.
+Catalog reading/inspection failures appear as `error` with status `unavailable` and exit 0; machine/state loading failures still exit 1.
+`locate` returns absolute `entry`, `checkout`, and `repository`; the latter two are null for a local catalog.
+Locate validates Git identity and the tracked file but does not parse its TOML or require cleanliness, so it can locate a malformed file for repair.
+
+`update` requires a Git binding and a clean checkout on the recorded branch with the expected origin.
+It fetches that branch, validates the incoming tracked UTF-8 TOML, declarations, machine bindings, target paths, and existing ownership, then fast-forwards only after all checks pass.
+Dirty, local-ahead, diverged, misidentified, detached, or unfinished checkouts are refused without reset or merge reconciliation.
+Validation failures leave the previous HEAD and working catalog intact, although fetched references and observations may change.
+No newly declared content is cloned or installed by this command.
+Use `bootstrap`, then `apply --dry-run` / `apply`, after adding declarations.
+Removed declarations leave existing installations and ownership intact; path/mode changes for owned items require detach first.
+New required external paths must be bound in the machine file before the catalog update can pass validation.
+
+`publish` uses the [content publication rules](#publish), but selects the whole catalog repository.
+The working catalog must pass declaration and ownership validation before publication.
+Dry run reports the checkout, entry, repository, branch, changed files, tracked diff, outgoing commits, and last-fetched relation without fetching, staging, committing, pushing, or recording attempts.
+With a message it commits all nonignored changes, including files outside the catalog path; without a message it pushes existing commits from a clean worktree.
+Fetch precedes staging, behind/diverged histories are refused, and only the registered branch is pushed without force.
+A failed push retains the local commit so publication can be retried without a message.
+Publication never applies declarations or collects installed-copy edits.
+
+Update and publish return one JSON object with `checkout`, `entry`, `repository`, `branch`, and `status` (`updated`, `planned` for dry run, `published`, or `failed`).
+Operation failures include `error` and exit 1; binding/precondition errors may use stderr instead.
+Update includes `previous_revision`, `observed_revision`, and `last_fetch` once fetched, and `revision` / `last_update` after success.
+Publish uses the inspection/result fields described above and adds `created_commit` when it commits, and `revision`, `observed_revision`, `last_fetch`, and `last_publish` after successful publication.
+Fetch/publication observations are saved separately from content ownership and automatic attempt clocks.
+Local catalog bindings reject update and publish; manage their transport yourself or register a Git catalog.
+
+Content `update`, `sync`, `auto`, and `status --refresh` never fetch or advance the catalog repository.
+Bootstrap validates an existing catalog checkout without pulling it.
 
 ## update
 

@@ -11,6 +11,7 @@ import sys
 import tomlkit
 
 from .agents import PROFILES, profile
+from . import catalog as catalog_delivery
 from .git_source import now
 from .manager import Manager
 from .model import Config, MachineFile, Error, absolute, default_config, identifier
@@ -28,6 +29,22 @@ def argument_identifier(value):
 def bootstrap_skills(config, state, args):
     state.ready()
     document = tomlkit.parse(tomlkit.dumps(config.doc))
+    if args.catalog_repository is not None:
+        if args.catalog_path is not None or args.catalog is not None:
+            raise Error("Git catalog registration cannot be combined with a local catalog path")
+        if args.catalog_entry is None:
+            raise Error("--catalog-repository requires --catalog-path")
+        document["catalog"] = {"type": "git", "repository": args.catalog_repository, "path": args.catalog_entry}
+        if args.catalog_branch is not None:
+            document["catalog"]["branch"] = args.catalog_branch
+        elif config.catalog_source:
+            repository = args.catalog_repository
+            if Path(repository).expanduser().is_absolute():
+                repository = str(absolute(repository))
+            if repository == config.catalog_source.git and config.catalog_source.branch:
+                document["catalog"]["branch"] = config.catalog_source.branch
+    elif args.catalog_entry is not None or args.catalog_branch is not None:
+        raise Error("--catalog-path and --catalog-branch require --catalog-repository")
     if args.catalog_path is not None:
         if args.catalog is not None:
             raise Error("Specify the catalog either positionally or with --catalog, not both")
@@ -35,7 +52,7 @@ def bootstrap_skills(config, state, args):
     if args.catalog is not None:
         document["catalog"] = str(args.catalog.expanduser().resolve())
     if "catalog" not in document:
-        raise Error("Use bootstrap /path/to/catalog.toml")
+        raise Error("Use bootstrap /path/to/catalog.toml or --catalog-repository URL --catalog-path PATH")
     if args.checkout_root is not None:
         document["checkout_root"] = str(args.checkout_root.expanduser().resolve())
     roots = document.setdefault("roots", {})
@@ -64,17 +81,21 @@ def bootstrap_skills(config, state, args):
         external_names.add(key)
         document.setdefault("external_paths", {})[key] = str(Path(location).expanduser().resolve())
     candidate = Config(config.path, document=document)
-    if external_names - candidate.external_names:
-        raise Error("--external must name an external declared in the catalog")
-    if set(args.item) - candidate.sources.keys():
-        raise Error("Unknown catalog source selection")
-    manager = Manager(candidate, state)
-    # Validate all declarations/ownership before saving a machine binding or
-    # contacting any repository. Failed downloads can then be retried in place.
-    manager.selected([i.key for name in args.item for i in candidate.declarations(candidate.sources[name])])
-    atomic_write(config.path, tomlkit.dumps(document).encode("utf-8"))
+    # A remote inventory must be downloaded before its declarations can be
+    # checked. Content repositories remain untouched until all preflight passes.
+    with catalog_delivery.prepare(candidate, state, timeout=args.timeout) as (candidate, catalog_report):
+        if external_names - candidate.external_names:
+            raise Error("--external must name an external declared in the catalog")
+        if set(args.item) - candidate.sources.keys():
+            raise Error("Unknown catalog source selection")
+        catalog_delivery.validate(candidate, state)
+        manager = Manager(candidate, state)
+    atomic_write(config.path, tomlkit.dumps(candidate.doc).encode("utf-8"))
     report, failed = manager.prepare_skills(args.item, timeout=args.timeout)
-    return {"skills": report, "config": str(config.path), "next": "apply --dry-run"}, failed
+    result = {"skills": report, "config": str(config.path), "next": "apply --dry-run"}
+    if catalog_report:
+        result["catalog"] = catalog_report
+    return result, failed
 
 
 def parser():
@@ -91,11 +112,22 @@ def parser():
     boot = commands.add_parser("bootstrap", help="prepare Git skills and Git/external instruction bundles; never install targets")
     boot.add_argument("catalog_path", nargs="?", metavar="CATALOG", help="local catalog path")
     boot.add_argument("--catalog", type=Path, help="local inventory of skills, instruction bundles, and sources")
+    boot.add_argument("--catalog-repository", help="Git catalog URL or absolute local repository path")
+    boot.add_argument("--catalog-path", dest="catalog_entry", help="catalog file path relative to its Git repository")
+    boot.add_argument("--catalog-branch", help="catalog branch; otherwise record the remote default")
     boot.add_argument("--checkout-root", type=Path, help="device-local storage for managed skill checkouts")
     boot.add_argument("--root", action="append", default=[], metavar="NAME=PATH")
     boot.add_argument("--external", action="append", default=[], metavar="NAME=PATH", help="bind a catalog external source to a device-local folder; repeat for multiple sources")
     boot.add_argument("--item", action="append", default=[], metavar="NAME", help="catalog skill or instruction name; repeat to select multiple sources")
     boot.add_argument("--timeout", type=float, default=30)
+    catalog = commands.add_parser("catalog", help="explicitly inspect, update, or publish the bound catalog")
+    catalog_commands = catalog.add_subparsers(dest="catalog_command", required=True)
+    for action in ("update", "status", "locate", "publish"):
+        operation = catalog_commands.add_parser(action)
+        operation.add_argument("--timeout", type=float, default=30)
+        if action == "publish":
+            operation.add_argument("-m", "--message", help="commit all nonignored catalog checkout changes")
+            operation.add_argument("--dry-run", action="store_true", help="inspect changes offline without staging or pushing")
     update = commands.add_parser("update", help="fetch and fast-forward Git sources; live links change immediately")
     update.add_argument("source", nargs="*")
     update.add_argument("--timeout", type=float, default=30)
@@ -190,6 +222,8 @@ def main(argv=None):
                 report, failed = (profile(args.agent).startup_result(startup_briefing(outcomes)) if args.agent else {}), False
             elif args.command == "bootstrap":
                 report, failed = bootstrap_skills(config, state, args)
+            elif args.command == "catalog":
+                report, failed = catalog_delivery.command(config, state, args)
             elif args.command == "update":
                 report, failed = manager.update(args.source, timeout=args.timeout)
             elif args.command == "publish":

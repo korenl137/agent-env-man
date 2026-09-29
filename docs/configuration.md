@@ -1,7 +1,7 @@
 # TOML configuration reference
 
 AEM reads two independent UTF-8 TOML documents, both with integer `version = 1`.
-Filenames are arbitrary: the CLI selects a machine file, and its `catalog` field selects the catalog.
+Filenames are arbitrary: the CLI selects a machine file, and its `catalog` field selects a local catalog or a Git repository and catalog entry.
 The catalog declares reusable content and update policies; the machine file binds them to this device.
 Installation and update commands reject unknown fields in the catalog and machine configuration.
 Maintenance commands can ignore unrelated fields; see [validation boundaries](#storage-and-validation-boundaries).
@@ -20,7 +20,8 @@ Names use ASCII letters, digits, `_`, `-`, and `.`, starting with a letter or di
 Relative content paths use `/`, with no empty, `.` or `..` components, backslashes, drive prefixes, or leading slash.
 Only `subdir` accepts `.` to select the source root.
 Paths are literal: AEM does not expand environment variables, interpolate other fields, or evaluate shell expressions.
-Machine paths must be absolute or begin with `~/`, except `catalog`, which may be relative to the machine file's directory.
+Machine paths must be absolute or begin with `~/`, except a local `catalog` string, which may be relative to the machine file's directory.
+Git `catalog.path` is a literal relative file path within that repository, using the relative content path rules above.
 On Windows, use forward slashes such as `C:/Users/me/.codex` in TOML strings.
 CLI path arguments have their own resolution rules described in [Commands](commands.md#bootstrap).
 
@@ -164,7 +165,7 @@ Explicit commands ignore these policies and clocks.
 | Field/table | Type | Meaning/default |
 | --- | --- | --- |
 | `version` | Integer | Required, exactly `1`. |
-| `catalog` | String | Optional local catalog path; required for bootstrap/content preparation. One binding per machine file. |
+| `catalog` | String or table | Optional local catalog path or Git binding described below; required for bootstrap/content preparation. One binding per machine file. |
 | `checkout_root` | String | Managed Git storage; defaults to sibling `<machine-file>.checkouts`. |
 | `roots` | Table of paths | User-named installation roots; bootstrap defaults missing `skills` and `agent`. |
 | `agents` | Table | Agent selections and path bindings, normally written by setup. |
@@ -195,6 +196,42 @@ Machine selection defaults to `$XDG_CONFIG_HOME/agent-env-man/machine.toml` or `
 On Windows it uses `%LOCALAPPDATA%/agent-env-man/machine.toml`, falling back to `~/AppData/Local/agent-env-man/machine.toml`.
 Pass `--config PATH` before the command to select another file.
 
+### Git catalog binding
+
+Bootstrap writes this table when given `--catalog-repository URL --catalog-path PATH`; no manual machine-file setup is required.
+The local string form remains supported with its existing behavior.
+
+```toml
+[catalog]
+type = "git"
+repository = "git@github.com:OWNER/environment.git"
+branch = "main"
+path = "catalogs/personal.toml"
+```
+
+| Field | Type | Requirement/default |
+| --- | --- | --- |
+| `type` | String | `"git"` only; defaults to `"git"`. |
+| `repository` | String | Required Git URL, SSH location, or absolute local repository path. |
+| `branch` | String | Optional nonempty branch name; bootstrap discovers and persists the remote default when absent. |
+| `path` | String | Required repository-relative path to a tracked, regular UTF-8 TOML file. |
+
+Unknown fields are rejected.
+The catalog's own format is unchanged; its repository binding belongs only in the machine file.
+The checkout is sibling `<machine-file>.catalog`, independent of `checkout_root` and of all content checkouts, including those using the same remote URL.
+It cannot overlap external sources, content checkout storage, machine/state files, or installation targets.
+The entry and checkout must not redirect through symlinks or junctions.
+Reading a Git catalog validates its checkout origin, recorded branch, and tracked entry without fetching; local edits remain readable.
+Run bootstrap after manually specifying a Git binding without a branch.
+
+Only `catalog update` advances an existing catalog checkout.
+Bootstrap reuses it without pulling, and content update/sync/automatic policies do not refresh it.
+Catalog status and locate also support local bindings; update and publish require Git.
+Switching to a local binding preserves the old Git checkout.
+Reusing the same Git checkout requires a matching origin and branch; a new binding never resets or replaces a mismatching repository.
+To switch repositories, preserve or move the old `<machine-file>.catalog` checkout explicitly before bootstrapping the new binding.
+See [catalog commands](commands.md#catalog) for validation, publication, and failure behavior.
+
 ### Roots and agents
 
 `agents.codex` accepts only `root` and `skills` path strings.
@@ -218,6 +255,7 @@ Setup rejects an invalid executable path before writing profiles and requires an
 Direct skill checkouts use `CHECKOUT_ROOT/SKILL`; named repositories use `CHECKOUT_ROOT/.aem-repositories/NAME`.
 Ownership, attempt records, and recovery journals live in sibling `<machine-file>.state`; default bundle links live in `<machine-file>.bundles`.
 Do not synchronize machine files, checkouts, or state between devices.
+Share a Git catalog through its repository, letting each device prepare its own checkout and machine binding.
 External roots must be disjoint from each other, managed checkout storage, the catalog, machine file, and state.
 Targets may not overlap sources, manager storage, or another owned target tree.
 

@@ -96,7 +96,7 @@ class MachineFile:
 
 
 class Config(MachineFile):
-    def __init__(self, path: Path, *, missing_ok: bool = False, document=None):
+    def __init__(self, path: Path, *, missing_ok: bool = False, document=None, catalog_document=None):
         super().__init__(path, missing_ok=missing_ok, document=document)
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
@@ -131,6 +131,10 @@ class Config(MachineFile):
                     raise Error(f"Root {key} conflicts with the agent binding")
                 self.roots[key] = path
         self.catalog_path = None
+        self.catalog_source = None
+        # Candidate revisions can be validated against final device paths before
+        # moving the catalog checkout. This input never changes path resolution.
+        self._catalog_document = catalog_document
         self._catalog = None
         self._repositories = {}
         self._instructions = {}
@@ -140,10 +144,28 @@ class Config(MachineFile):
             raise Error("Checkout storage must be separate from machine config and state")
         if "catalog" in self.doc:
             value = self.doc["catalog"]
-            if not isinstance(value, str) or not value:
+            if isinstance(value, dict):
+                if set(value) - {"type", "repository", "branch", "path"} or value.get("type", "git") != "git":
+                    raise Error("Git catalog accepts only type, repository, branch, and path")
+                self._validate_repository(value, "Catalog")
+                entry = relative(value.get("path"))
+                checkout = self.path.parent / (self.path.name + ".catalog")
+                if checkout.resolve() != checkout:
+                    raise Error("Catalog checkout must not redirect through a symlink or junction")
+                protected = [self.path, self.state_dir, self.checkout_root]
+                protected.extend(absolute(p) for p in self.doc.get("external_paths", {}).values())
+                if any(overlaps(checkout, p) for p in protected):
+                    raise Error("Catalog checkout must be separate from content sources and manager storage")
+                repository = value["repository"]
+                if Path(repository).expanduser().is_absolute():
+                    repository = str(absolute(repository))
+                self.catalog_source = Source("catalog", checkout, repository, value.get("branch"))
+                self.catalog_path = checkout / entry
+            elif not isinstance(value, str) or not value:
                 raise Error("catalog must name an inventory file")
-            location = Path(value).expanduser()
-            self.catalog_path = (location if location.is_absolute() else self.path.parent / location).resolve()
+            else:
+                location = Path(value).expanduser()
+                self.catalog_path = (location if location.is_absolute() else self.path.parent / location).resolve()
             if overlaps(self.catalog_path, self.state_dir) or self.catalog_path == self.path:
                 raise Error("Catalog must be separate from machine config and state")
             if overlaps(self.catalog_path, self.checkout_root):
@@ -167,7 +189,13 @@ class Config(MachineFile):
         if self.catalog_path is None:
             return {}
         try:
-            document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
+            if self._catalog_document is not None:
+                document = self._catalog_document
+            else:
+                if self.catalog_source:
+                    from .catalog import local_entry
+                    local_entry(self)
+                document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
         version = document.get("version")
@@ -244,7 +272,7 @@ class Config(MachineFile):
         external_paths = {identifier(k): absolute(v) for k, v in bindings.items()}
         protected = [self.path, self.state_dir, self.checkout_root]
         if self.catalog_path:
-            protected.append(self.catalog_path)
+            protected.append(self.catalog_source.path if self.catalog_source else self.catalog_path)
         paths = list(external_paths.values())
         for i, path in enumerate(paths):
             if any(overlaps(path, other) for other in protected + paths[:i]):
@@ -361,7 +389,7 @@ class Config(MachineFile):
             raise Error(f"Cannot own an entire configured target root: {target}")
         protected = [s.path for s in self.sources.values()] + [self.state_dir, self.path]
         if self.catalog_path:
-            protected.extend([self.catalog_path, self.checkout_root])
+            protected.extend([self.catalog_source.path if self.catalog_source else self.catalog_path, self.checkout_root])
         if any(overlaps(target, path) for path in protected):
             raise Error(f"Target overlaps source, inventory, or manager state: {target}")
         return target

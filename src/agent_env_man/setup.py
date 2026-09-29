@@ -159,7 +159,7 @@ def setup(manager, args):
         protected = [config.path, config.state_dir, config.checkout_root]
         protected.extend(absolute(p) for p in config.doc.get("external_paths", {}).values())
         if config.catalog_path:
-            protected.append(config.catalog_path)
+            protected.append(config.catalog_source.path if config.catalog_source else config.catalog_path)
         if any(overlaps(path, p) for p in protected):
             raise Error(f'Setup target overlaps manager storage: {path}')
         if baseline and baseline['target'] != str(path):
