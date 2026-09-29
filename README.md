@@ -1,4 +1,4 @@
-# agent-env-man
+# Agent Environment Manager (AEM)
 
 Install and update AI agent skills and personal instruction bundles from a user-owned TOML catalog, supplied as a local file or delivered through Git.
 Skills stay in their own Git repositories; instructions can come from Git or an existing local folder.
