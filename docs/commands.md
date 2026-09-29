@@ -9,6 +9,10 @@ Every command accepts `-h` or `--help`.
 Outputs are JSON; ordinary operation errors use stderr and exit `1`, argument parsing errors exit `2`.
 Successful operations exit `0`; status also exits `0` when its report contains conflicts or unavailable sources.
 Callbacks have the exceptions described below.
+Documented commands, behavior, exit codes, and JSON fields are covered by the package's [compatibility policy](../CONTRIBUTING.md#versioning-and-compatibility).
+JSON consumers must ignore unknown object fields; field additions may appear in compatible feature releases.
+Enum values are closed unless their interface explicitly documents unknown-value handling.
+JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
 Commands lock one configuration, not all AEM installations or external editors.
 Read-only commands and dry runs may create the lock directory/file; `setup --dry-run` does not.
 

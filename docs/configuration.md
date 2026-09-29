@@ -7,6 +7,13 @@ Installation and update commands reject unknown fields in the catalog and machin
 Maintenance commands can ignore unrelated fields; see [validation boundaries](#storage-and-validation-boundaries).
 For the command interface, see [Commands](commands.md).
 
+The package version communicates compatibility for catalog syntax and documented machine settings; neither document has an independent SemVer release cycle.
+Their integer `version` fields identify format generations and need not change for compatible additions.
+Default workflows let setup/bootstrap write machine settings; direct edits to documented settings remain supported.
+AEM is responsible for compatibility handling of generated machine configuration and state, within the supported versions described below.
+Do not manually change version markers to bypass validation.
+See the [versioning policy](../CONTRIBUTING.md#versioning-and-compatibility).
+
 ## Paths and identifiers
 
 Names use ASCII letters, digits, `_`, `-`, and `.`, starting with a letter or digit.

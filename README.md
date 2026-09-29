@@ -24,6 +24,19 @@ Prepared sources remain usable offline.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
 - [Contributing](CONTRIBUTING.md): development and validation contracts.
 
+## Versioning and compatibility
+
+AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
+From 1.0.0 onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
+During 0.x development, minor releases may break compatibility; patch releases preserve it.
+Review migration instructions before upgrading across an incompatible release.
+
+The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.
+In the default workflow, AEM writes machine settings through setup/bootstrap and manages saved state.
+Documented manual settings and continued operation of generated configuration and hooks are also covered by the package's compatibility policy.
+Users do not need to coordinate separate file-format releases or manually change version markers.
+See the [compatibility policy](CONTRIBUTING.md#versioning-and-compatibility) and [existing-installation precautions](docs/removed-interfaces.md).
+
 ## Install and connect this machine
 
 Requirements: Python 3.11 or later and Git.
