@@ -200,6 +200,8 @@ Verify that missing inventory files do not prevent status from observing install
 Changes to installation must exercise unmanaged targets, local edits, directory contents, unrelated hook preservation, detach, and failure recovery.
 Policy changes must cover precedence, manual opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
+When adding or changing a workflow that connects multiple commands, verify that each command's outputs and selected scope match the next command's inputs and actual operation targets.
+Where source content and installed content can differ, cover link, copy, and detached states and verify which content an edit changes and which content the subsequent command consumes.
 Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
 Keep the README focused on user workflows and link to those references.
 Installation and update paths must reject unknown fields and invalid types instead of silently accepting misspelled or removed settings.
