@@ -46,6 +46,11 @@ Removing support or requiring manual reconfiguration is an incompatible change e
 No automatic migration is implied by this policy; any future conversion must preserve contents, ownership, and recoverability and be documented and tested.
 Review compatibility against existing catalogs, saved machine/state data, and installed integrations, using fixtures for the affected released contracts when implementation changes.
 
+## Changelog and releases
+
+Maintain [CHANGELOG.md](CHANGELOG.md) alongside notable user-visible changes and contributor workflow changes.
+Release entries correspond to the package version in `pyproject.toml` and its `vX.Y.Z` Git tag, using the compatibility policy above.
+
 ## Development and validation
 
 Use Python 3.11 or later and Git.

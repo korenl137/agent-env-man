@@ -22,6 +22,7 @@ Prepared sources remain usable offline.
 - [Command reference](docs/commands.md): complete command and option list.
 - [Instruction walkthrough](docs/instruction-bundles.md): external and Git bundles on Linux/WSL and Windows.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
+- [Changelog](CHANGELOG.md): release history and upcoming changes.
 - [Contributing](CONTRIBUTING.md): development and validation contracts.
 
 ## Versioning and compatibility
