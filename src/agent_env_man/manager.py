@@ -551,6 +551,50 @@ class Manager:
             self.state.save()
         return [{"item": key, "action": "detach"} for key in keys]
 
+    def publish(self, names, *, message=None, dry_run=False, timeout=30):
+        """Publish each selected checkout once, reporting every catalog consumer.
+
+        Names select sources, not file scopes. Installation records and automatic
+        update clocks are independent of publication and remain untouched.
+        """
+        self.state.ready()
+        sources = self.config.sources
+        if not names or set(names) - sources.keys():
+            raise Error("publish requires known catalog skill or instruction bundle names")
+        if message is not None and not message.strip():
+            raise Error("--message must not be empty")
+        groups = {}
+        for name, source in sources.items():
+            groups.setdefault(source.path, []).append((name, source))
+        results, failed = [], False
+        for path, members in groups.items():
+            selected = sorted(name for name, _ in members if name in names)
+            if not selected:
+                continue
+            source = members[0][1]
+            report = {"checkout": str(path), "repository": source.git,
+                      "selected": selected, "members": sorted(name for name, _ in members),
+                      "status": "planned"}
+            results.append(report)
+            try:
+                if not source.git:
+                    raise Error(f"{source.name}: external source publication is managed outside AEM")
+                source = self.delivery_source(source)
+                git = Git(timeout)
+                report.update(git.publication(source))
+                if not dry_run:
+                    git.publish(source, report, message=message)
+            except (Error, OSError) as exc:
+                failed = True
+                report.update(status="failed", error=str(exc))
+            if not dry_run and "last_fetch" in report:
+                for name, _ in members:
+                    self.state.data["sources"].setdefault(name, {}).update(
+                        {key: report[key] for key in ("last_fetch", "observed_revision", "last_publish", "revision")
+                         if key in report})
+                self.state.save()
+        return results, failed
+
     def update(self, names=(), *, timeout=30):
         self.state.ready()
         if set(names) - self.config.sources.keys():

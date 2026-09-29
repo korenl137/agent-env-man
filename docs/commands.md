@@ -17,6 +17,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `setup` | Connect or remove machine startup integrations. | None. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
 | `update` | Fetch and fast-forward prepared sources. | Yes for Git. |
+| `publish` | Commit local changes and push selected checkouts. | Fetch and push; none in dry run. |
 | `apply` | Install from local prepared sources. | None. |
 | `sync` | Update all sources, then apply if every update succeeds. | Yes for Git. |
 | `auto` | Run due per-skill policies for an event. | Due skills only; none in dry run. |
@@ -86,6 +87,48 @@ Shared checkouts advance once and guard every active link, including orphaned de
 Links change immediately; copies are refreshed by apply.
 External sources only receive an existence check (`external-no-fetch`).
 Dirty, divergent, local-ahead, detached, misidentified, or unsupported incoming checkouts are refused.
+
+## publish
+
+```text
+aem publish NAME [NAME ...] [-m MESSAGE | --message MESSAGE]
+            [--dry-run] [--timeout TIMEOUT]
+```
+
+Edit the prepared checkout directly, or edit through an installed link pointing to it.
+Select catalog skill or instruction bundle names, not ownership IDs or repository aliases:
+
+```bash
+aem publish report personal --dry-run
+aem publish report personal -m "Clarify report and instruction guidance"
+```
+
+The optional dry run is offline and shows checkout paths, every inventory member sharing each checkout, changed files, the tracked diff against HEAD, and outgoing commit IDs/subjects relative to the last fetched remote reference.
+Untracked files appear in the changed-file listing; their contents are not included in the diff.
+Review full existing commit patches with Git in the reported checkout when needed.
+Dry run does not stage, commit, push, fetch, or update ownership/source records.
+Its remote comparison can be stale; actual publication fetches before staging.
+
+Selection chooses whole repositories, not file scopes.
+Each shared checkout is processed once, even if several selected skills or bundles reference it.
+With `-m`, all nonignored changes in that checkout are staged and committed, including deletions, untracked files, previously staged changes, and changes outside declared skill directories.
+The same message is used for each selected checkout needing a commit.
+AEM reports the repository scope but does not determine whether unrelated files belong in the commit or outgoing history.
+Without `-m`, publish requires no uncommitted changes and pushes existing commits.
+No interactive confirmation or editor is required; use the optional dry run for review and supply a message when committing.
+
+Publication uses the configured Git identity and signing settings, the registered origin URL, and the inventory branch (or the default branch recorded at bootstrap).
+As with other AEM Git operations, repository Git hooks are disabled and authentication cannot prompt.
+Only the selected branch is pushed, without force, additional branches, or tags; a different origin push URL is rejected.
+Behind/diverged histories, wrong branches, and unfinished Git operations must be reconciled explicitly with Git before retrying.
+Ignored untracked files are left alone by publication; the existing update/apply cleanliness rules still apply afterward.
+
+Results are JSON grouped by checkout, with independent success/failure outcomes; any failure exits 1.
+Publication is not atomic across repositories or between commit and push.
+A failed commit may leave staged changes, and a failed push retains the local commit; inspect the reported error and retry after resolving it.
+Publication does not install content or update automatic-policy attempt clocks.
+For copy installations, edit the checkout and run apply after committing; changes made only in an installed copy or detached copy are not collected into the source.
+External sources are reported as unsupported for publication; their synchronization remains outside AEM.
 
 ## apply
 

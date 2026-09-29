@@ -99,6 +99,11 @@ def parser():
     update = commands.add_parser("update", help="fetch and fast-forward Git sources; live links change immediately")
     update.add_argument("source", nargs="*")
     update.add_argument("--timeout", type=float, default=30)
+    publish = commands.add_parser("publish", help="commit and push whole checkouts selected by skill or instruction name")
+    publish.add_argument("source", nargs="+", metavar="NAME")
+    publish.add_argument("-m", "--message", help="commit all nonignored checkout changes with this message before pushing")
+    publish.add_argument("--dry-run", action="store_true", help="review grouped changes and commits offline without staging, committing, or pushing")
+    publish.add_argument("--timeout", type=float, default=30)
     for name in ("apply", "sync"):
         command = commands.add_parser(name, help="install registered local items" if name == "apply" else "update, then apply only if all updates succeed")
         command.add_argument("--agent", choices=tuple(PROFILES))
@@ -186,6 +191,8 @@ def main(argv=None):
                 report, failed = bootstrap_skills(config, state, args)
             elif args.command == "update":
                 report, failed = manager.update(args.source, timeout=args.timeout)
+            elif args.command == "publish":
+                report, failed = manager.publish(args.source, message=args.message, dry_run=args.dry_run, timeout=args.timeout)
             elif args.command == "apply":
                 report = manager.apply(args.item, adopt=args.adopt, replace=args.replace,
                                        reattach=args.reattach, dry_run=args.dry_run, timeout=args.timeout, agent=args.agent)

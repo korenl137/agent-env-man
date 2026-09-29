@@ -155,6 +155,24 @@ aem locate personal              # Resolve installed instruction paths.
 `sync --item` filters only installation, while its update phase still visits all sources.
 See [Commands](docs/commands.md) for all arguments, previews, callbacks, and exit codes.
 
+## Edit and publish
+
+Edit a prepared checkout directly or through its installed link, then publish by catalog skill or instruction bundle name:
+
+```bash
+aem publish report --dry-run                # Review local changes and outgoing commits.
+aem publish report -m "Clarify guidance"    # Commit checkout changes and push.
+aem publish report                         # Push changes already committed.
+```
+
+Pass multiple names to publish several sources; shared checkouts are grouped and processed once, with all connected skills and instructions listed.
+Selection covers the whole repository, including files outside declared skills.
+The optional dry run is offline; publication fetches first and leaves behind/diverged histories for explicit reconciliation.
+A failed push retains the local commit for retry.
+For copy installations, edit the checkout and apply after committing; installed-copy edits are not collected automatically.
+External-folder synchronization stays with its existing service.
+See [publish](docs/commands.md#publish) for commit scope, Git settings, and failure behavior.
+
 ## Automatic updates
 
 Automatic updates default to disabled (`trigger = "manual"`).

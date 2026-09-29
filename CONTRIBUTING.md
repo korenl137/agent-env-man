@@ -86,6 +86,18 @@ Preserve original documents and use the existing per-target conflict/recovery ma
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
 Instruction automatic policies are not supported; skill policies may still advance shared checkouts.
 
+## Publication contracts
+
+Explicit publish selects catalog skill or instruction bundle names and groups them by the existing checkout identity, reporting all catalog consumers of each selected checkout.
+Do not infer per-skill file ownership for publication: commit and push operate on the whole repository, including changes outside catalog subdirectories.
+A supplied message authorizes staging all nonignored changes; without it, require a clean worktree and publish existing commits only.
+Keep preview offline and preserve the index, HEAD, installation records, and automatic-policy attempt clocks.
+Fetch before staging and refuse behind/diverged histories without rewriting or merging them.
+Push only the registered branch to the registered origin, without force or implicit additional refs.
+Preserve staged changes/commits after failures, report independent repository outcomes, and never claim cross-repository atomicity.
+External synchronization, fork/PR workflows, and collecting installed-copy edits are outside this command's scope.
+Exercise shared skill/instruction consumers, unrelated files, existing commits, offline preview, rejected histories, remote failure, and retry using local Git fixtures.
+
 ## Automatic update contracts
 
 Resolve policies by explicit field override: built-in defaults, catalog-wide defaults, one named policy, then skill-local fields.

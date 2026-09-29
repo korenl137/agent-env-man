@@ -74,6 +74,10 @@ class Git:
             raise Error(f"{source.name}: dirty checkout; commit or reconcile changes explicitly")
         if self.run(source.path, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
             raise Error(f"{source.name}: ignored local files exist; keep local-only data outside the managed checkout")
+        self.idle(source)
+
+    def idle(self, source: Source):
+        """Reject incomplete Git operations without requiring a clean worktree."""
         for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
             name = self.run(source.path, "rev-parse", "--git-path", marker).stdout
             location = Path(name)
@@ -81,6 +85,56 @@ class Git:
                 location = source.path / location
             if location.exists():
                 raise Error(f"{source.name}: unfinished Git operation ({marker})")
+
+    def publication(self, source: Source) -> dict:
+        """Inspect the entire checkout offline, using the last fetched remote ref."""
+        self.validate(source)
+        self.idle(source)
+        destinations = self.run(source.path, "remote", "get-url", "--push", "--all", "origin").stdout.splitlines()
+        if destinations != [source.git]:
+            raise Error(f"{source.name}: origin push destination differs from the registered Git URL")
+        relation = self.relation(source)
+        commits = []
+        if relation != "unknown":
+            commits = self.run(source.path, "log", "--format=%H %s",
+                               f"refs/remotes/origin/{source.branch}..HEAD").stdout.splitlines()
+        return {"branch": source.branch, "remote_relation": relation,
+                "changes": self.run(source.path, "status", "--porcelain=v1", "--untracked-files=all").stdout,
+                "diff": self.run(source.path, "diff", "--no-ext-diff", "--no-textconv", "HEAD", "--").stdout,
+                "commits": commits}
+
+    def publish(self, source: Source, report: dict, *, message=None):
+        """Commit all nonignored changes when requested, then push the selected branch.
+
+        Fetch precedes staging so known remote conflicts leave local changes alone.
+        Failure after staging/commit preserves that work for inspection and retry;
+        publication is not a transaction and never rewrites local or remote history.
+        """
+        if report["changes"] and message is None:
+            raise Error(f"{source.name}: uncommitted changes; supply --message to commit the whole checkout")
+        observed = self.fetch(source)
+        report.update(last_fetch=now(), observed_revision=observed)
+        report.update(self.publication(source))
+        if report["remote_relation"] not in ("ahead", "equal-at-last-fetch"):
+            raise Error(f"{source.name}: {report['remote_relation']}; reconcile Git history manually")
+        if report["changes"]:
+            if message is None:
+                raise Error(f"{source.name}: checkout changed; supply --message or commit explicitly")
+            self.run(source.path, "add", "--all", "--", ".")
+            staged = self.run(source.path, "diff", "--cached", "--quiet", check=False)
+            if staged.returncode not in (0, 1):
+                raise Error(f"{source.name}: cannot inspect staged changes")
+            if staged.returncode:
+                self.run(source.path, "commit", "-m", message)
+                report["created_commit"] = self.run(source.path, "rev-parse", "HEAD").stdout
+        self.validate(source)
+        self.idle(source)
+        revision = self.run(source.path, "rev-parse", "HEAD").stdout
+        # Pin the reviewed commit and refspec; do not inherit push.default,
+        # matching branches, followTags, or a configured mirror push.
+        self.run(source.path, "-c", "remote.origin.mirror=false", "push", "--porcelain", "--no-follow-tags",
+                 "origin", f"{revision}:refs/heads/{source.branch}")
+        report.update(status="published", revision=revision, observed_revision=revision, last_publish=now())
 
     def fetch(self, source: Source) -> str:
         self.validate(source)
