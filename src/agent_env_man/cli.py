@@ -127,9 +127,10 @@ def parser():
     detach.add_argument("--agent", choices=tuple(PROFILES))
     detach.add_argument("item", nargs="+", metavar="NAME")
     detach.add_argument("--dry-run", action="store_true")
-    locate = commands.add_parser("locate", help="resolve an installed instruction bundle root and entry as JSON without fetching")
+    locate = commands.add_parser("locate", help="locate installed skill/instruction content or prepared source paths without fetching")
     locate.add_argument("--agent", default="codex", choices=tuple(PROFILES))
-    locate.add_argument("name", help="instruction bundle name")
+    locate.add_argument("name", help="catalog skill or instruction bundle name")
+    locate.add_argument("--source", action="store_true", help="resolve the current catalog source for editing and publication")
     commands.add_parser("recover", help="restore the previous target after an interrupted replacement")
     startup = commands.add_parser("startup", help="fail-open startup callback; policies still select the work")
     startup.add_argument("--trigger", required=True, choices=TRIGGERS)
@@ -201,7 +202,7 @@ def main(argv=None):
             elif args.command == "agent-hook":
                 report = manager.hook_context(args.name, args.agent)
             elif args.command == "locate":
-                report = manager.locate(args.name, args.agent)
+                report = manager.locate(args.name, args.agent, source=args.source)
             elif args.command == "status":
                 report = (manager.saved_status(agent=args.agent, error=saved_error) if saved_error
                           else manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent))

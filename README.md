@@ -157,9 +157,10 @@ See [Commands](docs/commands.md) for all arguments, previews, callbacks, and exi
 
 ## Edit and publish
 
-Edit a prepared checkout directly or through its installed link, then publish by catalog skill or instruction bundle name:
+Find the prepared source with `locate --source`, edit it directly or through its installed link, then publish by catalog skill or instruction bundle name:
 
 ```bash
+aem locate report --source                  # Find the prepared source to edit.
 aem publish report --dry-run                # Review local changes and outgoing commits.
 aem publish report -m "Clarify guidance"    # Commit checkout changes and push.
 aem publish report                         # Push changes already committed.

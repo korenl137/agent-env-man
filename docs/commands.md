@@ -23,7 +23,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `auto` | Run due per-skill policies for an event. | Due skills only; none in dry run. |
 | `status` | Inspect sources and saved installations. | Only with `--refresh`. |
 | `detach` | Preserve contents and release ownership. | None. |
-| `locate` | Resolve saved instruction paths. | None. |
+| `locate` | Find installed content or prepared editing sources. | None. |
 | `recover` | Recover an interrupted target replacement. | None. |
 | `startup` | Fail-open automatic-update callback. | According to due policies. |
 | `agent-hook` | Emit instruction locations for the selected agent. | None. |
@@ -209,15 +209,31 @@ Unknown fields and unselected records are preserved; no legacy config-merge pars
 ## locate
 
 ```text
-aem locate NAME [--agent AGENT]
+aem locate NAME [--agent AGENT] [--source]
 ```
 
-The agent defaults to `codex`.
-Returns `root`, `entry`, `installed_root`, and `detached` for an installed instruction bundle.
-Uses saved state without validating installation fields, loading the catalog, fetching, or changing ownership.
-Versions 1 and 2 are accepted, but the selected bundle still needs a usable saved locator record.
-Missing or redirected entries and replaced active links are errors.
-Detached bundles resolve to preserved local contents.
+The agent defaults to `codex`; NAME is a catalog skill or instruction bundle name.
+By default, returns `root`, `entry`, `installed_root`, and `detached` from the selected agent's saved installation when one exists.
+For skills, `entry` is SKILL.md, and `location` distinguishes a linked source from a copy.
+An installed copy or detached item resolves to its preserved local contents, not the publish source.
+Saved lookup works without loading the catalog or validating installation fields, accepts state versions 1 and 2, and never changes ownership.
+Missing or redirected entries and replaced active links are errors; a broken installation never silently falls back to its source.
+
+If no saved installation exists for the selected agent, locate resolves the prepared source from the current catalog.
+Use `--source` to request that source explicitly even when a copy, detached item, or broken installation exists.
+Source lookup returns `location: "source"`, `root`, `entry`, `checkout` (null for external folders), `repository`, and all source names sharing the checkout in `members`.
+It sets `installed_root` to null and `detached` to false because it describes the source, not an installation.
+It requires a valid current machine/catalog configuration and existing source content; it does not clone or fetch.
+Git source lookup validates the registered repository and branch but allows uncommitted edits.
+Use the returned root/entry to edit, then `publish NAME` for Git content; external synchronization stays outside AEM.
+
+```bash
+aem locate report --source
+# Edit the returned entry or other files under root.
+aem publish report -m "Clarify guidance"
+```
+
+Instruction callbacks continue to use saved instruction installations only, without catalog fallback or source lookup.
 
 ## recover
 

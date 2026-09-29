@@ -77,7 +77,11 @@ Report the required /hooks trust review after apply; preview must show the plann
 Detach materializes both links and releases hook ownership while retaining its configuration, so saved locator records still support preserved documents.
 Default bundle installation to `<machine-file>.bundles/<bundle-name>` without requiring a configured rules root; preserve explicit location overrides and relocation guards.
 Resolve roots from saved installation records and actual filesystem links, not from prompt text or the current catalog.
-The locator must remain offline, avoid updating ownership records, work for detached copies without a catalog, and reject missing or redirected entries and replaced active links.
+Saved location lookup must remain offline, avoid updating ownership records, work for detached copies without a catalog, and reject missing or redirected entries and replaced active links.
+User-facing locate also supports saved skills and current catalog source lookup for uninstalled content or explicit --source requests.
+Keep callbacks on saved instruction lookup only; never fall back from a broken saved installation to a different source.
+Source lookup validates paths and Git identity without requiring a clean checkout, fetching, or installing content.
+Keep copy/detached locations distinct from source editing paths so publication never implies collecting installed-copy edits.
 Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
 The callback emits only path metadata as additionalContext, never document contents, and requests a structured stop on lookup failure.
 Instruction callbacks wait at most 5 seconds for the configuration lock within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.

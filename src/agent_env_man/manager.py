@@ -11,7 +11,7 @@ import uuid
 
 from .agents import profile, suffix
 from .git_source import Git, now
-from .model import MachineFile, Error, Item, identifier, overlaps, relative
+from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path
 
 
@@ -205,7 +205,78 @@ class Manager:
             raise Error(f"{item.key}: instruction entry must be a regular file")
         return fingerprint(item.source, exclude_git=item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".")
 
-    def locate(self, name, agent="codex"):
+    def locate(self, name, agent="codex", *, source=False):
+        """Locate saved content by default, or current catalog source content explicitly.
+
+        Saved locations take precedence even when broken: never silently redirect
+        an installed-copy edit to the source. Only a missing record falls back to
+        the catalog; instruction callbacks retain their saved-only lookup.
+        """
+        self.state.ready()
+        identifier(name)
+        profile(agent)
+        if not source:
+            record = self.state.data["items"].get(f"{name}:bundle{suffix(agent)}")
+            if record is not None:
+                return self.locate_instruction(name, agent)
+            records = [r for r in self.state.data["items"].values()
+                       if r.get("kind") == "skill" and r.get("source_name") == name
+                       and agent in (r.get("agents") or [r.get("agent", "codex")])]
+            if len(records) > 1:
+                raise Error(f"{name}: ambiguous saved skill locations for {agent}")
+            if records:
+                record = records[0]
+                target = saved_path(record.get("target"))
+                linked = record.get("mode") == "link" and not record.get("detached")
+                if linked:
+                    if observation(target) != {"kind": "link", "to": record.get("source")}:
+                        raise Error(f"{name}: installed skill link was replaced; inspect status")
+                elif record.get("mode") not in ("link", "copy"):
+                    raise Error(f"{name}: unsupported saved skill mode")
+                elif target.is_symlink() or is_reparse(target):
+                    raise Error(f"{name}: saved skill copy was replaced by a link")
+                root = target.resolve(strict=True)
+                self.locate_entry(root, root / "SKILL.md")
+                return {"root": str(root), "entry": str(root / "SKILL.md"),
+                        "installed_root": str(target), "detached": bool(record.get("detached")),
+                        "location": "source" if linked else "copy"}
+        config = Config(self.config.path)
+        sources = config.sources
+        if name not in sources:
+            raise Error(f"{name}: unknown catalog skill or instruction bundle")
+        selected = sources[name]
+        items = [i for i in config.declarations(selected) if i.kind in ("skill", "instruction")
+                 and agent in (i.agents or (i.agent,))]
+        if not items:
+            raise Error(f"{name}: no declaration for agent {agent}")
+        item = items[0]
+        if not selected.path.is_dir():
+            raise Error(f"{name}: source is missing; run bootstrap or restore the external folder")
+        if selected.git:
+            Git().validate(self.delivery_source(selected))
+        entry = item.source / ("SKILL.md" if item.kind == "skill" else item.entry)
+        self.locate_entry(selected.path, entry)
+        return {"root": str(item.source), "entry": str(entry), "installed_root": None,
+                "detached": False, "location": "source", "repository": selected.git,
+                "checkout": str(selected.path) if selected.git else None,
+                "members": sorted(n for n, s in sources.items() if s.path == selected.path)}
+
+    @staticmethod
+    def locate_entry(root, entry):
+        """Validate the entry and its ancestry without reading or hashing content."""
+        if not root.is_dir():
+            raise Error(f"Source directory is missing: {root}")
+        cursor = entry
+        while True:
+            if cursor.is_symlink() or (cursor.exists() and is_reparse(cursor)):
+                raise Error(f"Source entry contains a symlink/junction: {cursor}")
+            if cursor == root:
+                break
+            cursor = cursor.parent
+        if not entry.is_file():
+            raise Error(f"Source entry is missing: {entry}")
+
+    def locate_instruction(self, name, agent="codex"):
         """Resolve a saved installation without loading its catalog or fetching sources.
 
         Detached bundles resolve to their preserved directory; active bundles
@@ -239,7 +310,7 @@ class Manager:
 
     def hook_context(self, name, agent="codex"):
         """Return location metadata only; personal instruction text stays in AGENTS.md."""
-        found = self.locate(name, agent)
+        found = self.locate_instruction(name, agent)
         record = self.state.data["items"].get(f"{name}:entry{suffix(agent)}")
         if not record or record.get("kind") != "instruction-entry" or record["mode"] != "link":
             raise Error(f"{name}: original instruction entry link is not installed")
