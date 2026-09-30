@@ -8,18 +8,25 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.3.0] &mdash; 2026-09-30
+
+Existing configurations retain policy-driven automation by default; full automation requires explicit opt-in.
+During 0.x, `compatible` self-updates stay within the current minor series; upgrading from 0.2.x to 0.3.0 requires an explicit upgrade or `breaking` permission.
+
 ### Added
 
 - Installer/setup-selected device automation modes (`off`, `policies`, `full`), a unified event/preview command, and sequential full runs through tool replacement, fresh-CLI catalog refresh, and eligible content preparation/update/application with shared throttling.
+Full runs preserve explicit manual exclusions and detached installations, stop later stages on failure, and retain the existing live-link effects of shared checkouts.
 - Opt-in machine-owned catalog automatic triggers configured through bootstrap/setup options, independent attempt throttling, `catalog auto`, and validated catalog refresh before startup skill policies.
 - Installer-selected `off`, `compatible`, and `breaking` AEM self-update modes, release-tag updates queued after startup exits, and independent `self status` / `self update` commands.
-
+Updates validate release metadata, use an external worker after the requesting process exits, and serialize replacement across configurations sharing an installation.
 - Changelog with release history and contributor guidance for maintaining release notes.
 - Git-delivered catalogs registered through bootstrap repository/path arguments, with automatic machine binding and separate checkouts.
 - Explicit `catalog status`, `locate`, `update`, and `publish` commands, including validation before catalog updates and offline publication previews.
 
 ### Changed
 
+- Automation settings can be changed through configuration-only `setup` calls without registering integrations or rewriting shell profiles.
 - Require validation across connected command workflows, including the distinction between installed content and editable source checkouts.
 
 ## [0.2.0] &mdash; 2026-09-29
@@ -61,6 +68,7 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mirinae3145/agent-env-man/tree/v0.1.0
