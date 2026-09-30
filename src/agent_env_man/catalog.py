@@ -205,7 +205,9 @@ def run_auto(config, state, trigger, *, dry_run=False):
         raise Error(f'Unknown automatic update trigger: {trigger}')
     policy = config.catalog_update
     report = {'policy': policy, 'status': 'not-triggered'}
-    if trigger not in policy['trigger']:
+    if config.automation['mode'] == 'full':
+        raise Error('Use automation --trigger EVENT in full mode')
+    if config.automation['mode'] == 'off' or trigger not in policy['trigger']:
         return report, False
     state.ready()
     source = source_for(config)

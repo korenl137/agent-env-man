@@ -58,8 +58,9 @@ py -3 scripts/setup.py --shell powershell --agent codex
 ```
 
 The installer uses `uv tool install --reinstall` and then `aem setup` to connect startup integrations.
-On first interactive installation, select automatic AEM updates: `off`, `compatible`, or `breaking`.
-For unattended installation, supply `--self-update compatible` (or another mode); omission defaults to `off`.
+On first interactive installation, select the device automation mode (`policies`, `full`, or `off`), then the AEM release range (`off`, `compatible`, or `breaking`) when automation is enabled.
+For unattended installation, supply `--automation full --self-update compatible` to enable the full sequence.
+Omission preserves existing settings; a new installation defaults to `policies` with tool updates off.
 Reinstallation preserves a saved mode and release repository unless explicitly overridden.
 It does not bind a catalog or install skills/instructions.
 Open a new selected shell to use the updated PATH.
@@ -223,6 +224,44 @@ For copy installations, edit the checkout and apply after committing; installed-
 External-folder synchronization stays with its existing service.
 See [publish](docs/commands.md#publish) for commit scope, Git settings, and failure behavior.
 
+## Device automation modes
+
+```bash
+python scripts/setup.py --shell bash --agent codex --automation full --self-update compatible
+aem setup --automation full --automation-trigger shell-start --automation-trigger agent-start \
+  --automation-interval 3600 --automation-timeout 30
+aem automation --trigger agent-start --dry-run
+aem setup --automation policies
+aem setup --automation off
+```
+
+`policies` is the backward-compatible default: tool, catalog, and skill policies run as before.
+`off` disables startup and event-driven automatic work; explicit update, sync, catalog update, and self update commands remain available.
+`full` queues one sequential run after the requesting process exits:
+
+1. Update AEM within its saved release range, or skip this stage when tool updates are off.
+1. Invoke the installed AEM afresh and validate/fast-forward the Git catalog; local or unbound catalogs skip delivery.
+1. Prepare and update eligible skill/instruction sources, then apply after all selected delivery succeeds.
+
+Full mode uses one shared trigger list and attempt interval, including failed attempts.
+Its defaults are shell/agent startup, 3600 seconds between attempts, and 30 seconds per content/catalog Git phase.
+It replaces individual automatic triggers, intervals, and check/sync actions for this run.
+Skills without an explicit trigger policy participate; explicit `manual` exclusions resolve through catalog defaults, named policy, and skill fields.
+Detached skills and detached instruction groups remain excluded.
+Shared checkout updates can still change linked consumers excluded from installation, including manual skills; this is the existing shared-source contract.
+It never adopts conflicts, replaces user edits, reattaches detached content, removes undeclared targets, or grants agent hook trust.
+New valid catalog declarations can be prepared and installed in full mode.
+A failed stage stops later stages; successful earlier work remains and normal per-target recovery rules apply.
+
+The installer must register an external Python, uv, and the installation directories before full mode can be enabled, even when tool updates are off.
+No OS scheduler or daemon is installed: use startup integrations or `aem automation --trigger interval` from an external scheduler.
+`aem auto` and `aem catalog auto` require `policies` mode; use the unified automation command in full mode to avoid duplicate event paths.
+Policy-only setup edits require no profile changes; omitted fields retain saved values and supplied trigger lists replace the saved list.
+Inspect the eventual sequence and stage results under `automation` in `aem status`.
+Queued work is not yet completed; changed mode/runtime settings cancel pending work.
+Registered commands may report lock contention while the worker or continuation holds the installation/configuration locks.
+Native Windows replacement and real uv reinstallation retain their existing validation limits.
+
 ## Update AEM itself
 
 ```bash
@@ -241,7 +280,7 @@ AEM reads `vX.Y.Z` tags from its upstream Git repository, verifies the matching 
 Use the installer's `--update-repository URL` to select another release repository.
 Development checkout edits are not published or installed by this path.
 
-With automatic updates enabled, the existing startup callback queues at most one attempt per day across shell and agent events; failures are throttled too.
+In `policies` mode with tool updates enabled, the existing startup callback queues at most one attempt per day across shell and agent events; failures are throttled too.
 It works without a bound content catalog.
 The worker waits for the requesting AEM process to exit, then uses the installer's external Python rather than the environment being replaced.
 The saved external Python and uv executables must remain available; rerun the installer if they move.
@@ -279,7 +318,7 @@ Policy-only setup needs no executable or startup selections and leaves existing 
 The underlying `catalog_update` table remains documented in [Configuration](docs/configuration.md#catalog-automatic-update-settings).
 
 The default trigger is `manual`; automatic updates require a Git catalog binding.
-Setup's existing startup callback updates a due catalog first, then resolves skill policies from the validated new catalog.
+In `policies` mode, setup's existing startup callback updates a due catalog first, then resolves skill policies from the validated new catalog.
 If that catalog attempt fails, the callback skips skill updates for the event and still allows startup to continue.
 External callers can use `aem catalog auto --trigger interval`; add `--dry-run` for an offline preview.
 `aem auto` continues to operate on skills only.
@@ -292,7 +331,7 @@ See `aem catalog status` or `aem status` for the last automatic result.
 
 ## Automatic updates
 
-Automatic updates default to disabled (`trigger = "manual"`).
+In `policies` mode, automatic skill updates default to disabled (`trigger = "manual"`).
 Opt in through the catalog:
 
 ```toml

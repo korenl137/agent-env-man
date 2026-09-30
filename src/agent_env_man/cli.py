@@ -12,6 +12,7 @@ import tomlkit
 
 from .agents import PROFILES, profile
 from . import catalog as catalog_delivery
+from . import automation
 from .git_source import now
 from .manager import Manager
 from .model import Config, MachineFile, Error, absolute, default_config, identifier
@@ -121,6 +122,10 @@ def parser():
         setup_parser.add_argument("--update-" + field)
     setup_parser.add_argument("--dry-run", action="store_true")
     catalog_policy_arguments(setup_parser)
+    setup_parser.add_argument('--automation', choices=automation.MODES)
+    setup_parser.add_argument('--automation-trigger', action='append', choices=('manual', *TRIGGERS))
+    setup_parser.add_argument('--automation-interval', type=float)
+    setup_parser.add_argument('--automation-timeout', type=float)
     self_parser = commands.add_parser("self", help="inspect or queue release updates of AEM itself")
     self_commands = self_parser.add_subparsers(dest="self_command", required=True)
     self_commands.add_parser("status")
@@ -189,9 +194,17 @@ def parser():
     startup = commands.add_parser("startup", help="fail-open startup callback; policies still select the work")
     startup.add_argument("--trigger", required=True, choices=TRIGGERS)
     startup.add_argument("--agent", choices=tuple(PROFILES))
+    auto_flow = commands.add_parser('automation', help='run or preview the device automation mode')
+    auto_flow.add_argument('--trigger', required=True, choices=TRIGGERS)
+    auto_flow.add_argument('--dry-run', action='store_true')
+    continuation = commands.add_parser('_full-run', help=argparse.SUPPRESS)
+    continuation.add_argument('--token', required=True)
     agent_hook = commands.add_parser("agent-hook", help="emit agent-specific instruction location context")
     agent_hook.add_argument("name")
     agent_hook.add_argument("--agent", required=True, choices=tuple(PROFILES))
+    # Worker continuation is accepted internally but omitted from user help.
+    commands._choices_actions = [choice for choice in commands._choices_actions if choice.dest != '_full-run']
+    commands.metavar = '{' + ','.join(name for name in commands.choices if not name.startswith('_')) + '}'
     return result
 
 
@@ -203,9 +216,10 @@ def main(argv=None):
         remove_only = (args.command == "setup" and (args.remove_shell or args.remove_agent)
                        and not (args.shell or args.agent or args.self_update is not None
                                 or args.catalog_trigger is not None or args.catalog_interval is not None or args.catalog_timeout is not None
+                                or any(getattr(args, option) is not None for _, option in automation.FIELDS)
                                 or any(getattr(args, "update_" + field) for field in ("repository", "python", "uv", "tool_dir", "bin_dir"))))
         maintenance = args.command in ("detach", "recover", "locate", "agent-hook", "self") or remove_only
-        missing_ok = args.command in ("bootstrap", "setup", "startup", "self")
+        missing_ok = args.command in ("bootstrap", "setup", "startup", "self", "automation")
         # Find the lock without requiring installation declarations to be valid.
         config = MachineFile(args.config, missing_ok=missing_ok)
         # SessionStart callbacks can overlap each other or startup updates.
@@ -217,7 +231,7 @@ def main(argv=None):
             tool_lock = self_update.installation_lock(settings)
         except ValueError:
             tool_lock = None  # Maintenance still tolerates opaque machine fields.
-        preview = (args.command == "setup" and args.dry_run) or (args.command == "self" and getattr(args, "dry_run", False))
+        preview = (args.command == "setup" and args.dry_run) or (args.command in ("self", "automation") and getattr(args, "dry_run", False))
         with (lock(tool_lock) if tool_lock and not preview else nullcontext()), (nullcontext() if preview
               else lock(config.state_dir, timeout=lock_timeout)):
             # Read again under the lock: another process may just have registered a source.
@@ -250,34 +264,21 @@ def main(argv=None):
                     state.ready()
                     mode = args.mode or config.doc.get("self_update", {}).get("mode", "off")
                     report = self_update.schedule(config, mode="compatible" if mode == "off" else mode, dry_run=args.dry_run)
-            elif args.command == "startup":
-                self_outcome = {}
+            elif args.command in ('startup', 'automation'):
                 try:
-                    state.ready()
-                    self_outcome = self_update.schedule(config, automatic=True)
+                    result = automation.run(manager, args.trigger, dry_run=getattr(args, 'dry_run', False))
                 except (Error, OSError, ValueError, subprocess.SubprocessError) as exc:
-                    self_outcome = {"status": "failed", "error": str(exc)}
-                outcomes, catalog_outcome = [], {}
-                try:
-                    catalog_outcome, catalog_failed = catalog_delivery.run_auto(config, state, args.trigger)
-                    if catalog_failed:
-                        failed = True
-                        raise Error('Automatic catalog update failed; skill updates skipped')
-                    if catalog_outcome['status'] == 'updated':
-                        # Discard any cached declarations before resolving this
-                        # event's skill policies from the newly validated catalog.
-                        config = Config(args.config)
-                        manager = Manager(config, state)
-                    outcomes, failed = run_updates(manager, args.trigger)
-                    state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": failed, "outcomes": outcomes}
-                except (Error, OSError, ValueError) as exc:
-                    if not catalog_outcome:
-                        catalog_outcome = {"status": "failed", "error": str(exc)}
-                    state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": True, "error": str(exc)}
-                state.data["startup"]["catalog_update"] = catalog_outcome
-                state.data["startup"]["self_update"] = self_outcome
-                state.save()
-                report, failed = (profile(args.agent).startup_result(startup_briefing(outcomes)) if args.agent else {}), False
+                    if args.command != 'startup':
+                        raise
+                    result = {'status': 'failed', 'failed': True, 'error': str(exc), 'outcomes': []}
+                if args.command == 'startup':
+                    state.data['startup'] = {'trigger': args.trigger, 'time': now(), **result}
+                    state.save()
+                    report = profile(args.agent).startup_result(startup_briefing(result.get('outcomes', []))) if args.agent else {}
+                else:
+                    report, failed = result, result.get('failed', False)
+            elif args.command == '_full-run':
+                report, failed = automation.complete(manager, args.token)
             elif args.command == "bootstrap":
                 report, failed = bootstrap_skills(config, state, args)
             elif args.command == "catalog":
@@ -298,6 +299,10 @@ def main(argv=None):
             elif args.command == "status":
                 report = (manager.saved_status(agent=args.agent, error=saved_error) if saved_error
                           else manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent))
+                try:
+                    report['automation'] = automation.status(config)
+                except (Error, ValueError) as exc:
+                    report['automation'] = {'error': str(exc)}
                 if "catalog_automation" in state.data:
                     report["catalog_automation"] = state.data["catalog_automation"]
                 try:

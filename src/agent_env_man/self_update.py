@@ -7,6 +7,7 @@ process exits, including releasing its configuration and installation locks.
 import atexit
 from importlib.metadata import version
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -81,6 +82,11 @@ def select_release(output, current, mode):
     return {'version': '.'.join(map(str, selected)), 'revision': releases[selected]}
 
 
+def full_binding(document):
+    fields = {key: document.get(key, {}) for key in ('automation', 'self_update')}
+    return hashlib.sha256(json.dumps(fields, sort_keys=True).encode('utf-8')).hexdigest()
+
+
 def result_path(config):
     return config.state_dir / 'self-update.json'
 
@@ -140,21 +146,27 @@ def schedule(config, *, automatic=False, mode=None, dry_run=False):
         return {'status': 'throttled'}
     if dry_run:
         return {'status': 'planned', 'mode': selected_mode, 'network': False}
+    return launch(config, settings, {'mode': selected_mode, 'time': current}, extra={'automatic': automatic})
+
+
+def launch(config, settings, attempt, *, filename='self-update.json', extra=None):
+    """Persist a request and launch a copied worker on the external interpreter."""
     token = uuid.uuid4().hex
     directory = config.state_dir / 'self-update-worker' / token
-    attempt = {'status': 'queued', 'time': current, 'token': token, 'mode': selected_mode}
-    write_json(result_path(config), attempt)
+    result = config.state_dir / filename
+    attempt = {**attempt, 'status': 'queued', 'token': token}
+    write_json(result, attempt)
     try:
-        for field in ('python', 'uv'):
+        required = ('python',) if extra and extra.get('full') and settings.get('mode', 'off') == 'off' else ('python', 'uv')
+        for field in required:
             if not Path(settings[field]).is_file():
                 raise ValueError(f'Updater {field} is missing; rerun scripts/setup.py')
         directory.mkdir(parents=True, exist_ok=True)
-        # Copy before launching so replacement cannot remove the worker's code.
         from .storage import atomic_write
         for name in ('self_update.py', 'process_lock.py'):
             atomic_write(directory / name, Path(__file__).with_name(name).read_bytes())
         request = {'token': token, 'parent_pid': os.getpid(), 'config': str(config.path), 'settings': settings,
-                   'saved_settings': dict(config.doc.get('self_update', {}))}
+                   'saved_settings': dict(config.doc.get('self_update', {})), 'filename': filename, **(extra or {})}
         request_path = directory / 'request.json'
         write_json(request_path, request)
         options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
@@ -164,7 +176,7 @@ def schedule(config, *, automatic=False, mode=None, dry_run=False):
                                  close_fds=True, **options)
     except (OSError, ValueError) as exc:
         shutil.rmtree(directory, ignore_errors=True)
-        write_json(result_path(config), {**attempt, 'status': 'failed', 'error': str(exc), 'finished': time.time()})
+        write_json(result, {**attempt, 'status': 'failed', 'error': str(exc), 'finished': time.time()})
         raise
     _children.append(child)
     return attempt
@@ -267,7 +279,8 @@ def worker(request_path):
     request = json.loads(request_path.read_text(encoding='utf-8'))
     config = Path(request['config'])
     state_dir = config.parent / (config.name + '.state')
-    result = state_dir / 'self-update.json'
+    result = state_dir / request.get('filename', 'self-update.json')
+    continue_full = False
     try:
         parent_exited = wait_for_parent(request['parent_pid'])
         with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
@@ -280,16 +293,41 @@ def worker(request_path):
                     outcome = {'status': 'failed', 'error': 'Could not confirm requesting process exit'}
                 elif document.get('self_update', {}) != request['saved_settings']:
                     outcome = {'status': 'cancelled', 'reason': 'Self-update settings changed'}
+                elif request.get('automatic') and document.get('automation', {}).get('mode', 'policies') != 'policies':
+                    outcome = {'status': 'cancelled', 'reason': 'Automation mode changed'}
+                elif request.get('full') and document.get('automation', {}) != request['saved_automation']:
+                    outcome = {'status': 'cancelled', 'reason': 'Automation settings changed'}
                 elif json.loads((state_dir / 'state.json').read_text(encoding='utf-8')).get('pending') is not None:
                     outcome = {'status': 'cancelled', 'reason': 'Recovery is pending'}
                 else:
-                    outcome = perform(request)
+                    outcome = ({'status': 'disabled'} if request.get('full') and request['settings'].get('mode', 'off') == 'off'
+                               else perform(request))
+                    continue_full = bool(request.get('full'))
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 # Do not persist subprocess output: Git URLs/build logs may
                 # contain credentials. Explicit updates can retry immediately.
                 outcome = {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
                                                          else f'{type(exc).__name__}: release update failed')}
-            write_json(result, {**previous, **outcome, 'finished': time.time()})
+            if continue_full:
+                write_json(result, {**previous, 'status': 'continuing', 'stages': {'tool': outcome}})
+            else:
+                write_json(result, {**previous, **outcome, 'finished': time.time()})
+        if continue_full:
+            # Release both locks before the fresh CLI acquires them. Keep a
+            # one-use token in the result so retries cannot repeat a continuation.
+            executable = Path(request['settings']['bin_dir']) / ('aem.exe' if os.name == 'nt' else 'aem')
+            try:
+                process = subprocess.run([str(executable), '--config', str(config), '_full-run',
+                                          '--token', request['token']], capture_output=True)
+                failed = process.returncode != 0
+            except (OSError, subprocess.SubprocessError):
+                failed = True
+            if failed:
+                with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
+                    latest = read_result(result)
+                    if latest.get('token') == request['token'] and latest.get('status') == 'continuing':
+                        write_json(result, {**latest, 'status': 'failed', 'error': 'Fresh AEM continuation failed',
+                                            'finished': time.time()})
     finally:
         shutil.rmtree(request_path.parent, ignore_errors=True)
 

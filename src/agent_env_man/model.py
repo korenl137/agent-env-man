@@ -101,7 +101,7 @@ class Config(MachineFile):
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update"}
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update", "automation"}
         if unknown:
             raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
         if not isinstance(self.doc.get("roots", {}), dict):
@@ -179,6 +179,10 @@ class Config(MachineFile):
         self.catalog_update = catalog_policy(self.doc.get("catalog_update", {}))
         if self.catalog_update['trigger'] != ['manual'] and self.catalog_source is None:
             raise Error('Automatic catalog updates require a Git catalog binding')
+        from .automation import policy, runtime
+        self.automation = policy(self.doc.get('automation', {}))
+        if self.automation['mode'] == 'full':
+            runtime(self.doc.get('self_update', {}))
         self.modes = self.doc.get("modes", {})
         if not isinstance(self.modes, dict) or any(v not in ("link", "copy") for v in self.modes.values()):
             raise Error("Machine modes must map skill names to link or copy")
@@ -294,6 +298,10 @@ class Config(MachineFile):
         from .updates import resolve_policies
 
         self._update_policies = resolve_policies(document.get("updates", {}), skills)
+        # Full mode supplies its own opt-in default; explicit catalog/manual
+        # overrides still resolve through the same precedence rules.
+        from .updates import TRIGGERS
+        self._full_update_policies = resolve_policies(document.get('updates', {}), skills, default_trigger=list(TRIGGERS))
         self._repositories = repositories
         self._catalog = skills
         return skills
@@ -312,6 +320,10 @@ class Config(MachineFile):
         """Return validated effective policies from the currently bound catalog."""
         self.catalog()
         return self._update_policies
+
+    def full_update_policies(self):
+        self.catalog()
+        return getattr(self, '_full_update_policies', {})
 
     @property
     def sources(self) -> dict[str, Source]:

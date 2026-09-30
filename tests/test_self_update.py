@@ -271,9 +271,9 @@ class InstallerChoices(SetupFixture):
         with patch.object(module.shutil, 'which', side_effect=lambda n: '/fake/' + n), \
                 patch.object(module.subprocess, 'run', side_effect=run), \
                 patch.object(module.sys.stdin, 'isatty', return_value=True), \
-                patch('builtins.input', side_effect=['invalid', 'compatible']) as prompt, redirect_stdout(io.StringIO()):
+                patch('builtins.input', side_effect=['policies', 'invalid', 'compatible']) as prompt, redirect_stdout(io.StringIO()):
             self.assertEqual(module.main(['--shell', 'bash', '--config', str(self.config)]), 0)
-            self.assertEqual(prompt.call_count, 2)
+            self.assertEqual(prompt.call_count, 3)
         self.assertIn('compatible', calls[-1])
         self.config.write_text('version = 1\n[self_update]\nmode = "breaking"\nrepository = "https://example.test/aem.git"\n')
         with patch.object(module.shutil, 'which', side_effect=lambda n: '/fake/' + n), \
@@ -282,3 +282,27 @@ class InstallerChoices(SetupFixture):
             prompt.assert_not_called()
         self.assertNotIn('--self-update', calls[-1])
         self.assertNotIn('--update-repository', calls[-1])
+
+    def test_installer_forwards_full_mode_and_shared_clock_options(self):
+        module = self.module()
+        calls = []
+        def run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout=str(self.root / 'tools'))
+        with patch.object(module.shutil, 'which', side_effect=lambda n: '/fake/' + n), \
+                patch.object(module.subprocess, 'run', side_effect=run), patch('builtins.input') as prompt:
+            self.assertEqual(module.main(['--shell', 'bash', '--config', str(self.config), '--automation', 'full',
+                                         '--self-update', 'off', '--automation-trigger', 'interval',
+                                         '--automation-interval', '600']), 0)
+            prompt.assert_not_called()
+        command = calls[-1]
+        self.assertEqual(command[command.index('--automation') + 1], 'full')
+        self.assertEqual(command[command.index('--automation-trigger') + 1], 'interval')
+        self.assertEqual(command[command.index('--automation-interval') + 1], '600.0')
+
+    def test_invalid_installer_flow_options_fail_before_install(self):
+        module = self.module()
+        with patch.object(module.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(module.main(['--automation-timeout', '0']), 1)
+            self.assertEqual(module.main(['--automation-trigger', 'manual', '--automation-trigger', 'interval']), 1)
+            run.assert_not_called()

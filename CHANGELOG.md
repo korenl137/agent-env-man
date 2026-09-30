@@ -10,6 +10,7 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Added
 
+- Installer/setup-selected device automation modes (`off`, `policies`, `full`), a unified event/preview command, and sequential full runs through tool replacement, fresh-CLI catalog refresh, and eligible content preparation/update/application with shared throttling.
 - Opt-in machine-owned catalog automatic triggers configured through bootstrap/setup options, independent attempt throttling, `catalog auto`, and validated catalog refresh before startup skill policies.
 - Installer-selected `off`, `compatible`, and `breaking` AEM self-update modes, release-tag updates queued after startup exits, and independent `self status` / `self update` commands.
 

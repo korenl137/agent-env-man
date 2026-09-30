@@ -117,7 +117,8 @@ Bootstrap supplies `roots.agent`, but an instruction declaration must either ref
 Codex is the only shipped agent profile.
 An instruction creates `NAME:bundle`, `NAME:entry`, and `NAME:hook` ownership IDs.
 The bundle and entry are links; the hook owns one group in `hooks.json` under the entry root.
-Instruction copy modes and automatic policies are not supported.
+Instruction copy modes and per-bundle automatic policies are not supported.
+Explicitly selected full device automation may prepare, update, and apply instruction bundles, while preserving detached groups.
 Changing a managed source path, target path, or mode requires detach before reconfiguration.
 AEM does not interpret document contents, reading order, or applicability.
 See the [instruction walkthrough](instruction-bundles.md).
@@ -172,6 +173,7 @@ Explicit commands ignore these policies and clocks.
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill names mapped to `"link"` or `"copy"`. Unknown skill names fail catalog validation. |
 | `setup` | Table | Saved startup selections; normally written by setup. |
+| `automation` | Table | Device orchestration mode and full-run schedule; omission preserves individual policy behavior. |
 | `catalog_update` | Table | Device-local automatic policy for a Git catalog; defaults to manual. |
 | `self_update` | Table | Device-local AEM release policy and installer runtime; omission disables automatic self-updates. |
 
@@ -323,3 +325,32 @@ Attempts are persisted before remote access and failures are throttled too.
 A changed repository, branch, or entry binding starts a separate attempt clock.
 Explicit catalog update/publication commands do not consult or reset this clock.
 The policy does not register startup hooks or an OS scheduler; use setup's existing callback or invoke `catalog auto` externally.
+
+## Device automation settings
+
+Manage the machine-owned `automation` table through installer/setup options.
+Use `--automation MODE`, repeated `--automation-trigger EVENT`, `--automation-interval SECONDS`, and `--automation-timeout SECONDS`.
+Omitted fields retain saved values; a supplied trigger list replaces the saved list.
+Policy-only setup uses the machine journal and does not rewrite profiles or require integration selections.
+Unknown fields are rejected.
+
+| Field | Type | Default/meaning |
+| --- | --- | --- |
+| `mode` | String | `policies` (default), `off`, or `full`. |
+| `trigger` | String or array of strings | Defaults to `shell-start` and `agent-start`. May contain unique supported events or only `manual`. Used in full mode. |
+| `min_interval` | Integer or float | `3600` seconds, finite and nonnegative; full runs share one clock across events, including failures. |
+| `timeout` | Integer or float | `30` seconds per content/catalog Git phase, finite and positive; used in full mode. |
+
+Boolean numeric values are rejected.
+`policies` retains the independent self-update, catalog-update, and skill policies and their clocks.
+`off` disables all event-driven automatic entrypoints while leaving explicit commands available.
+`full` uses the shared schedule, without consulting or modifying individual attempt clocks.
+Its tool stage retains the self-update release permission (`off`, `compatible`, or `breaking`); the copied worker uses the existing 300-second tool subprocess bounds.
+Full mode requires installer-registered runtime paths even when tool updates are off.
+
+In full mode the implicit skill trigger default becomes eligible for the full run, while explicitly declared trigger fields keep the existing precedence.
+A resulting explicit `manual` excludes a skill; other trigger lists and per-skill actions/intervals are replaced by the full-run schedule and prepare/update/apply behavior.
+Instruction groups with detached components are excluded together; remaining bundles participate without introducing instruction-specific policy tables.
+A shared repository can still advance live links of excluded consumers.
+Local or unbound catalogs skip Git delivery and use the existing local declarations.
+Mode, schedule, or runtime changes cancel queued work; the fresh continuation also verifies the saved request binding before advancing content.

@@ -139,7 +139,8 @@ Instruction callbacks wait at most 5 seconds for the configuration lock within t
 Limit callback metadata to the effective root, entry, and global_entry reading locations; keep installed_root and detached in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
-Instruction automatic policies are not supported; skill policies may still advance shared checkouts.
+Instruction-specific automatic policies are not supported; skill policies may still advance shared checkouts.
+Explicit full device automation may prepare/update/apply instruction bundles, excluding an agent group if any of its saved components is detached.
 
 ## Catalog delivery contracts
 
@@ -164,7 +165,7 @@ Policy-only setup must use the machine configuration journal without requiring a
 Use the same candidate validation and fast-forward safeguards as explicit catalog update, without bootstrapping or applying declarations.
 Persist a separate attempt clock before remote access, throttle failed attempts across events, and reset the effective clock on a changed repository/branch/entry binding.
 Explicit catalog operations ignore this clock, and automatic previews remain offline without recording attempts.
-Startup must run due catalog work before resolving skill policies, reload successfully updated declarations, and skip skill work on a failed catalog attempt while remaining fail-open.
+In policies mode, startup must run due catalog work before resolving skill policies, reload successfully updated declarations, and skip skill work on a failed catalog attempt while remaining fail-open.
 Ordinary content update, sync, skill automatic policies, and refreshed content status must not fetch or advance the catalog.
 Keep catalog inspection/location offline and usable for repairing malformed catalog contents, and retain catalog-independent maintenance paths.
 Catalog publication selects the whole repository and follows the existing publication contracts; it never installs declarations or changes content attempt clocks.
@@ -200,6 +201,24 @@ Preview must not fetch or record attempts.
 Automatic sync applies each successfully updated skill independently; this intentionally differs from explicit sync's all-updates-before-apply gate.
 Preserve existing per-target transactions, stop if recovery is pending, and never adopt, replace conflicts, or reattach detached skills automatically.
 Automatic policies cover catalog skills; explicit sync is unthrottled.
+
+## Device orchestration contracts
+
+Default to `policies` so existing installations retain independent automatic behavior.
+Expose `off`/`policies`/`full` and full trigger/interval/timeout options in installer/setup, preserving omitted fields and supporting configuration-only journaled edits.
+`off` gates automatic events, never explicit maintenance/update commands.
+Full mode owns one persisted attempt clock across events and failures; do not consult or modify individual automatic clocks during its stages.
+Reject individual skill/catalog event entrypoints in full mode to avoid duplicating the unified schedule.
+Queue full work on the existing external standard-library worker after requester OS termination, including when tool updates are off.
+Apply the saved tool release permission first, then invoke the freshly installed CLI before catalog/content work; never import the replacing package into the external worker.
+Release installation/configuration locks before invoking the fresh CLI, and validate mode/runtime binding and a one-use token under its locks.
+Cancel queued work when automation settings change and prevent queued individual tool updates from surviving a switch to off/full.
+Validate and fast-forward the catalog before loading full content selection; skip transport for local/unbound catalogs.
+Full mode opts in otherwise unconfigured skills but preserves explicitly resolved manual exclusions using the existing precedence.
+Prepare/update eligible sources before applying selected items, with no adoption, replacement, reattachment, deletion, publication, or hook trust granting.
+Keep shared-checkout validation and live-link side effects intact, including excluded consumers; document this boundary.
+Stop later stages on failure without claiming cross-repository rollback; preserve ordinary per-target journals and recovery.
+Test actual fresh-CLI continuation, stage ordering, new declarations, exclusions, throttling, cancellation, lock handoff, and failure gates using local fixtures and fake installers.
 
 ## Ownership and safety
 

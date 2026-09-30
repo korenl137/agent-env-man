@@ -64,7 +64,7 @@ def catalog_policy(value):
             **policy_fields(value, 'catalog_update')}
 
 
-def resolve_policies(updates, skills):
+def resolve_policies(updates, skills, *, default_trigger=None):
     """Merge built-ins, global defaults, one named policy, then skill fields.
 
     Trigger lists replace rather than append; manual explicitly disables events.
@@ -72,7 +72,10 @@ def resolve_policies(updates, skills):
     """
     if not isinstance(updates, dict) or set(updates) - {"defaults", "policies"}:
         raise Error("updates must contain only defaults and policies tables")
-    defaults = policy_fields(DEFAULTS, "built-in defaults")
+    builtins = dict(DEFAULTS)
+    if default_trigger is not None:
+        builtins["trigger"] = default_trigger
+    defaults = policy_fields(builtins, "built-in defaults")
     defaults.update(policy_fields(updates.get("defaults", {}), "updates.defaults"))
     named = updates.get("policies", {})
     if not isinstance(named, dict):
@@ -101,6 +104,10 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
     """
     if trigger not in TRIGGERS:
         raise Error(f"Unknown automatic update trigger: {trigger}")
+    if manager.config.automation['mode'] == 'off':
+        return [], False
+    if manager.config.automation['mode'] == 'full':
+        raise Error('Use automation --trigger EVENT in full mode')
     policies = manager.config.update_policies()
     if set(names) - policies.keys():
         raise Error("Unknown catalog skill selection")

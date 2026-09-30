@@ -15,7 +15,7 @@ Enum values are closed unless their interface explicitly documents unknown-value
 JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
 Commands lock one configuration; installations registered for self-updates also share a lock for their uv tools directory.
 External editors and other package-manager processes do not participate in these locks.
-Read-only commands and dry runs may create the lock directory/file; `setup --dry-run` and `self update --dry-run` do not.
+Read-only commands and dry runs may create the lock directory/file; `setup --dry-run`, `self update --dry-run`, and `automation --dry-run` do not.
 
 | Command | Purpose | Network |
 | --- | --- | --- |
@@ -32,6 +32,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `detach` | Preserve contents and release ownership. | None. |
 | `locate` | Find installed content or prepared editing sources. | None. |
 | `recover` | Recover an interrupted target replacement. | None. |
+| `automation` | Run or preview device automation. | According to selected mode; no network in dry run. |
 | `startup` | Fail-open automatic-update callback. | According to due policies. |
 | `agent-hook` | Emit instruction locations for the selected agent. | None. |
 
@@ -50,12 +51,14 @@ aem setup [--shell SHELL ...] [--agent AGENT ...]
           [--update-tool-dir PATH] [--update-bin-dir PATH]
           [--catalog-trigger TRIGGER ...] [--catalog-interval SECONDS]
           [--catalog-timeout SECONDS]
+          [--automation off|policies|full] [--automation-trigger EVENT ...]
+          [--automation-interval SECONDS] [--automation-timeout SECONDS]
 ```
 
 Shell choices are `bash`, `zsh`, and `powershell`.
 Selections accumulate; omitted selections remain saved, and repeated setup avoids duplicate blocks/groups.
 Initial integration setup requires at least one shell or agent selection.
-A call supplying only catalog policy options (and optionally `--dry-run`) can save policy without registering integrations or requiring an executable.
+A call supplying only catalog/device automation policy options (and optionally `--dry-run`) can save policy without registering integrations or requiring an executable.
 Adding and removing the same integration in one call is invalid.
 `--executable` overrides the saved absolute executable path, otherwise it defaults beside the running Python interpreter.
 Setup edits startup integrations and saves machine selections; it does not bootstrap or apply content.
@@ -76,6 +79,9 @@ It removes only the selected saved blocks/groups and corresponding selections, w
 A supplied `--executable` is ignored on removal-only calls; no executable or current agent profile is needed.
 Locally edited selected blocks/groups, redirected targets, malformed records, and pending recovery still stop removal.
 Calls that also add a shell/agent or change self-update/catalog policy settings retain full installation validation.
+Device automation options save the [mode and full-run schedule](configuration.md#device-automation-settings), preserving omitted fields and replacing supplied trigger lists.
+Changing these settings alone does not execute a run or rewrite profiles.
+Initial interactive installation offers the device mode before tool release permission; unattended omission defaults to the existing `policies` behavior.
 The repository installer `python scripts/setup.py` installs AEM using uv and delegates integration to this command; it is not an additional AEM subcommand.
 
 ## self
@@ -378,13 +384,47 @@ Transactions are per target, so recovery does not undo earlier successful target
 Recovery accepts the common journal format in state versions 1 and 2, validates paths and observations, and preserves the original state version and unrelated fields.
 An unknown version or incomplete journal is rejected rather than inferred.
 
+## automation
+
+```text
+aem automation --trigger EVENT [--dry-run]
+```
+
+Runs the selected device mode.
+`off` returns `mode = "off"`, `status = "disabled"`, empty `outcomes`, and `failed = false`.
+`policies` returns the individual `self_update` / `catalog_update` outcomes, skill `outcomes`, and `failed`; catalog failures skip skill work.
+`full` returns `not-triggered`, `throttled`, `planned` (preview), or `queued` and defers the whole sequence until requester termination.
+Only full mode uses the shared device trigger list and interval; individual modes retain their existing clocks.
+Dry run makes no remote requests or attempt records and creates no command lock files.
+The full preview includes `policy` and `stages = ["tool", "catalog", "content"]`.
+The full launch result includes `mode`, Unix `time`, `trigger`, `token`, and an opaque request `binding`.
+A launch failure exits 1; a successfully queued run exits 0 and reports eventual failure through status.
+
+`status` includes an `automation` object with effective `policy` and `last_attempt`.
+Full attempt status can be `queued`, `continuing`, `completed`, `failed`, or `cancelled`.
+Continuation results contain a `stages` object with the tool outcome and, when reached, catalog and content outcomes.
+Terminal results include Unix `finished`, with `error` or `reason` on failure/cancellation.
+The content result includes selected `sources`, `excluded` consumers/reasons, and preparation/update/application outcomes when reached.
+The tool stage obeys the existing self-update release range; `off` skips it.
+The fresh installed CLI then updates only a Git-bound catalog before resolving declarations, preparing eligible sources, updating them, and applying only after delivery succeeds.
+Full runs can install new declarations, while preserving explicit manual exclusions, detached groups, conflict/recovery protections, and shared-link semantics.
+They do not publish content or delete targets removed from the catalog.
+The worker and fresh continuation release/reacquire installation-before-configuration locks; mode/runtime binding and one-use token checks prevent stale continuation.
+The continuation has no total wall-clock timeout; individual Git phases and the tool subprocess remain bounded.
+
+In `off` mode, `auto` returns no skill work and `catalog auto` reports `not-triggered`.
+In `full` mode these individual event commands fail with guidance to use `automation`, avoiding duplicate policy execution.
+Explicit `self update`, `catalog update`, content `update`, and `sync` retain their contracts in every mode.
+
 ## startup
 
 ```text
 aem startup --trigger EVENT [--agent AGENT]
 ```
 
-Callback registered by setup; independently queues due AEM self-updates, runs the machine catalog policy, then runs the same skill policy engine as `auto`.
+Callback registered by setup; runs the selected device automation mode and remains fail-open.
+In the default `policies` mode it independently queues due AEM self-updates, runs the machine catalog policy, then runs the same skill policy engine as `auto`.
+In `full` mode it queues the entire sequence for execution after the callback exits; in `off` mode it performs no automatic work.
 A successful catalog update reloads declarations before resolving skill policies for that event.
 A failed catalog attempt skips skill work for that event, preserving fail-open startup.
 The saved startup report includes the catalog result as `catalog_update`.

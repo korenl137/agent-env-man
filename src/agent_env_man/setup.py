@@ -110,6 +110,8 @@ def setup(manager, args):
     document = tomlkit.parse(tomlkit.dumps(config.doc))
     from .updates import set_catalog_policy
     catalog_changed = set_catalog_policy(document, args)
+    from .automation import set_options
+    automation_changed = set_options(document, args)
     update_fields = ("repository", "python", "uv", "tool_dir", "bin_dir")
     if args.self_update is not None or any(getattr(args, "update_" + f) for f in update_fields):
         settings = document.setdefault("self_update", {})
@@ -120,7 +122,7 @@ def setup(manager, args):
             value = getattr(args, "update_" + field)
             if value is not None:
                 settings[field] = value
-    policy_only = (catalog_changed and not (args.shell or args.agent or args.remove_shell or args.remove_agent
+    policy_only = ((catalog_changed or automation_changed) and not (args.shell or args.agent or args.remove_shell or args.remove_agent
                    or args.self_update is not None or args.executable
                    or any(getattr(args, 'update_' + f) for f in update_fields)))
     if policy_only:
@@ -132,8 +134,8 @@ def setup(manager, args):
             manager.install(plan)
         return {'integrations': [], 'agents': list(config.agents),
                 'shells': list(config.doc.get('setup', {}).get('shells', {})),
-                'catalog_update': candidate.catalog_update, 'notices': [],
-                'next': 'Use catalog auto --trigger EVENT or configured startup integrations.'}
+                'catalog_update': candidate.catalog_update, 'automation': candidate.automation, 'notices': [],
+                'next': 'Use automation --trigger EVENT or configured startup integrations.'}
     selected = document.setdefault('setup', {})
     values = selected.get('shells', {})
     shells = dict(values)
@@ -237,6 +239,7 @@ def setup(manager, args):
     return {'integrations': report, 'agents': list(agents), 'shells': list(shells),
             'self_update': document.get('self_update', {'mode': 'off'}),
             'catalog_update': candidate.catalog_update,
+            'automation': candidate.automation,
             'notices': [profile(n).notice for n in agents],
             'next': 'Run bootstrap CATALOG, then apply; restart selected shells and review agent hook trust.'}
 
