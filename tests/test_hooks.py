@@ -155,7 +155,7 @@ class HookInstallation(InstructionFixture):
                             state.save()
                         holder.close()
 
-                    with patch("agent_env_man.storage.time.sleep", side_effect=finish_writer) as retry:
+                    with patch("agent_env_man.process_lock.time.sleep", side_effect=finish_writer) as retry:
                         result = self.run_cli(*command, "personal")
                     retry.assert_called_once()
                     if pending:
@@ -171,8 +171,8 @@ class HookInstallation(InstructionFixture):
         before = (directory / "state.json").read_bytes()
         for command in (("agent-hook", "--agent", "codex"),):
             with self.subTest(command=command), lock(directory):
-                with patch("agent_env_man.storage.time.monotonic", side_effect=[0, 0, 5]), \
-                        patch("agent_env_man.storage.time.sleep") as retry:
+                with patch("agent_env_man.process_lock.time.monotonic", side_effect=[0, 0, 5]), \
+                        patch("agent_env_man.process_lock.time.sleep") as retry:
                     result = self.run_cli(*command, "personal")
                 retry.assert_called_once()
                 self.assertIs(result["continue"], False)

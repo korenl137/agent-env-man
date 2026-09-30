@@ -108,7 +108,16 @@ def parser():
         setup_parser.add_argument("--remove-" + flag, action="append", default=[], type=argument_identifier,
                                  metavar="NAME", help="remove a saved integration, including retired names")
     setup_parser.add_argument("--executable", help="absolute installed aem executable")
+    setup_parser.add_argument("--self-update", choices=("off", "compatible", "breaking"))
+    for field in ("repository", "python", "uv", "tool-dir", "bin-dir"):
+        setup_parser.add_argument("--update-" + field)
     setup_parser.add_argument("--dry-run", action="store_true")
+    self_parser = commands.add_parser("self", help="inspect or queue release updates of AEM itself")
+    self_commands = self_parser.add_subparsers(dest="self_command", required=True)
+    self_commands.add_parser("status")
+    self_operation = self_commands.add_parser("update")
+    self_operation.add_argument("--mode", choices=("compatible", "breaking"), default=None)
+    self_operation.add_argument("--dry-run", action="store_true")
     boot = commands.add_parser("bootstrap", help="prepare Git skills and Git/external instruction bundles; never install targets")
     boot.add_argument("catalog_path", nargs="?", metavar="CATALOG", help="local catalog path")
     boot.add_argument("--catalog", type=Path, help="local inventory of skills, instruction bundles, and sources")
@@ -179,15 +188,23 @@ def main(argv=None):
         if hasattr(args, "timeout") and (not math.isfinite(args.timeout) or args.timeout <= 0):
             raise Error("--timeout must be positive and finite")
         remove_only = (args.command == "setup" and (args.remove_shell or args.remove_agent)
-                       and not (args.shell or args.agent))
-        maintenance = args.command in ("detach", "recover", "locate", "agent-hook") or remove_only
-        missing_ok = args.command in ("bootstrap", "setup", "startup")
+                       and not (args.shell or args.agent or args.self_update is not None
+                                or any(getattr(args, "update_" + field) for field in ("repository", "python", "uv", "tool_dir", "bin_dir"))))
+        maintenance = args.command in ("detach", "recover", "locate", "agent-hook", "self") or remove_only
+        missing_ok = args.command in ("bootstrap", "setup", "startup", "self")
         # Find the lock without requiring installation declarations to be valid.
         config = MachineFile(args.config, missing_ok=missing_ok)
         # SessionStart callbacks can overlap each other or startup updates.
         # Leave time for lookup/output within the installed 10-second hook limit.
         lock_timeout = 5 if args.command == "agent-hook" else 0
-        with (nullcontext() if args.command == "setup" and args.dry_run
+        from . import self_update
+        try:
+            settings = self_update.validate(config.doc.get("self_update", {}))
+            tool_lock = self_update.installation_lock(settings)
+        except ValueError:
+            tool_lock = None  # Maintenance still tolerates opaque machine fields.
+        preview = (args.command == "setup" and args.dry_run) or (args.command == "self" and getattr(args, "dry_run", False))
+        with (lock(tool_lock) if tool_lock and not preview else nullcontext()), (nullcontext() if preview
               else lock(config.state_dir, timeout=lock_timeout)):
             # Read again under the lock: another process may just have registered a source.
             saved_error = None
@@ -211,13 +228,28 @@ def main(argv=None):
             if args.command == "setup":
                 from .setup import setup, remove_integrations
                 report = remove_integrations(manager, args) if remove_only else setup(manager, args)
+            elif args.command == "self":
+                self_update.validate(config.doc.get("self_update", {}))
+                if args.self_command == "status":
+                    report = self_update.status(config)
+                else:
+                    state.ready()
+                    mode = args.mode or config.doc.get("self_update", {}).get("mode", "off")
+                    report = self_update.schedule(config, mode="compatible" if mode == "off" else mode, dry_run=args.dry_run)
             elif args.command == "startup":
+                self_outcome = {}
+                try:
+                    state.ready()
+                    self_outcome = self_update.schedule(config, automatic=True)
+                except (Error, OSError, ValueError, subprocess.SubprocessError) as exc:
+                    self_outcome = {"status": "failed", "error": str(exc)}
                 outcomes = []
                 try:
                     outcomes, failed = run_updates(manager, args.trigger)
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": failed, "outcomes": outcomes}
                 except (Error, OSError, ValueError) as exc:
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": True, "error": str(exc)}
+                state.data["startup"]["self_update"] = self_outcome
                 state.save()
                 report, failed = (profile(args.agent).startup_result(startup_briefing(outcomes)) if args.agent else {}), False
             elif args.command == "bootstrap":
@@ -240,6 +272,10 @@ def main(argv=None):
             elif args.command == "status":
                 report = (manager.saved_status(agent=args.agent, error=saved_error) if saved_error
                           else manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent))
+                try:
+                    report["self_update"] = self_update.status(config)
+                except ValueError as exc:
+                    report["self_update"] = {"error": str(exc)}
             elif args.command == "detach":
                 report = manager.detach(args.item, dry_run=args.dry_run, agent=args.agent)
             elif args.command == "recover":

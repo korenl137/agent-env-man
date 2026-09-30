@@ -172,6 +172,7 @@ Explicit commands ignore these policies and clocks.
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill names mapped to `"link"` or `"copy"`. Unknown skill names fail catalog validation. |
 | `setup` | Table | Saved startup selections; normally written by setup. |
+| `self_update` | Table | Device-local AEM release policy and installer runtime; omission disables automatic self-updates. |
 
 ```toml
 version = 1
@@ -273,3 +274,27 @@ It validates only the records and operations needed for the requested cleanup; i
 Unknown state versions or malformed ownership/journal structures are still rejected.
 Regular setup, bootstrap, apply, update, sync, automatic updates, and refreshed status continue to require current configuration and state.
 See [Removed interfaces](removed-interfaces.md) before upgrading an existing installation.
+
+## AEM self-update settings
+
+This policy belongs to the machine, independently of the content catalog and skill update policies.
+The installer records runtime paths; manage the mode with `aem setup --self-update MODE`.
+An omitted field on subsequent setup/installer calls retains its saved value.
+Unknown fields are rejected.
+
+| Field | Type | Meaning/default |
+| --- | --- | --- |
+| `mode` | String | `off` (default), `compatible`, or `breaking`. |
+| `repository` | String | Release Git repository; defaults to `https://github.com/mirinae3145/agent-env-man.git`. Supports HTTPS, SSH, and absolute local paths. |
+| `python` | Absolute path string | External Python 3.11+ used by the standalone worker and uv installation. Must be outside the uv tools directory, including resolved symlink locations. |
+| `uv` | Absolute path string | Installer-discovered uv executable. |
+| `tool_dir` | Absolute path string | Installer-discovered uv tools directory; also identifies the shared installation lock. |
+| `bin_dir` | Absolute path string | Installer-discovered executable directory; passed to uv to preserve executable locations. |
+
+All four runtime paths are required when enabling automatic updates or requesting an explicit update.
+`compatible` permits the same major from `1.0.0` onward and the same minor during `0.x`.
+`breaking` permits any newer final `vX.Y.Z` release.
+Neither mode selects prereleases, development versions, or untagged commits.
+Attempts share a fixed 86,400-second interval across startup events and are recorded before launching the worker.
+An explicit update bypasses the interval and can override the mode for that attempt without changing the saved policy.
+Existing machine files remain usable with self-updates disabled until runtime registration through the installer.

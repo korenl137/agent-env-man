@@ -101,7 +101,7 @@ class Config(MachineFile):
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup"}
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update"}
         if unknown:
             raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
         if not isinstance(self.doc.get("roots", {}), dict):
@@ -121,6 +121,11 @@ class Config(MachineFile):
             raise Error("Setup shells must map supported shell names to absolute profile paths")
         if "executable" in setup:
             absolute(setup["executable"])
+        from .self_update import validate
+        try:
+            validate(self.doc.get("self_update", {}))
+        except ValueError as exc:
+            raise Error(str(exc)) from exc
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
         from .agents import bindings
         self.agents = bindings(self.doc)

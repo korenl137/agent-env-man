@@ -347,6 +347,6 @@ class Installer(SetupFixture):
             self.assertFalse(any('install' in call for call in calls))
             calls.clear()
             self.assertEqual(module.main(['--shell', 'bash', '--config', str(self.config)]), 0)
-        self.assertIn('install', calls[1])
-        self.assertIn('--reinstall', calls[1])
+        self.assertIn('install', calls[2])
+        self.assertIn('--reinstall', calls[2])
         self.assertEqual(calls[-1][0], str(self.executable))

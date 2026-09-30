@@ -58,6 +58,9 @@ py -3 scripts/setup.py --shell powershell --agent codex
 ```
 
 The installer uses `uv tool install --reinstall` and then `aem setup` to connect startup integrations.
+On first interactive installation, select automatic AEM updates: `off`, `compatible`, or `breaking`.
+For unattended installation, supply `--self-update compatible` (or another mode); omission defaults to `off`.
+Reinstallation preserves a saved mode and release repository unless explicitly overridden.
 It does not bind a catalog or install skills/instructions.
 Open a new selected shell to use the updated PATH.
 Bash, Zsh, PowerShell, and Codex are the built-in integrations.
@@ -218,6 +221,39 @@ A failed push retains the local commit for retry.
 For copy installations, edit the checkout and apply after committing; installed-copy edits are not collected automatically.
 External-folder synchronization stays with its existing service.
 See [publish](docs/commands.md#publish) for commit scope, Git settings, and failure behavior.
+
+## Update AEM itself
+
+```bash
+python scripts/setup.py --shell bash --agent codex --self-update compatible
+aem setup --self-update off       # Change the saved automatic mode.
+aem self status                  # Installed version, mode, and last attempt.
+aem self update --dry-run         # Offline preview.
+aem self update                  # Queue an explicit compatible release update.
+aem self update --mode breaking  # Permit incompatible releases for this attempt.
+```
+
+`compatible` permits newer releases in the same major version; during `0.x`, it permits only patches in the same minor version.
+`breaking` permits any newer final release, including incompatible changes; review migration instructions before enabling it.
+Prereleases and untagged commits are excluded.
+AEM reads `vX.Y.Z` tags from its upstream Git repository, verifies the matching package metadata, and installs the selected commit through uv.
+Use the installer's `--update-repository URL` to select another release repository.
+Development checkout edits are not published or installed by this path.
+
+With automatic updates enabled, the existing startup callback queues at most one attempt per day across shell and agent events; failures are throttled too.
+It works without a bound content catalog.
+The worker waits for the requesting AEM process to exit, then uses the installer's external Python rather than the environment being replaced.
+The saved external Python and uv executables must remain available; rerun the installer if they move.
+A queued result means the attempt has been scheduled, not completed; use `aem self status` for the eventual result.
+Explicit updates bypass the daily throttle and work even with automatic updates off.
+Content updates, catalog delivery, instruction location callbacks, and `auto` do not update AEM itself.
+No daemon or OS scheduler is installed.
+
+Self-updates coordinate registered AEM commands sharing the same uv tools directory.
+Commands can report lock contention during replacement; startup remains fail-open.
+Other package-manager processes and external editors are not covered by these locks.
+A failed uv replacement is reported without a rollback guarantee; rerun `scripts/setup.py` to repair the installation if AEM cannot start.
+Native Windows worker/replacement and actual agent hook continuity require platform validation.
 
 ## Automatic updates
 

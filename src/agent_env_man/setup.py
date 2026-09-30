@@ -97,6 +97,16 @@ def setup(manager, args):
     manager.state.ready()
     config, state = manager.config, manager.state
     document = tomlkit.parse(tomlkit.dumps(config.doc))
+    update_fields = ("repository", "python", "uv", "tool_dir", "bin_dir")
+    if args.self_update is not None or any(getattr(args, "update_" + f) for f in update_fields):
+        settings = document.setdefault("self_update", {})
+        settings.setdefault("mode", "off")
+        if args.self_update is not None:
+            settings["mode"] = args.self_update
+        for field in update_fields:
+            value = getattr(args, "update_" + field)
+            if value is not None:
+                settings[field] = value
     selected = document.setdefault('setup', {})
     values = selected.get('shells', {})
     shells = dict(values)
@@ -204,6 +214,7 @@ def setup(manager, args):
         for plan in plans:
             manager.install(plan)
     return {'integrations': report, 'agents': list(agents), 'shells': list(shells),
+            'self_update': document.get('self_update', {'mode': 'off'}),
             'notices': [profile(n).notice for n in agents],
             'next': 'Run bootstrap CATALOG, then apply; restart selected shells and review agent hook trust.'}
 

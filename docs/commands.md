@@ -13,12 +13,14 @@ Documented commands, behavior, exit codes, and JSON fields are covered by the pa
 JSON consumers must ignore unknown object fields; field additions may appear in compatible feature releases.
 Enum values are closed unless their interface explicitly documents unknown-value handling.
 JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
-Commands lock one configuration, not all AEM installations or external editors.
-Read-only commands and dry runs may create the lock directory/file; `setup --dry-run` does not.
+Commands lock one configuration; installations registered for self-updates also share a lock for their uv tools directory.
+External editors and other package-manager processes do not participate in these locks.
+Read-only commands and dry runs may create the lock directory/file; `setup --dry-run` and `self update --dry-run` do not.
 
 | Command | Purpose | Network |
 | --- | --- | --- |
 | `setup` | Connect or remove machine startup integrations. | None. |
+| `self` | Inspect or queue updates of AEM itself. | Status and dry run are offline; queued workers fetch releases and install through uv. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
 | `catalog` | Inspect, update, or publish the catalog itself. | Update/publish only; publication dry run is offline. |
 | `update` | Fetch and fast-forward prepared sources. | Yes for Git. |
@@ -43,7 +45,9 @@ It bounds each Git phase, not the entire command or filesystem copying.
 ```text
 aem setup [--shell SHELL ...] [--agent AGENT ...]
           [--remove-shell NAME ...] [--remove-agent NAME ...]
-          [--executable PATH] [--dry-run]
+          [--executable PATH] [--self-update MODE] [--dry-run]
+          [--update-repository URL] [--update-python PATH] [--update-uv PATH]
+          [--update-tool-dir PATH] [--update-bin-dir PATH]
 ```
 
 Shell choices are `bash`, `zsh`, and `powershell`.
@@ -52,6 +56,10 @@ Initial setup requires at least one shell or agent selection.
 Adding and removing the same integration in one call is invalid.
 `--executable` overrides the saved absolute executable path, otherwise it defaults beside the running Python interpreter.
 Setup edits startup integrations and saves machine selections; it does not bootstrap or apply content.
+`--self-update` saves `off`, `compatible`, or `breaking`; omission preserves the saved mode.
+The `--update-*` options register the release source and external installer runtime described in [Configuration](configuration.md#aem-self-update-settings).
+Enabling updates requires runtime registration; the repository installer supplies those paths.
+Changing self-update settings does not immediately update the package.
 Removing an agent requires first detaching its managed content.
 Dry run writes no files, including lock files.
 When only `--remove-shell` / `--remove-agent` selections are supplied, setup uses saved ownership instead of validating installation declarations.
@@ -59,8 +67,41 @@ Removal accepts retired integration names and old state versions 1/2; unknown ma
 It removes only the selected saved blocks/groups and corresponding selections, without rebuilding other integrations.
 A supplied `--executable` is ignored on removal-only calls; no executable or current agent profile is needed.
 Locally edited selected blocks/groups, redirected targets, malformed records, and pending recovery still stop removal.
-Calls that also add a shell or agent retain full installation validation.
+Calls that also add a shell/agent or change self-update settings retain full installation validation.
 The repository installer `python scripts/setup.py` installs AEM using uv and delegates integration to this command; it is not an additional AEM subcommand.
+
+## self
+
+```text
+aem self status
+aem self update [--mode compatible|breaking] [--dry-run]
+```
+
+`status` is offline and reports `version`, `mode`, `repository`, `runtime_registered`, and `last_attempt`.
+It works without a catalog, including when content declarations are malformed.
+`update` queues an external worker and exits `0` when queued; asynchronous failure is reported by subsequent status, not the launch command's exit code.
+It uses the saved enabled mode, or `compatible` if automatic updates are off.
+`--mode` overrides only this attempt; explicit updates ignore the automatic daily interval.
+Dry run requires a registered runtime but performs no remote access, launches no worker, and writes no files.
+Pending recovery blocks an update.
+
+The worker waits for the requesting AEM process to exit, locks the registered installation and configuration, then rechecks its request token, saved settings, and recovery state.
+A superseded request does no work; changed settings or pending recovery cancel it.
+The actual uv-installed version is checked under the installation lock so another configuration's completed update cannot cause a downgrade.
+Only newer final `vX.Y.Z` tags qualify; annotated tags resolve to their commits.
+The selected commit must contain `project.name = "agent-env-man"` and the matching release version in `pyproject.toml`.
+Installation pins that commit through `uv tool install --reinstall`; neither the development checkout nor managed content is changed.
+Git authentication is noninteractive.
+Each Git/uv subprocess and worker lock wait is bounded to 300 seconds.
+Package-manager rollback and coordination with external installers are not guaranteed.
+If an installation is damaged, rerun the repository installer.
+
+A queued report contains `status`, `time` (Unix seconds), `token`, and `mode`.
+Dry run returns `status = "planned"`, `mode`, and `network = false`.
+The initially empty `last_attempt` subsequently contains those queued fields and can become `up-to-date`, `updated`, `failed`, or `cancelled`.
+Completed results include `finished` (Unix seconds); an updated result also includes `version` and `revision`, failures include `error`, and cancellations include `reason`.
+An interrupted worker can leave a queued result; explicit update queues a fresh attempt immediately.
+During startup, disabled/throttled work is reported in the saved startup outcome as `disabled`/`throttled` and does not replace the last attempt.
 
 ## bootstrap
 
@@ -316,8 +357,12 @@ An unknown version or incomplete journal is rejected rather than inferred.
 aem startup --trigger EVENT [--agent AGENT]
 ```
 
-Callback registered by setup; runs the same automatic policy engine as `auto`.
-No bound catalog means no update work.
+Callback registered by setup; runs the same skill policy engine as `auto` and independently queues due AEM self-updates.
+No bound catalog means no skill update work; enabled self-updates still run.
+Self-updates are throttled once per day across events, including failures, and start after the requesting process exits.
+They do not delay startup for release discovery or package installation.
+The saved startup report includes `self_update`; `status` also reports the latest worker result separately.
+AEM self-update completion does not produce a skill-change briefing.
 Operational failures are recorded in status when possible; failures before state access go to stderr.
 It exits `0` on handled operational failures so startup can continue; CLI usage errors still exit `2`.
 With an agent, completed changes can return an agent-specific briefing; shell callbacks return `{}`.

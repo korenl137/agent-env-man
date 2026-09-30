@@ -1,0 +1,298 @@
+"""Release-tag updates; the copied worker runs outside the uv tool environment.
+
+The worker intentionally uses only the standard library and process_lock.py.
+Its stdin is a lifetime pipe: replacement starts only after the requesting AEM
+process exits, including releasing its configuration and installation locks.
+"""
+import atexit
+from importlib.metadata import version
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+import uuid
+
+MODES = ('off', 'compatible', 'breaking')
+REPOSITORY = 'https://github.com/mirinae3145/agent-env-man.git'
+INTERVAL = 86400
+TIMEOUT = 300
+_children = []
+
+
+def validate(settings):
+    if not isinstance(settings, dict) or set(settings) - {'mode', 'repository', 'python', 'uv', 'tool_dir', 'bin_dir'}:
+        raise ValueError('self_update accepts only mode, repository, python, uv, tool_dir, and bin_dir')
+    if settings.get('mode', 'off') not in MODES:
+        raise ValueError('self_update.mode must be off, compatible, or breaking')
+    repository = settings.get('repository', REPOSITORY)
+    if not isinstance(repository, str) or not repository or repository.startswith('-'):
+        raise ValueError('self_update.repository must be a Git URL or absolute local path')
+    if not (Path(repository).is_absolute() or repository.startswith(('https://', 'ssh://'))
+            or re.fullmatch(r'git@[^:]+:.+', repository)):
+        raise ValueError('Use HTTPS, SSH, or an absolute local release repository')
+    for field in ('python', 'uv', 'tool_dir', 'bin_dir'):
+        if field in settings and (not isinstance(settings[field], str) or not Path(settings[field]).is_absolute()):
+            raise ValueError(f'self_update.{field} must be an absolute path')
+    if settings.get('mode', 'off') != 'off' and any(field not in settings for field in ('python', 'uv', 'tool_dir', 'bin_dir')):
+        raise ValueError('Register the self-update runtime with scripts/setup.py first')
+    if 'python' in settings and 'tool_dir' in settings:
+        interpreter, tools = Path(settings['python']).absolute(), Path(settings['tool_dir']).resolve()
+        if interpreter == tools or tools in interpreter.parents or tools in interpreter.resolve().parents:
+            raise ValueError('The updater Python must be outside the uv tools directory')
+    return settings
+
+
+def release_version(value):
+    match = re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value)
+    return tuple(map(int, match.groups())) if match else None
+
+
+def select_release(output, current, mode):
+    """Select only newer vX.Y.Z tags, preferring peeled annotated-tag commits."""
+    baseline = release_version(current)
+    if baseline is None:
+        raise ValueError('Self-update requires an installed X.Y.Z release version')
+    releases = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', parts[0]):
+            continue
+        revision, ref = parts
+        match = re.fullmatch(r'refs/tags/v(.+?)(\^\{\})?', ref)
+        candidate = release_version(match[1]) if match else None
+        if candidate is None or candidate <= baseline:
+            continue
+        if mode == 'compatible' and candidate[:2 if baseline[0] == 0 else 1] != baseline[:2 if baseline[0] == 0 else 1]:
+            continue
+        if mode == 'off':
+            continue
+        if candidate not in releases or match[2]:
+            releases[candidate] = revision
+    if not releases:
+        return None
+    selected = max(releases)
+    return {'version': '.'.join(map(str, selected)), 'revision': releases[selected]}
+
+
+def result_path(config):
+    return config.state_dir / 'self-update.json'
+
+
+def read_result(path):
+    if not path.exists():
+        return {}
+    value = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict):
+        raise ValueError('Self-update result must be an object')
+    timestamp = value.get('time', 0)
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp) or timestamp < 0:
+        raise ValueError('Self-update attempt time must be a finite nonnegative number')
+    return value
+
+
+def write_json(path, value):
+    # Also used by the standalone worker, which cannot import package storage.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.aem-self-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(value, stream, indent=2)
+            stream.write('\n')
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def status(config):
+    settings = validate(config.doc.get('self_update', {}))
+    return {'version': version('agent-env-man'), 'mode': settings.get('mode', 'off'),
+            'repository': settings.get('repository', REPOSITORY),
+            'runtime_registered': all(k in settings for k in ('python', 'uv', 'tool_dir', 'bin_dir')),
+            'last_attempt': read_result(result_path(config))}
+
+
+def installation_lock(settings):
+    return Path(settings['tool_dir']) / '.aem-update-lock' if 'tool_dir' in settings else None
+
+
+def schedule(config, *, automatic=False, mode=None, dry_run=False):
+    """Queue replacement after exit; explicit requests bypass the daily throttle.
+
+    A queued result is never reported as a successful installation. Workers
+    check their token and saved policy again before any remote access.
+    """
+    settings = dict(validate(config.doc.get('self_update', {})))
+    selected_mode = mode or settings.get('mode', 'off')
+    if selected_mode == 'off':
+        return {'status': 'disabled'}
+    settings['mode'] = selected_mode
+    validate(settings)
+    previous = read_result(result_path(config))
+    current = time.time()
+    if automatic and current - previous.get('time', 0) < INTERVAL:
+        return {'status': 'throttled'}
+    if dry_run:
+        return {'status': 'planned', 'mode': selected_mode, 'network': False}
+    token = uuid.uuid4().hex
+    directory = config.state_dir / 'self-update-worker' / token
+    attempt = {'status': 'queued', 'time': current, 'token': token, 'mode': selected_mode}
+    write_json(result_path(config), attempt)
+    try:
+        for field in ('python', 'uv'):
+            if not Path(settings[field]).is_file():
+                raise ValueError(f'Updater {field} is missing; rerun scripts/setup.py')
+        directory.mkdir(parents=True, exist_ok=True)
+        # Copy before launching so replacement cannot remove the worker's code.
+        from .storage import atomic_write
+        for name in ('self_update.py', 'process_lock.py'):
+            atomic_write(directory / name, Path(__file__).with_name(name).read_bytes())
+        request = {'token': token, 'parent_pid': os.getpid(), 'config': str(config.path), 'settings': settings,
+                   'saved_settings': dict(config.doc.get('self_update', {}))}
+        request_path = directory / 'request.json'
+        write_json(request_path, request)
+        options = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+                   if os.name == 'nt' else {'start_new_session': True})
+        child = subprocess.Popen([settings['python'], str(directory / 'self_update.py'), str(request_path)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 close_fds=True, **options)
+    except (OSError, ValueError) as exc:
+        shutil.rmtree(directory, ignore_errors=True)
+        write_json(result_path(config), {**attempt, 'status': 'failed', 'error': str(exc), 'finished': time.time()})
+        raise
+    _children.append(child)
+    return attempt
+
+
+def close_workers():
+    for child in _children:
+        if child.stdin:
+            child.stdin.close()
+    _children.clear()
+
+
+atexit.register(close_workers)
+
+
+def git(*arguments, cwd=None):
+    environment = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
+    return subprocess.run(['git', *arguments], cwd=cwd, env=environment, check=True,
+                          capture_output=True, text=True, encoding='utf-8', timeout=TIMEOUT).stdout.strip()
+
+
+def git_url(repository):
+    if Path(repository).is_absolute():
+        return 'git+' + Path(repository).as_uri()
+    if repository.startswith('git@'):
+        host, path = repository.split(':', 1)
+        return f'git+ssh://{host}/{path}'
+    return 'git+' + repository
+
+
+def perform(request):
+    """Validate release metadata before asking uv to replace the registered tool."""
+    settings = validate(request['settings'])
+    repository = settings.get('repository', REPOSITORY)
+    environment = dict(os.environ, UV_TOOL_DIR=settings['tool_dir'], UV_TOOL_BIN_DIR=settings['bin_dir'],
+                       GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
+    listing = subprocess.run([settings['uv'], 'tool', 'list'], env=environment, check=True,
+                             capture_output=True, text=True, timeout=TIMEOUT).stdout
+    installed = re.search(r'^agent-env-man v(\S+)', listing, re.MULTILINE)
+    if installed is None:
+        raise ValueError('Registered uv installation is missing; rerun scripts/setup.py')
+    selected = select_release(git('ls-remote', '--tags', repository), installed[1], settings['mode'])
+    if selected is None:
+        return {'status': 'up-to-date'}
+    with tempfile.TemporaryDirectory(prefix='aem-release-') as temporary:
+        checkout = Path(temporary)
+        git('init', str(checkout))
+        git('fetch', '--depth', '1', repository, selected['revision'], cwd=checkout)
+        descriptor = git('ls-tree', 'FETCH_HEAD', '--', 'pyproject.toml', cwd=checkout)
+        if not descriptor.startswith(('100644 blob ', '100755 blob ')):
+            raise ValueError('Release pyproject.toml must be a tracked regular file')
+        metadata = tomllib.loads(git('show', 'FETCH_HEAD:pyproject.toml', cwd=checkout))
+        project = metadata.get('project', {})
+        if not isinstance(project, dict) or project.get('name') != 'agent-env-man' or project.get('version') != selected['version']:
+            raise ValueError('Release tag does not match agent-env-man package metadata')
+    command = [settings['uv'], 'tool', 'install', '--reinstall', '--python', settings['python'],
+               '--from', git_url(repository) + '@' + selected['revision'], 'agent-env-man']
+    subprocess.run(command, env=environment, check=True, capture_output=True, text=True, timeout=TIMEOUT)
+    return {'status': 'updated', **selected}
+
+
+def wait_for_parent(pid):
+    """Wait for OS termination as well as EOF, which can arrive during atexit.
+
+    On Windows the original interpreter can remain locked until its process
+    terminates. POSIX children can observe reparenting without signalling or
+    probing an unrelated process that might reuse the original PID.
+    """
+    if not pid:
+        return True
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE only.
+        if not handle:
+            return ctypes.get_last_error() == 87  # Invalid PID: already exited.
+        try:
+            return kernel.WaitForSingleObject(handle, TIMEOUT * 1000) == 0
+        finally:
+            kernel.CloseHandle(handle)
+    deadline = time.monotonic() + TIMEOUT
+    while os.getppid() == pid:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def worker(request_path):
+    from process_lock import lock
+    request_path = Path(request_path)
+    # The pipe also prevents inheriting callback stdout or keeping its host waiting.
+    sys.stdin.buffer.read()
+    request = json.loads(request_path.read_text(encoding='utf-8'))
+    config = Path(request['config'])
+    state_dir = config.parent / (config.name + '.state')
+    result = state_dir / 'self-update.json'
+    try:
+        parent_exited = wait_for_parent(request['parent_pid'])
+        with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
+            previous = read_result(result)
+            if previous.get('token') != request['token']:
+                return
+            try:
+                document = tomllib.loads(config.read_text(encoding='utf-8'))
+                if not parent_exited:
+                    outcome = {'status': 'failed', 'error': 'Could not confirm requesting process exit'}
+                elif document.get('self_update', {}) != request['saved_settings']:
+                    outcome = {'status': 'cancelled', 'reason': 'Self-update settings changed'}
+                elif json.loads((state_dir / 'state.json').read_text(encoding='utf-8')).get('pending') is not None:
+                    outcome = {'status': 'cancelled', 'reason': 'Recovery is pending'}
+                else:
+                    outcome = perform(request)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                # Do not persist subprocess output: Git URLs/build logs may
+                # contain credentials. Explicit updates can retry immediately.
+                outcome = {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
+                                                         else f'{type(exc).__name__}: release update failed')}
+            write_json(result, {**previous, **outcome, 'finished': time.time()})
+    finally:
+        shutil.rmtree(request_path.parent, ignore_errors=True)
+
+
+if __name__ == '__main__':
+    worker(sys.argv[1])

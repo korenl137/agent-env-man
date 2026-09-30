@@ -1,7 +1,5 @@
 """Local bookkeeping, process locks, and conservative filesystem inspection."""
 
-from contextlib import contextmanager
-import errno
 import hashlib
 import json
 import os
@@ -9,7 +7,6 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
-import time
 
 from .model import Error
 
@@ -99,48 +96,9 @@ def remove(path: Path):
         shutil.rmtree(path)
 
 
-@contextmanager
 def lock(directory: Path, *, timeout: float = 0):
-    """Serialize managers, optionally waiting up to timeout seconds for contention.
-
-    OS locks are released even after a crash; the persistent file is not a
-    stale lock to delete. Ordinary commands retain immediate failure.
-    """
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "lock").open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            stream.seek(0, os.SEEK_END)
-            if stream.tell() == 0:
-                stream.write(b"0")
-                stream.flush()
-            stream.seek(0)
-        else:
-            import fcntl
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                if os.name == "nt":
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
-                    raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise Error("Another aem command holds this config's lock") from exc
-                time.sleep(min(0.05, remaining))
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
+    from .process_lock import lock as process_lock
+    return process_lock(directory, timeout=timeout, error_type=Error)
 
 class State:
     def __init__(self, directory: Path, *, maintenance=False):

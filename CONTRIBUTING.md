@@ -239,6 +239,20 @@ Do not add a dynamic plugin loader or additional source providers without a demo
 ## Machine setup and agent integration
 
 The repository installer uses uv to install this checkout as a user tool, then delegates integration to `aem setup`.
+Offer `off`, `compatible`, and `breaking` self-update modes on first interactive installation; unattended omission defaults to off, and omitted choices preserve saved settings.
+Self-update policy and the external installer runtime belong to machine configuration, never the content catalog.
+Release selection uses only newer final `vX.Y.Z` tags, with same-major compatibility from 1.x and same-minor compatibility during 0.x.
+Validate package identity and tag/version agreement before installation, and pin the selected commit.
+Do not advance or publish the development checkout as a self-update side effect.
+The standalone worker must remain standard-library-only, run on a Python outside the replaced tool environment, and wait for its requesting AEM process to exit.
+Copy worker code into a distinct request directory before launching; never depend on package files surviving replacement.
+Registered commands and workers share an installation lock before their configuration lock, including across machine files sharing one uv tools directory.
+Recheck saved policy, recovery state, request identity, and actual installed version before replacement.
+Persist attempts before launch, throttle failures across startup events, keep previews offline and read-only, and distinguish queued work from completed updates.
+Keep self commands independent of content declarations; ordinary content operations and instruction location callbacks must not schedule self-updates.
+Keep removal-only setup independent of runtime registration and policy edits.
+Exercise release boundaries, annotated tags, metadata mismatches, policy cancellation, contention, failure/retry, and worker lifetime with local repositories and fake uv processes.
+Package-manager rollback and real Windows replacement require separate evidence before strengthening their documented guarantees.
 Keep the installer standard-library-only; configuration and ownership logic belong in the package.
 Setup owns machine selection and startup registration, while bootstrap prepares content and apply installs it.
 Catalog update policies must never register hooks implicitly.
