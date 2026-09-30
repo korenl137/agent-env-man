@@ -44,6 +44,26 @@ def policy_fields(value, location, *, allow_policy=False):
     return result
 
 
+def set_catalog_policy(document, args):
+    """Apply only supplied device-policy fields; trigger lists replace saved lists."""
+    values = {field: getattr(args, option) for field, option in
+              (('trigger', 'catalog_trigger'), ('min_interval', 'catalog_interval'), ('timeout', 'catalog_timeout'))
+              if getattr(args, option) is not None}
+    if values:
+        policy = document.setdefault('catalog_update', {})
+        policy.update(values)
+        catalog_policy(policy)
+    return bool(values)
+
+
+def catalog_policy(value):
+    """Resolve a machine-local catalog update policy without loading its catalog."""
+    if not isinstance(value, dict) or set(value) - {'trigger', 'min_interval', 'timeout'}:
+        raise Error('catalog_update accepts only trigger, min_interval, and timeout')
+    return {**policy_fields({'trigger': 'manual', 'min_interval': 3600, 'timeout': 5}, 'catalog_update defaults'),
+            **policy_fields(value, 'catalog_update')}
+
+
 def resolve_policies(updates, skills):
     """Merge built-ins, global defaults, one named policy, then skill fields.
 

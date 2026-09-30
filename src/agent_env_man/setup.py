@@ -88,6 +88,17 @@ def render_shell(path, start, end, desired, old):
     return result.encode('utf-8'), desired
 
 
+def machine_plan(config, document):
+    """Use the existing setup journal for a lossless machine-document replacement."""
+    content = tomlkit.dumps(document).encode('utf-8')
+    regular(config.path)
+    record = {'source_name': 'setup', 'id': 'machine', 'kind': 'setup', 'mode': 'setup-config',
+              'source': str(config.path), 'target': str(config.path), 'relative': '.',
+              'hash': hashlib.sha256(content).hexdigest(), 'detached': False, 'agents': [], 'agent': ''}
+    return Plan(Item('setup', 'machine', '.', config.path, config.path, 'setup-config', 'setup'),
+                observation(config.path), record, not exists(config.path) or content != config.path.read_bytes(), content)
+
+
 def setup(manager, args):
     """Preflight all integrations, then use the existing per-target journal.
 
@@ -97,6 +108,8 @@ def setup(manager, args):
     manager.state.ready()
     config, state = manager.config, manager.state
     document = tomlkit.parse(tomlkit.dumps(config.doc))
+    from .updates import set_catalog_policy
+    catalog_changed = set_catalog_policy(document, args)
     update_fields = ("repository", "python", "uv", "tool_dir", "bin_dir")
     if args.self_update is not None or any(getattr(args, "update_" + f) for f in update_fields):
         settings = document.setdefault("self_update", {})
@@ -107,6 +120,20 @@ def setup(manager, args):
             value = getattr(args, "update_" + field)
             if value is not None:
                 settings[field] = value
+    policy_only = (catalog_changed and not (args.shell or args.agent or args.remove_shell or args.remove_agent
+                   or args.self_update is not None or args.executable
+                   or any(getattr(args, 'update_' + f) for f in update_fields)))
+    if policy_only:
+        # Policy edits need no executable or profile rewrites, including on a
+        # machine bootstrapped without startup integrations.
+        candidate = Config(config.path, document=document)
+        plan = machine_plan(config, document)
+        if not args.dry_run:
+            manager.install(plan)
+        return {'integrations': [], 'agents': list(config.agents),
+                'shells': list(config.doc.get('setup', {}).get('shells', {})),
+                'catalog_update': candidate.catalog_update, 'notices': [],
+                'next': 'Use catalog auto --trigger EVENT or configured startup integrations.'}
     selected = document.setdefault('setup', {})
     values = selected.get('shells', {})
     shells = dict(values)
@@ -203,18 +230,13 @@ def setup(manager, args):
     for i, plan in enumerate(plans):
         if any(overlaps(plan.item.target, p.item.target) for p in plans[:i]):
             raise Error('Selected integrations have overlapping target files')
-    content = tomlkit.dumps(document).encode()
-    regular(config.path)
-    record = {'source_name': 'setup', 'id': 'machine', 'kind': 'setup', 'mode': 'setup-config',
-              'source': str(config.path), 'target': str(config.path), 'relative': '.', 'hash': hashlib.sha256(content).hexdigest(),
-              'detached': False, 'agents': [], 'agent': ''}
-    plans.append(Plan(Item('setup', 'machine', '.', config.path, config.path, 'setup-config', 'setup'),
-                      observation(config.path), record, not exists(config.path) or content != config.path.read_bytes(), content))
+    plans.append(machine_plan(config, document))
     if not args.dry_run:
         for plan in plans:
             manager.install(plan)
     return {'integrations': report, 'agents': list(agents), 'shells': list(shells),
             'self_update': document.get('self_update', {'mode': 'off'}),
+            'catalog_update': candidate.catalog_update,
             'notices': [profile(n).notice for n in agents],
             'next': 'Run bootstrap CATALOG, then apply; restart selected shells and review agent hook trust.'}
 

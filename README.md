@@ -151,7 +151,7 @@ Use `--catalog-branch NAME` to select a branch; otherwise AEM records the remote
 Include any required `--external` bindings just as with a local catalog.
 Later `aem bootstrap` calls reuse these settings without pulling the catalog.
 
-Catalog changes are explicit:
+Explicit catalog maintenance:
 
 ```bash
 aem catalog update               # Validate and fast-forward the catalog only.
@@ -165,7 +165,8 @@ aem catalog publish -m "Update catalog"
 
 `aem catalog status` inspects the catalog offline.
 Publishing includes all nonignored changes in its repository, not just the TOML file.
-Content `update`, `sync`, and automatic policies never refresh the catalog itself.
+Content `update`, `sync`, and skill automatic policies never refresh the catalog itself.
+Catalog automatic updates are an independent device policy described below.
 The catalog has a separate checkout even when it shares a remote repository with content.
 
 Skill links default to `~/.agents/skills`; instruction entries default to the selected Codex home when using agent bindings, or the explicitly declared entry root.
@@ -254,6 +255,40 @@ Commands can report lock contention during replacement; startup remains fail-ope
 Other package-manager processes and external editors are not covered by these locks.
 A failed uv replacement is reported without a rollback guarantee; rerun `scripts/setup.py` to repair the installation if AEM cannot start.
 Native Windows worker/replacement and actual agent hook continuity require platform validation.
+
+## Automatic catalog updates
+
+Choose automatic catalog events during Git registration:
+
+```bash
+aem bootstrap --catalog-repository URL --catalog-path catalogs/personal.toml \
+  --catalog-trigger shell-start --catalog-trigger agent-start
+```
+
+Change the saved policy later:
+
+```bash
+aem setup --catalog-trigger agent-start --catalog-interval 3600 --catalog-timeout 5
+aem setup --catalog-trigger manual  # Disable automatic catalog updates.
+aem setup --catalog-trigger interval --dry-run
+```
+
+These options write device-local settings; no manual `machine.toml` edit is required.
+Repeated trigger options replace the complete event list; omitted options retain their saved values.
+Policy-only setup needs no executable or startup selections and leaves existing profiles alone.
+The underlying `catalog_update` table remains documented in [Configuration](docs/configuration.md#catalog-automatic-update-settings).
+
+The default trigger is `manual`; automatic updates require a Git catalog binding.
+Setup's existing startup callback updates a due catalog first, then resolves skill policies from the validated new catalog.
+If that catalog attempt fails, the callback skips skill updates for the event and still allows startup to continue.
+External callers can use `aem catalog auto --trigger interval`; add `--dry-run` for an offline preview.
+`aem auto` continues to operate on skills only.
+
+Catalog automation shares one attempt clock across events, throttling failures too.
+It uses the same validation and fast-forward guards as `aem catalog update`, preserving local edits and the previous catalog on validation failure.
+The catalog update itself does not bootstrap or apply content; startup's subsequent skill policies retain their existing scope and require prepared sources.
+Explicit catalog updates bypass the automatic interval.
+See `aem catalog status` or `aem status` for the last automatic result.
 
 ## Automatic updates
 

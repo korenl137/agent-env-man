@@ -101,7 +101,7 @@ class Config(MachineFile):
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update"}
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update"}
         if unknown:
             raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
         if not isinstance(self.doc.get("roots", {}), dict):
@@ -175,6 +175,10 @@ class Config(MachineFile):
                 raise Error("Catalog must be separate from machine config and state")
             if overlaps(self.catalog_path, self.checkout_root):
                 raise Error("Keep the local catalog outside managed checkouts")
+        from .updates import catalog_policy
+        self.catalog_update = catalog_policy(self.doc.get("catalog_update", {}))
+        if self.catalog_update['trigger'] != ['manual'] and self.catalog_source is None:
+            raise Error('Automatic catalog updates require a Git catalog binding')
         self.modes = self.doc.get("modes", {})
         if not isinstance(self.modes, dict) or any(v not in ("link", "copy") for v in self.modes.values()):
             raise Error("Machine modes must map skill names to link or copy")

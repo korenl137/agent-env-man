@@ -1,6 +1,6 @@
-"""Explicit Git delivery of the inventory, independent of content delivery.
+"""Git delivery of the inventory, independent of content delivery.
 
-Only bootstrap and catalog commands contact this repository. Candidate catalogs
+Bootstrap, catalog commands, and opted-in startup automation contact this repository. Candidate catalogs
 are interpreted against final machine paths before their checkout advances.
 """
 
@@ -11,6 +11,8 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
+import time
+from types import SimpleNamespace
 
 import tomlkit
 
@@ -125,9 +127,11 @@ def prepare(config, state, *, timeout=30):
 
 
 def command(config, state, args):
-    """Run an explicit catalog operation; never install or update its contents."""
+    """Run a catalog operation; never install or update its declared content."""
     action = args.catalog_command
     source = config.catalog_source
+    if action == "auto":
+        return run_auto(config, state, args.trigger, dry_run=args.dry_run)
     if action == "locate":
         if source:
             local_entry(config, Git(args.timeout))
@@ -137,7 +141,8 @@ def command(config, state, args):
                 "repository": source.git if source else None}, False
     if action == "status":
         report = {"entry": str(config.catalog_path) if config.catalog_path else None,
-                  "checkout": str(source.path) if source else None, "repository": source.git if source else None}
+                  "checkout": str(source.path) if source else None, "repository": source.git if source else None,
+                  "automation": state.data.get("catalog_automation", {})}
         try:
             if source:
                 source = source_for(config)
@@ -186,3 +191,48 @@ def command(config, state, args):
                                   "last_update", "last_publish", "error") if key in report}
         state.save()
     return report, report["status"] == "failed"
+
+
+def run_auto(config, state, trigger, *, dry_run=False):
+    """Update only the bound catalog under the caller's configuration lock.
+
+    The device policy lives outside the file it updates. Record attempts before
+    remote access; explicit catalog commands neither read nor reset this clock.
+    A changed binding starts a new clock, independently of skill/source names.
+    """
+    from .updates import TRIGGERS
+    if trigger not in TRIGGERS:
+        raise Error(f'Unknown automatic update trigger: {trigger}')
+    policy = config.catalog_update
+    report = {'policy': policy, 'status': 'not-triggered'}
+    if trigger not in policy['trigger']:
+        return report, False
+    state.ready()
+    source = source_for(config)
+    binding = {'repository': source.git, 'branch': source.branch, 'entry': config.doc['catalog']['path']}
+    previous = state.data.get('catalog_automation', {})
+    current = time.time()
+    if (previous.get('binding') == binding and 'last_attempt' in previous
+            and current - previous['last_attempt'] < policy['min_interval']):
+        report['status'] = 'throttled'
+        return report, False
+    report['status'] = 'planned'
+    if dry_run:
+        return report, False
+    attempt = {'binding': binding, 'last_attempt': current, 'trigger': trigger, 'status': 'running'}
+    state.data['catalog_automation'] = attempt
+    state.save()
+    try:
+        outcome, failed = command(config, state, SimpleNamespace(catalog_command='update', timeout=policy['timeout']))
+        report.update(status=outcome['status'], outcome=outcome)
+        attempt['status'] = outcome['status']
+        if failed:
+            attempt['error'] = outcome['error']
+        else:
+            attempt['last_success'] = time.time()
+    except (Error, OSError, ValueError) as exc:
+        failed = True
+        report.update(status='failed', error=str(exc))
+        attempt.update(status='failed', error=str(exc))
+    state.save()
+    return report, failed

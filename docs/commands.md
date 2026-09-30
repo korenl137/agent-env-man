@@ -48,11 +48,14 @@ aem setup [--shell SHELL ...] [--agent AGENT ...]
           [--executable PATH] [--self-update MODE] [--dry-run]
           [--update-repository URL] [--update-python PATH] [--update-uv PATH]
           [--update-tool-dir PATH] [--update-bin-dir PATH]
+          [--catalog-trigger TRIGGER ...] [--catalog-interval SECONDS]
+          [--catalog-timeout SECONDS]
 ```
 
 Shell choices are `bash`, `zsh`, and `powershell`.
 Selections accumulate; omitted selections remain saved, and repeated setup avoids duplicate blocks/groups.
-Initial setup requires at least one shell or agent selection.
+Initial integration setup requires at least one shell or agent selection.
+A call supplying only catalog policy options (and optionally `--dry-run`) can save policy without registering integrations or requiring an executable.
 Adding and removing the same integration in one call is invalid.
 `--executable` overrides the saved absolute executable path, otherwise it defaults beside the running Python interpreter.
 Setup edits startup integrations and saves machine selections; it does not bootstrap or apply content.
@@ -60,6 +63,11 @@ Setup edits startup integrations and saves machine selections; it does not boots
 The `--update-*` options register the release source and external installer runtime described in [Configuration](configuration.md#aem-self-update-settings).
 Enabling updates requires runtime registration; the repository installer supplies those paths.
 Changing self-update settings does not immediately update the package.
+`--catalog-trigger` sets `manual` or a supported event; repeat it to replace the complete saved trigger list.
+`--catalog-interval` sets the finite nonnegative attempt interval, and `--catalog-timeout` sets the finite positive per-Git-phase timeout.
+Omitted policy options preserve their saved fields; configuring events requires a bound Git catalog.
+Policy-only edits validate machine settings and use the configuration journal without reading or rewriting profiles, even when those profiles contain local edits.
+They do not fetch, run automatic updates, or register startup integrations; the result includes the effective `catalog_update` policy.
 Removing an agent requires first detaching its managed content.
 Dry run writes no files, including lock files.
 When only `--remove-shell` / `--remove-agent` selections are supplied, setup uses saved ownership instead of validating installation declarations.
@@ -67,7 +75,7 @@ Removal accepts retired integration names and old state versions 1/2; unknown ma
 It removes only the selected saved blocks/groups and corresponding selections, without rebuilding other integrations.
 A supplied `--executable` is ignored on removal-only calls; no executable or current agent profile is needed.
 Locally edited selected blocks/groups, redirected targets, malformed records, and pending recovery still stop removal.
-Calls that also add a shell/agent or change self-update settings retain full installation validation.
+Calls that also add a shell/agent or change self-update/catalog policy settings retain full installation validation.
 The repository installer `python scripts/setup.py` installs AEM using uv and delegates integration to this command; it is not an additional AEM subcommand.
 
 ## self
@@ -110,10 +118,16 @@ aem bootstrap [CATALOG | --catalog PATH] [--checkout-root PATH]
               [--catalog-repository URL --catalog-path RELATIVE_PATH [--catalog-branch BRANCH]]
               [--root NAME=PATH ...] [--external NAME=PATH ...]
               [--item NAME ...] [--timeout TIMEOUT]
+              [--catalog-trigger TRIGGER ...] [--catalog-interval SECONDS]
+              [--catalog-timeout SECONDS]
 ```
 
 Omit the catalog argument to reuse the saved binding.
 A positional catalog and `--catalog` cannot both be supplied.
+Bootstrap accepts the same catalog policy options as setup, allowing initial Git registration and automatic policy selection in one call.
+Omitted options retain saved policy fields, and repeated triggers replace the saved list.
+Policy validation precedes cloning or configuration writes; enabling events for a local catalog is rejected.
+`--catalog-timeout` controls future automatic updates; `--timeout` controls the current bootstrap delivery.
 Git catalog registration requires `--catalog-repository` and `--catalog-path` together, optionally with `--catalog-branch`; these cannot be combined with a local catalog argument.
 `--catalog-path` is relative to the repository root, not the working directory, and must identify a tracked regular TOML file.
 Repository syntax matches catalog repository declarations: a URL, SSH location, or absolute local repository path.
@@ -141,13 +155,14 @@ For Git bindings it also includes `catalog`, with `status` (`cloned` or `already
 aem catalog status [--timeout TIMEOUT]
 aem catalog locate [--timeout TIMEOUT]
 aem catalog update [--timeout TIMEOUT]
+aem catalog auto --trigger EVENT [--dry-run]
 aem catalog publish [-m MESSAGE | --message MESSAGE] [--dry-run] [--timeout TIMEOUT]
 ```
 
 These commands select the bound catalog, independently of the skill/instruction namespace.
 They never install content or run content automatic policies.
 `status` and `locate` are offline and do not change saved state; their Git subprocesses still respect `--timeout`.
-`status` reports the entry, checkout, repository, and `status` (`ready`, `unavailable`, or `unbound`).
+`status` reports the entry, checkout, repository, `status` (`ready`, `unavailable`, or `unbound`), and `automation` (the last automatic attempt, or an empty object).
 For Git catalogs it also reports the branch, current revision, local changes, tracked diff, outgoing commits, and remote relation at the last fetch, using the same fields as publication inspection.
 Catalog reading/inspection failures appear as `error` with status `unavailable` and exit 0; machine/state loading failures still exit 1.
 `locate` returns absolute `entry`, `checkout`, and `repository`; the latter two are null for a local catalog.
@@ -176,6 +191,18 @@ Update includes `previous_revision`, `observed_revision`, and `last_fetch` once 
 Publish uses the inspection/result fields described above and adds `created_commit` when it commits, and `revision`, `observed_revision`, `last_fetch`, and `last_publish` after successful publication.
 Fetch/publication observations are saved separately from content ownership and automatic attempt clocks.
 Local catalog bindings reject update and publish; manage their transport yourself or register a Git catalog.
+
+`auto` runs the machine's [catalog policy](configuration.md#catalog-automatic-update-settings) for the supplied event.
+It shares update's validation and fast-forward behavior and does not prepare or install content.
+Its JSON object contains the effective `policy` and `status`: `not-triggered`, `throttled`, `planned` (dry run), `updated`, or `failed`.
+An executed update includes its ordinary result as `outcome`; failures before that result exists include `error`.
+Failed automatic operations exit 1; skipped, planned, and successful work exit 0.
+Dry run does not fetch or record an attempt, although ordinary command locks may be created.
+Pending recovery blocks due work.
+
+`automation` contains `binding` (`repository`, `branch`, `entry`), `last_attempt` (Unix seconds), `trigger`, and `status` (`running`, `updated`, or `failed`).
+Successful attempts also include `last_success`; failed attempts include `error`.
+The same saved record appears as `catalog_automation` in ordinary status, separately from skill clocks and catalog delivery observations.
 
 Content `update`, `sync`, `auto`, and `status --refresh` never fetch or advance the catalog repository.
 Bootstrap validates an existing catalog checkout without pulling it.
@@ -357,7 +384,10 @@ An unknown version or incomplete journal is rejected rather than inferred.
 aem startup --trigger EVENT [--agent AGENT]
 ```
 
-Callback registered by setup; runs the same skill policy engine as `auto` and independently queues due AEM self-updates.
+Callback registered by setup; independently queues due AEM self-updates, runs the machine catalog policy, then runs the same skill policy engine as `auto`.
+A successful catalog update reloads declarations before resolving skill policies for that event.
+A failed catalog attempt skips skill work for that event, preserving fail-open startup.
+The saved startup report includes the catalog result as `catalog_update`.
 No bound catalog means no skill update work; enabled self-updates still run.
 Self-updates are throttled once per day across events, including failures, and start after the requesting process exits.
 They do not delay startup for release discovery or package installation.

@@ -10,6 +10,7 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Added
 
+- Opt-in machine-owned catalog automatic triggers configured through bootstrap/setup options, independent attempt throttling, `catalog auto`, and validated catalog refresh before startup skill policies.
 - Installer-selected `off`, `compatible`, and `breaking` AEM self-update modes, release-tag updates queued after startup exits, and independent `self status` / `self update` commands.
 
 - Changelog with release history and contributor guidance for maintaining release notes.

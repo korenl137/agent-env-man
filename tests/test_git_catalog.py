@@ -74,6 +74,180 @@ class GitCatalog(unittest.TestCase):
     def state(self):
         return (self.root / "machine.toml.state/state.json").read_bytes()
 
+    def enable_catalog_auto(self, **overrides):
+        document = tomlkit.parse(self.config.read_text(encoding='utf-8'))
+        document['catalog_update'] = {'trigger': ['shell-start', 'agent-start', 'interval'],
+                                      'min_interval': 3600, 'timeout': 5, **overrides}
+        self.config.write_text(tomlkit.dumps(document), encoding='utf-8')
+
+    def test_catalog_policy_cli_bootstrap_setup_and_omitted_fields(self):
+        self.boot('--catalog-trigger', 'shell-start', '--catalog-trigger', 'agent-start',
+                  '--catalog-interval', '120', '--catalog-timeout', '2')
+        expected = {'trigger': ['shell-start', 'agent-start'], 'min_interval': 120, 'timeout': 2}
+        self.assertEqual(tomlkit.parse(self.config.read_text())['catalog_update'], expected)
+        self.cli('bootstrap')
+        self.assertEqual(tomlkit.parse(self.config.read_text())['catalog_update'], expected)
+        before, state_before = self.config.read_bytes(), self.state()
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Policy edit fetched')):
+            preview = self.cli('setup', '--catalog-trigger', 'interval', '--dry-run')
+            self.assertEqual(preview['catalog_update']['trigger'], ['interval'])
+            self.assertEqual(self.config.read_bytes(), before)
+            self.assertEqual(self.state(), state_before)
+            self.cli('setup', '--catalog-trigger', 'interval')
+            self.cli('setup', '--catalog-interval', '600')
+        saved = tomlkit.parse(self.config.read_text())
+        self.assertNotIn('setup', saved)  # No executable/profile registration required.
+        self.assertEqual(saved['catalog_update'], {'trigger': ['interval'], 'min_interval': 600, 'timeout': 2})
+        self.cli('setup', '--catalog-trigger', 'manual')
+        self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'interval')['status'], 'not-triggered')
+
+    def test_catalog_policy_cli_invalid_options_fail_before_clone_or_save(self):
+        invalid = (('--catalog-trigger', 'manual', '--catalog-trigger', 'agent-start'),
+                   ('--catalog-trigger', 'agent-start', '--catalog-trigger', 'agent-start'),
+                   ('--catalog-timeout', '0'), ('--catalog-timeout', 'nan'), ('--catalog-interval', '-1'))
+        with patch.object(Git, 'run', side_effect=AssertionError('Invalid policy contacted Git')):
+            for options in invalid:
+                with self.subTest(options=options):
+                    self.boot(*options, code=1)
+                    self.assertFalse(self.config.exists())
+                    self.assertFalse(self.checkout.exists())
+        self.boot()
+        before = self.config.read_bytes()
+        for options in invalid:
+            with self.subTest(options=options):
+                self.cli('setup', *options, code=1)
+                self.assertEqual(self.config.read_bytes(), before)
+
+    def test_catalog_policy_cli_local_binding_rejected_and_can_disable_while_rebinding(self):
+        self.cli('bootstrap', self.seed / 'catalogs/personal.toml', '--catalog-trigger', 'agent-start', code=1)
+        self.assertFalse(self.config.exists())
+        self.boot('--catalog-trigger', 'agent-start')
+        self.cli('bootstrap', self.seed / 'catalogs/personal.toml', '--catalog-trigger', 'manual')
+        self.assertEqual(tomlkit.parse(self.config.read_text())['catalog_update']['trigger'], ['manual'])
+
+    def test_catalog_policy_only_setup_preserves_edited_profiles(self):
+        self.boot()
+        executable = self.root / 'aem'
+        executable.write_text('fake executable')
+        profile = self.root / '.bashrc'
+        with patch('agent_env_man.setup.shell_path', return_value=profile):
+            self.cli('setup', '--shell', 'bash', '--executable', executable)
+        profile.write_text(profile.read_text().replace('shell-start', 'interval'))
+        before = profile.read_bytes()
+        self.cli('setup', '--catalog-trigger', 'agent-start')
+        self.assertEqual(profile.read_bytes(), before)
+        self.assertEqual(tomlkit.parse(self.config.read_text())['catalog_update']['trigger'], ['agent-start'])
+
+    def test_catalog_auto_preview_updates_only_catalog_and_throttles_across_events(self):
+        self.boot()
+        self.cli('apply')
+        self.enable_catalog_auto()
+        original = self.git(self.checkout, 'rev-parse', 'HEAD')
+        content_head = self.git(self.content, 'rev-parse', 'HEAD')
+        items = json.loads(self.state())['items']
+        self.document['skills']['new'] = dict(self.document['skills']['tool'])
+        self.save_remote()
+        before = self.state()
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Preview fetched')):
+            self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'shell-start', '--dry-run')['status'], 'planned')
+        self.assertEqual(before, self.state())
+        self.assertEqual(self.git(self.checkout, 'rev-parse', 'HEAD'), original)
+        result = self.cli('catalog', 'auto', '--trigger', 'shell-start')
+        self.assertEqual(result['status'], 'updated')
+        self.assertEqual(self.git(self.content, 'rev-parse', 'HEAD'), content_head)
+        self.assertEqual(json.loads(self.state())['items'], items)
+        self.assertFalse((self.root / 'installed/new').exists())
+        self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'agent-start')['status'], 'throttled')
+        attempt = self.cli('catalog', 'status')['automation']
+        self.cli('catalog', 'update')
+        self.assertEqual(attempt, self.cli('catalog', 'status')['automation'])
+
+    def test_catalog_auto_changed_entry_binding_gets_fresh_attempt_clock(self):
+        self.boot()
+        self.enable_catalog_auto()
+        self.cli('catalog', 'auto', '--trigger', 'shell-start')
+        (self.seed / 'catalogs/other.toml').write_text(tomlkit.dumps(self.document))
+        self.commit(self.seed)
+        self.git(self.seed, 'push', 'origin', 'main')
+        self.cli('catalog', 'update')
+        document = tomlkit.parse(self.config.read_text())
+        document['catalog']['path'] = 'catalogs/other.toml'
+        self.config.write_text(tomlkit.dumps(document))
+        self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'agent-start')['status'], 'updated')
+        self.assertEqual(self.cli('catalog', 'status')['automation']['binding']['entry'], 'catalogs/other.toml')
+
+    def test_catalog_auto_invalid_candidate_failure_is_throttled_and_skips_startup_skills(self):
+        self.boot()
+        self.enable_catalog_auto()
+        original = self.git(self.checkout, 'rev-parse', 'HEAD')
+        self.save_remote('broken TOML [')
+        with patch('agent_env_man.cli.run_updates', side_effect=AssertionError('Skills ran after catalog failure')):
+            self.assertEqual(self.cli('startup', '--trigger', 'agent-start'), {})
+        saved = json.loads(self.state())
+        self.assertTrue(saved['startup']['failed'])
+        self.assertEqual(saved['startup']['catalog_update']['status'], 'failed')
+        self.assertEqual(saved['catalog_automation']['status'], 'failed')
+        self.assertEqual(self.git(self.checkout, 'rev-parse', 'HEAD'), original)
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Failure was not throttled')):
+            self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'interval')['status'], 'throttled')
+        self.document['skills']['fixed'] = dict(self.document['skills']['tool'])
+        self.save_remote()
+        self.assertEqual(self.cli('catalog', 'update')['status'], 'updated')
+
+    def test_catalog_auto_startup_reads_new_skill_policy_in_same_event(self):
+        self.boot()
+        self.cli('apply')
+        self.enable_catalog_auto()
+        self.document['updates'] = {'defaults': {'trigger': 'agent-start', 'action': 'check'}}
+        self.save_remote()
+        self.cli('startup', '--trigger', 'agent-start')
+        saved = json.loads(self.state())
+        self.assertFalse(saved['startup']['failed'])
+        self.assertEqual(saved['startup']['catalog_update']['status'], 'updated')
+        self.assertEqual(saved['startup']['outcomes'][0]['status'], 'checked')
+        self.assertEqual(self.cli('status')['catalog_automation']['status'], 'updated')
+
+    def test_catalog_auto_default_manual_and_content_auto_stay_offline(self):
+        self.boot()
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Default policy fetched')):
+            self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'shell-start')['status'], 'not-triggered')
+            self.cli('startup', '--trigger', 'agent-start')
+        self.enable_catalog_auto(trigger='agent-start')
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Unselected event fetched')):
+            self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'shell-start')['status'], 'not-triggered')
+            self.cli('auto', '--trigger', 'agent-start')
+        self.assertNotIn('catalog_automation', json.loads(self.state()))
+
+    def test_catalog_auto_dirty_checkout_preserves_edits_and_pending_recovery_blocks_attempt(self):
+        self.boot()
+        self.enable_catalog_auto(min_interval=0)
+        original = self.entry.read_bytes()
+        self.entry.write_bytes(original + b'# local edit\n')
+        self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'shell-start', code=1)['status'], 'failed')
+        self.assertEqual(self.entry.read_bytes(), original + b'# local edit\n')
+        state_path = self.root / 'machine.toml.state/state.json'
+        data = json.loads(self.state())
+        data['pending'] = {}
+        state_path.write_text(json.dumps(data))
+        before = self.state()
+        self.cli('catalog', 'auto', '--trigger', 'agent-start', code=1)
+        self.assertEqual(self.state(), before)
+
+    def test_catalog_auto_invalid_device_policies_rejected_before_network(self):
+        self.boot()
+        from agent_env_man.model import Config, Error
+        valid = tomlkit.parse(self.config.read_text())
+        invalid = ({'trigger': []}, {'trigger': ['manual', 'agent-start']}, {'trigger': 'unknown'},
+                   {'timeout': 0}, {'timeout': True}, {'min_interval': -1}, {'action': 'sync'})
+        with patch.object(Git, 'fetch', side_effect=AssertionError('Invalid policy fetched')):
+            for policy in invalid:
+                document = {**valid, 'catalog_update': policy}
+                with self.subTest(policy=policy), self.assertRaises(Error):
+                    Config(self.config, document=document)
+            with self.assertRaises(Error):
+                Config(self.config, document={'version': 1, 'catalog': str(self.entry),
+                                              'catalog_update': {'trigger': 'agent-start'}})
+
     def test_first_registration_reuse_locate_apply_and_separate_checkouts(self):
         report = self.boot()
         self.assertEqual(report["catalog"]["status"], "cloned")

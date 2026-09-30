@@ -172,6 +172,7 @@ Explicit commands ignore these policies and clocks.
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill names mapped to `"link"` or `"copy"`. Unknown skill names fail catalog validation. |
 | `setup` | Table | Saved startup selections; normally written by setup. |
+| `catalog_update` | Table | Device-local automatic policy for a Git catalog; defaults to manual. |
 | `self_update` | Table | Device-local AEM release policy and installer runtime; omission disables automatic self-updates. |
 
 ```toml
@@ -226,7 +227,8 @@ Reading a Git catalog validates its checkout origin, recorded branch, and tracke
 Run bootstrap after manually specifying a Git binding without a branch.
 
 Only `catalog update` advances an existing catalog checkout.
-Bootstrap reuses it without pulling, and content update/sync/automatic policies do not refresh it.
+Bootstrap reuses it without pulling, and content update/sync/skill automatic policies do not refresh it.
+Catalog updates can run automatically only through the independent device policy below.
 Catalog status and locate also support local bindings; update and publish require Git.
 Switching to a local binding preserves the old Git checkout.
 Reusing the same Git checkout requires a matching origin and branch; a new binding never resets or replaces a mismatching repository.
@@ -298,3 +300,26 @@ Neither mode selects prereleases, development versions, or untagged commits.
 Attempts share a fixed 86,400-second interval across startup events and are recorded before launching the worker.
 An explicit update bypasses the interval and can override the mode for that attempt without changing the saved policy.
 Existing machine files remain usable with self-updates disabled until runtime registration through the installer.
+
+## Catalog automatic update settings
+
+The machine-owned `catalog_update` table controls the bound Git catalog, without relying on policies inside the file it updates.
+Manage it with `bootstrap` during registration or `setup` afterward: repeat `--catalog-trigger` for events, set `--catalog-interval` for `min_interval`, and use `--catalog-timeout` for `timeout`.
+Supplied triggers replace the saved list; omitted options retain their existing fields.
+`--catalog-trigger manual` disables automatic catalog updates.
+Policy-only setup supports `--dry-run`, requires no integration selections or executable, and does not rewrite existing profiles.
+Omission leaves catalog delivery manual.
+Unknown fields are rejected, and an enabled event policy requires a Git catalog binding; local catalogs remain externally managed.
+
+| Field | Type | Default/meaning |
+| --- | --- | --- |
+| `trigger` | String or array of strings | `"manual"`; alternatively one or more unique `shell-start`, `agent-start`, or `interval` events. `manual` cannot be combined with events. |
+| `min_interval` | Integer or float | `3600` seconds; finite and nonnegative. One clock shared across events for the repository/branch/entry binding. |
+| `timeout` | Integer or float | `5` seconds per Git phase; finite and positive. |
+
+Boolean numeric values are rejected.
+There is no action field: catalog automation always performs the existing validated fast-forward update, without bootstrapping or applying declarations.
+Attempts are persisted before remote access and failures are throttled too.
+A changed repository, branch, or entry binding starts a separate attempt clock.
+Explicit catalog update/publication commands do not consult or reset this clock.
+The policy does not register startup hooks or an OS scheduler; use setup's existing callback or invoke `catalog auto` externally.

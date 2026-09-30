@@ -16,7 +16,7 @@ from .git_source import now
 from .manager import Manager
 from .model import Config, MachineFile, Error, absolute, default_config, identifier
 from .storage import State, atomic_write, lock
-from .updates import TRIGGERS, run_updates, startup_briefing
+from .updates import TRIGGERS, run_updates, set_catalog_policy, startup_briefing
 
 
 def argument_identifier(value):
@@ -29,6 +29,7 @@ def argument_identifier(value):
 def bootstrap_skills(config, state, args):
     state.ready()
     document = tomlkit.parse(tomlkit.dumps(config.doc))
+    set_catalog_policy(document, args)
     if args.catalog_repository is not None:
         if args.catalog_path is not None or args.catalog is not None:
             raise Error("Git catalog registration cannot be combined with a local catalog path")
@@ -98,6 +99,13 @@ def bootstrap_skills(config, state, args):
     return result, failed
 
 
+def catalog_policy_arguments(command):
+    command.add_argument("--catalog-trigger", action="append", choices=("manual", *TRIGGERS),
+                         help="replace saved catalog triggers; repeat for multiple events")
+    command.add_argument("--catalog-interval", type=float, help="minimum seconds between automatic catalog attempts")
+    command.add_argument("--catalog-timeout", type=float, help="seconds per Git phase for automatic catalog updates")
+
+
 def parser():
     result = argparse.ArgumentParser(prog="aem", description="Install skills and personal instruction bundles from an independent inventory")
     result.add_argument("--config", type=Path, default=default_config(), help="machine-local TOML file")
@@ -112,6 +120,7 @@ def parser():
     for field in ("repository", "python", "uv", "tool-dir", "bin-dir"):
         setup_parser.add_argument("--update-" + field)
     setup_parser.add_argument("--dry-run", action="store_true")
+    catalog_policy_arguments(setup_parser)
     self_parser = commands.add_parser("self", help="inspect or queue release updates of AEM itself")
     self_commands = self_parser.add_subparsers(dest="self_command", required=True)
     self_commands.add_parser("status")
@@ -129,6 +138,7 @@ def parser():
     boot.add_argument("--external", action="append", default=[], metavar="NAME=PATH", help="bind a catalog external source to a device-local folder; repeat for multiple sources")
     boot.add_argument("--item", action="append", default=[], metavar="NAME", help="catalog skill or instruction name; repeat to select multiple sources")
     boot.add_argument("--timeout", type=float, default=30)
+    catalog_policy_arguments(boot)
     catalog = commands.add_parser("catalog", help="explicitly inspect, update, or publish the bound catalog")
     catalog_commands = catalog.add_subparsers(dest="catalog_command", required=True)
     for action in ("update", "status", "locate", "publish"):
@@ -137,6 +147,9 @@ def parser():
         if action == "publish":
             operation.add_argument("-m", "--message", help="commit all nonignored catalog checkout changes")
             operation.add_argument("--dry-run", action="store_true", help="inspect changes offline without staging or pushing")
+    catalog_auto = catalog_commands.add_parser("auto", help="run the machine catalog policy for an event")
+    catalog_auto.add_argument("--trigger", required=True, choices=TRIGGERS)
+    catalog_auto.add_argument("--dry-run", action="store_true")
     update = commands.add_parser("update", help="fetch and fast-forward Git sources; live links change immediately")
     update.add_argument("source", nargs="*")
     update.add_argument("--timeout", type=float, default=30)
@@ -189,6 +202,7 @@ def main(argv=None):
             raise Error("--timeout must be positive and finite")
         remove_only = (args.command == "setup" and (args.remove_shell or args.remove_agent)
                        and not (args.shell or args.agent or args.self_update is not None
+                                or args.catalog_trigger is not None or args.catalog_interval is not None or args.catalog_timeout is not None
                                 or any(getattr(args, "update_" + field) for field in ("repository", "python", "uv", "tool_dir", "bin_dir"))))
         maintenance = args.command in ("detach", "recover", "locate", "agent-hook", "self") or remove_only
         missing_ok = args.command in ("bootstrap", "setup", "startup", "self")
@@ -243,12 +257,24 @@ def main(argv=None):
                     self_outcome = self_update.schedule(config, automatic=True)
                 except (Error, OSError, ValueError, subprocess.SubprocessError) as exc:
                     self_outcome = {"status": "failed", "error": str(exc)}
-                outcomes = []
+                outcomes, catalog_outcome = [], {}
                 try:
+                    catalog_outcome, catalog_failed = catalog_delivery.run_auto(config, state, args.trigger)
+                    if catalog_failed:
+                        failed = True
+                        raise Error('Automatic catalog update failed; skill updates skipped')
+                    if catalog_outcome['status'] == 'updated':
+                        # Discard any cached declarations before resolving this
+                        # event's skill policies from the newly validated catalog.
+                        config = Config(args.config)
+                        manager = Manager(config, state)
                     outcomes, failed = run_updates(manager, args.trigger)
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": failed, "outcomes": outcomes}
                 except (Error, OSError, ValueError) as exc:
+                    if not catalog_outcome:
+                        catalog_outcome = {"status": "failed", "error": str(exc)}
                     state.data["startup"] = {"trigger": args.trigger, "time": now(), "failed": True, "error": str(exc)}
+                state.data["startup"]["catalog_update"] = catalog_outcome
                 state.data["startup"]["self_update"] = self_outcome
                 state.save()
                 report, failed = (profile(args.agent).startup_result(startup_briefing(outcomes)) if args.agent else {}), False
@@ -272,6 +298,8 @@ def main(argv=None):
             elif args.command == "status":
                 report = (manager.saved_status(agent=args.agent, error=saved_error) if saved_error
                           else manager.status(refresh=args.refresh, timeout=args.timeout, agent=args.agent))
+                if "catalog_automation" in state.data:
+                    report["catalog_automation"] = state.data["catalog_automation"]
                 try:
                     report["self_update"] = self_update.status(config)
                 except ValueError as exc:

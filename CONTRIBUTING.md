@@ -96,7 +96,7 @@ The loader reads a local TOML file supplied directly or prepared through Git cat
 Each skill has a stable name and selects one Git repository and optional subdirectory.
 Named repository declarations let related skills share one URL, branch, and checkout; direct per-skill repository declarations remain supported.
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
-The catalog owns repository URLs, requested branches, and declarative automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
+The catalog owns repository URLs, requested branches, and declarative skill automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
 Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
 Application paths consume these prepared local checkouts without fetching.
 Share a checkout only when skills explicitly reference the same named repository; equal URLs in direct declarations do not imply shared ownership.
@@ -156,8 +156,16 @@ Catalog updates fast-forward only after the candidate passes the same declaratio
 Preserve the old catalog on validation failure, local edits on delivery failure, and installed ownership when declarations disappear.
 Do not reset mismatching checkouts on rebind.
 
-Only explicit catalog update/publication commands contact an existing catalog's remote.
-Ordinary content update, sync, automatic policies, and refreshed content status must not fetch or advance it.
+Explicit catalog update/publication and separately opted-in catalog automation may contact an existing catalog's remote.
+Keep catalog automation policy machine-owned, outside the file it updates; default to manual and require a Git binding when enabled.
+Expose trigger/interval/timeout selection through bootstrap and setup, preserving omitted fields and replacing explicitly supplied trigger lists.
+Validate supplied policies before network access or saving configuration.
+Policy-only setup must use the machine configuration journal without requiring an executable, registering integrations, or rewriting profiles.
+Use the same candidate validation and fast-forward safeguards as explicit catalog update, without bootstrapping or applying declarations.
+Persist a separate attempt clock before remote access, throttle failed attempts across events, and reset the effective clock on a changed repository/branch/entry binding.
+Explicit catalog operations ignore this clock, and automatic previews remain offline without recording attempts.
+Startup must run due catalog work before resolving skill policies, reload successfully updated declarations, and skip skill work on a failed catalog attempt while remaining fail-open.
+Ordinary content update, sync, skill automatic policies, and refreshed content status must not fetch or advance the catalog.
 Keep catalog inspection/location offline and usable for repairing malformed catalog contents, and retain catalog-independent maintenance paths.
 Catalog publication selects the whole repository and follows the existing publication contracts; it never installs declarations or changes content attempt clocks.
 Keep catalog delivery observations separate from item/source names and protect the whole catalog checkout from targets and external sources.
