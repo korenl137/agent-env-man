@@ -15,6 +15,7 @@ from . import catalog as catalog_delivery
 from . import automation
 from .git_source import now
 from .manager import Manager
+from .output import format_report
 from .model import Config, MachineFile, Error, absolute, default_config, identifier
 from .storage import State, atomic_write, lock
 from .updates import TRIGGERS, run_updates, set_catalog_policy, startup_briefing
@@ -110,6 +111,7 @@ def catalog_policy_arguments(command):
 def parser():
     result = argparse.ArgumentParser(prog="aem", description="Install skills and personal instruction bundles from an independent inventory")
     result.add_argument("--config", type=Path, default=default_config(), help="machine-local TOML file")
+    result.add_argument("--json", action="store_true", help="emit JSON instead of readable text")
     commands = result.add_subparsers(dest="command", required=True)
     setup_parser = commands.add_parser("setup", help="connect selected shells and agents; never bootstrap or apply")
     for flag, choices in (("shell", ("bash", "zsh", "powershell")), ("agent", tuple(PROFILES))):
@@ -205,6 +207,16 @@ def parser():
     # Worker continuation is accepted internally but omitted from user help.
     commands._choices_actions = [choice for choice in commands._choices_actions if choice.dest != '_full-run']
     commands.metavar = '{' + ','.join(name for name in commands.choices if not name.startswith('_')) + '}'
+    # Suppressed defaults keep a flag supplied before the command intact.
+    # Accept it at each command level, including catalog/self subcommands.
+    for command in commands.choices.values():
+        command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="emit JSON instead of readable text")
+        for action in command._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for operation in action.choices.values():
+                    operation.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                                           help="emit JSON instead of readable text")
     return result
 
 
@@ -320,7 +332,12 @@ def main(argv=None):
                 report = {"updates": updates, "apply": "skipped"}
                 if not failed:
                     report["apply"] = manager.apply(args.item, timeout=args.timeout, agent=args.agent)
-            print(json.dumps(report, indent=2, ensure_ascii=True))
+            # Installed callbacks are machine interfaces even when invoked
+            # without --json; changing them would break existing integrations.
+            if args.json or args.command in ("startup", "agent-hook", "_full-run"):
+                print(json.dumps(report, indent=2, ensure_ascii=True))
+            else:
+                print(format_report(report))
             return 1 if failed else 0
     except (Error, OSError, ValueError, subprocess.SubprocessError) as exc:
         if args.command == "agent-hook":

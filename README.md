@@ -38,6 +38,10 @@ Documented manual settings and continued operation of generated configuration an
 Users do not need to coordinate separate file-format releases or manually change version markers.
 See the [compatibility policy](CONTRIBUTING.md#versioning-and-compatibility) and [existing-installation precautions](docs/removed-interfaces.md).
 
+CLI commands show readable fields and indented lists by default.
+For scripts, add `--json` to retain structured output, for example `aem status --json`.
+Installed startup and instruction callbacks continue to emit their required JSON automatically.
+
 ## Install and connect this machine
 
 Requirements: Python 3.11 or later and Git.

@@ -8,6 +8,11 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Ordinary CLI commands now print human-readable fields and indented lists by default, including redirected stdout.
+Add `--json` to scripts to retain the existing JSON report schema; installed startup and instruction callbacks continue to emit JSON automatically.
+
 ## [0.3.0] &mdash; 2026-09-30
 
 Existing configurations retain policy-driven automation by default; full automation requires explicit opt-in.

@@ -234,7 +234,7 @@ class FullGitCatalog(unittest.TestCase):
         executable = self.bin / 'aem'
         executable.write_text('#!' + sys.executable + '\nfrom agent_env_man.cli import main\nraise SystemExit(main())\n')
         executable.chmod(0o755)
-        response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--config', str(self.config),
+        response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config),
                                    'automation', '--trigger', 'interval'], capture_output=True, text=True, timeout=5)
         self.assertEqual(response.returncode, 0, response.stderr)
         self.assertEqual(json.loads(response.stdout)['status'], 'queued')

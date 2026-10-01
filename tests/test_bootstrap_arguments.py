@@ -37,7 +37,7 @@ class BootstrapArguments(InstructionFixture):
     def cli(self, *args, code=0):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
-            result = main(list(map(str, args)))
+            result = main(["--json", *map(str, args)])
         self.assertEqual(result, code, output.getvalue() + errors.getvalue())
         return json.loads(output.getvalue()) if output.getvalue() else errors.getvalue()
 

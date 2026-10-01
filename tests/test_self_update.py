@@ -216,7 +216,7 @@ class SelfUpdate(SetupFixture):
         self.uv.write_text(self.uv.read_text().replace('sys.exit(1)', 'sys.exit(0)'))
         # Exercise the real entrypoint: stdout must finish without waiting on
         # worker-owned handles, and the external child outlives the callback.
-        response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--config', str(self.config),
+        response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config),
                                    'self', 'update'], capture_output=True, text=True, timeout=5)
         self.assertEqual(response.returncode, 0, response.stderr)
         self.assertEqual(json.loads(response.stdout)['status'], 'queued')

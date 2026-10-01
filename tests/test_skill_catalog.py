@@ -61,7 +61,7 @@ class SkillCatalog(unittest.TestCase):
     def run_cli(self, *args, code=0, config=None):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
-            result = main(["--config", str(config or self.config), *map(str, args)])
+            result = main(["--json", "--config", str(config or self.config), *map(str, args)])
         self.assertEqual(result, code, f"{args}\n{output.getvalue()}\n{errors.getvalue()}")
         return json.loads(output.getvalue()) if output.getvalue() else errors.getvalue()
 

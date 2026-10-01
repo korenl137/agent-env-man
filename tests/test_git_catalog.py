@@ -61,7 +61,7 @@ class GitCatalog(unittest.TestCase):
     def cli(self, *args, code=0):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):
-            result = main(["--config", str(self.config), *map(str, args)])
+            result = main(["--json", "--config", str(self.config), *map(str, args)])
         self.assertEqual(result, code, f"{args}\n{output.getvalue()}\n{errors.getvalue()}")
         return json.loads(output.getvalue()) if output.getvalue() else errors.getvalue()
 

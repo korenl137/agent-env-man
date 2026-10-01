@@ -1,12 +1,16 @@
 # Command reference
 
 ```text
-aem [--config PATH] COMMAND [ARGS]
+aem [--config PATH] [--json] COMMAND [ARGS]
 ```
 
 `--config` is a global option and must precede the command.
 Every command accepts `-h` or `--help`.
-Outputs are JSON; ordinary operation errors use stderr and exit `1`, argument parsing errors exit `2`.
+Ordinary commands print human-readable fields and indented lists by default, including when stdout is redirected.
+Use `--json` for the existing JSON report schema, for example `aem status --json` or `aem --json catalog status`.
+The flag is accepted before the command, after it, or after a nested subcommand.
+Scripts that parse stdout must add `--json`; startup and agent-hook callbacks retain JSON automatically.
+Ordinary operation errors use stderr and exit `1`, argument parsing errors exit `2`.
 Successful operations exit `0`; status also exits `0` when its report contains conflicts or unavailable sources.
 Callbacks have the exceptions described below.
 Documented commands, behavior, exit codes, and JSON fields are covered by the package's [compatibility policy](../CONTRIBUTING.md#versioning-and-compatibility).
@@ -260,7 +264,7 @@ Only the selected branch is pushed, without force, additional branches, or tags;
 Behind/diverged histories, wrong branches, and unfinished Git operations must be reconciled explicitly with Git before retrying.
 Ignored untracked files are left alone by publication; the existing update/apply cleanliness rules still apply afterward.
 
-Results are JSON grouped by checkout, with independent success/failure outcomes; any failure exits 1.
+With `--json`, results are grouped by checkout, with independent success/failure outcomes; any failure exits 1.
 Publication is not atomic across repositories or between commit and push.
 A failed commit may leave staged changes, and a failed push retains the local commit; inspect the reported error and retry after resolving it.
 Publication does not install content or update automatic-policy attempt clocks.
