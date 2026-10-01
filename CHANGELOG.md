@@ -8,6 +8,11 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.4.1] &mdash; 2026-10-01
+
+This release preserves existing setup behavior and adds the official skill as an ancillary integration under the 0.x PATCH exception.
+It is eligible for `compatible` self-updates from 0.4.0.
+
 ### Added
 
 - Official `idk-aem` skill for AEM user operations, authored at `skills/idk-aem/SKILL.md` and included in wheel and source distributions.
@@ -103,7 +108,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.1.0...v0.2.0

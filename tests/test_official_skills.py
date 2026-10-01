@@ -335,7 +335,9 @@ class OfficialUpdate(SetupFixture):
         config = self.register()
         payload = self.root / 'previous-package'
         shutil.copytree(official_skills.source(), payload)
-        with patch('agent_env_man.official_skills.source', return_value=payload):
+        # Match the fake uv installation rather than the test runner's package.
+        with patch('agent_env_man.official_skills.source', return_value=payload), \
+                patch('importlib.metadata.version', return_value='0.4.0'):
             self.setup_cli('--agent', 'codex')
         self.release('0.4.1')
         self.bin.mkdir()
