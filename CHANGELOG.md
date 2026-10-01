@@ -12,6 +12,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 - `locate --cd` and `catalog locate --cd` enter the selected directory through the Bash, Zsh, or PowerShell setup integration; standalone use prints the directory path.
 
+### Changed
+
+- Contributor guidance requires reviewing and updating affected official skill guidance alongside user-facing changes; the `idk-aem` skill now covers directory navigation with `locate --cd`.
+
 ## [0.4.2] &mdash; 2026-10-01
 
 ### Fixed

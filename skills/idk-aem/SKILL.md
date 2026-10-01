@@ -26,6 +26,12 @@ Linked installations expose the source; installed copies and detached content ca
 Use `locate --source` when the task targets source content for publication.
 This skill identifies paths and manages AEM operations; it does not prescribe how to author or edit the content at those paths.
 
+For directory navigation, use `aem locate NAME --cd`, adding `--source` to enter the prepared source instead of an installed copy or detached content.
+Use `aem catalog locate --cd` to enter the directory containing the catalog entry.
+These commands change the calling shell's directory only through the Bash, Zsh, or PowerShell integration registered by `setup --shell`; existing registrations need setup run again and the profile reloaded to gain this function.
+Without that integration, `--cd` prints only the absolute directory path; use it as a working directory for subsequent tool calls or with `cd -- "$(aem locate NAME --cd)"` in Bash/Zsh.
+Do not combine `--cd` with `--json`, and do not assume a directory change in one tool subprocess persists in later calls.
+
 Publication acts on the whole selected repository, including files outside the selected skill or instruction directory.
 A supplied commit message stages all nonignored changes; without a message, publication requires a clean worktree and pushes existing commits.
 Inspect the relevant changes and publication preview before publishing when the task calls for publication.

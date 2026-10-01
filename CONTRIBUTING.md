@@ -283,6 +283,9 @@ When adding or changing a workflow that connects multiple commands, verify that 
 Where source content and installed content can differ, cover link, copy, and detached states and verify which content an edit changes and which content the subsequent command consumes.
 Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
 Keep the README focused on user workflows and link to those references.
+When adding or changing user-facing commands, options, configuration, or workflows, review the relevant guidance in the packaged [idk-aem skill](skills/idk-aem/SKILL.md) and update affected portions in the same change.
+Keep the skill focused on operation selection, command sequencing, and practical constraints; retain detailed CLI and configuration contracts in their canonical documentation rather than duplicating them.
+Changes that do not affect the skill's guidance do not require a skill edit.
 Installation and update paths must reject unknown fields and invalid types instead of silently accepting misspelled or removed settings.
 Update examples and platform limitations with interface changes.
 Agent profiles are the internal extension boundary for paths, hook syntax, callback output, and notices.
