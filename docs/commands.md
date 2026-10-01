@@ -476,7 +476,7 @@ aem agent-hook NAME --agent AGENT
 Callback registered by instruction apply; emits only instruction reading locations and relative-reference guidance.
 It does not update sources or inject document contents.
 Unrelated machine fields and obsolete unselected state modes do not block lookup; the selected saved entry and bundle must still pass locator checks.
-It waits up to five seconds for the configuration lock within the installed ten-second hook timeout.
+It waits up to five seconds total for the installation and configuration locks within the installed ten-second hook timeout.
 For Codex, handled lookup errors return a structured stop response with exit `0`; usage errors still exit `2`.
 Trust remains an agent-side decision; AEM never grants it.
 

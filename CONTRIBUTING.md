@@ -159,7 +159,7 @@ Source lookup validates paths and Git identity without requiring a clean checkou
 Keep copy/detached locations distinct from source editing paths so publication never implies collecting installed-copy edits.
 Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
 The callback emits only path metadata as additionalContext, never document contents, and requests a structured stop on lookup failure.
-Instruction callbacks wait at most 5 seconds for the configuration lock within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.
+Instruction callbacks wait at most 5 seconds total for the installation and configuration locks within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.
 Limit callback metadata to the effective root, entry, and global_entry reading locations; keep installed_root and detached in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.

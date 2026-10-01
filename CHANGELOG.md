@@ -8,6 +8,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Fixed
+
+- Instruction callbacks wait for installation-lock contention within the same five-second budget as configuration-lock contention, instead of stopping immediately when another AEM command holds the installation lock.
+
 ## [0.4.1] &mdash; 2026-10-01
 
 This release preserves existing setup behavior and adds the official skill as an ancillary integration under the 0.x PATCH exception.

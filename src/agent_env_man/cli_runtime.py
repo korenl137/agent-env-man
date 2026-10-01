@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
+import time
 
 import click
 
@@ -109,8 +110,15 @@ class Runtime:
                 tool_lock = self_update.installation_lock(self_update.validate(config.doc.get("self_update", {})))
             except ValueError:
                 tool_lock = None  # Opaque settings must not block offline maintenance.
-            with (lock(tool_lock) if tool_lock and not preview else nullcontext()), (
-                    nullcontext() if preview else lock(config.state_dir, timeout=5 if callback == "agent-hook" else 0)):
+            # Both locks share the callback budget so installation contention
+            # cannot fail immediately or consume a second five-second wait.
+            deadline = time.monotonic() + 5 if callback == "agent-hook" else None
+
+            def remaining():
+                return max(0, deadline - time.monotonic()) if deadline is not None else 0
+
+            with (lock(tool_lock, timeout=remaining()) if tool_lock and not preview else nullcontext()), (
+                    nullcontext() if preview else lock(config.state_dir, timeout=remaining())):
                 # Re-read under the lock; another command may have changed bindings.
                 saved_error = None
                 if maintenance:

@@ -165,6 +165,30 @@ class HookInstallation(InstructionFixture):
                     else:
                         self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
 
+    def test_instruction_callback_waits_for_installation_lock(self):
+        self.configure()
+        self.run_cli("apply")
+        directory = self.config.parent / "installation-lock"
+        with ExitStack() as holder:
+            holder.enter_context(lock(directory))
+            with patch("agent_env_man.cli_runtime.self_update.installation_lock", return_value=directory), \
+                    patch("agent_env_man.process_lock.time.sleep", side_effect=lambda _: holder.close()) as retry:
+                result = self.run_cli("agent-hook", "personal", "--agent", "codex")
+            retry.assert_called_once()
+        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+
+    def test_instruction_callback_shares_wait_budget_across_locks(self):
+        self.configure()
+        self.run_cli("apply")
+        directory = self.config.parent / "installation-lock"
+        # Model four seconds spent acquiring the installation lock.
+        with patch("agent_env_man.cli_runtime.self_update.installation_lock", return_value=directory), \
+                patch("agent_env_man.cli_runtime.time.monotonic", side_effect=[0, 0, 4]), \
+                patch("agent_env_man.cli_runtime.lock", return_value=ExitStack()) as acquire:
+            result = self.run_cli("agent-hook", "personal", "--agent", "codex")
+        self.assertEqual([call.kwargs["timeout"] for call in acquire.call_args_list], [5, 1])
+        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+
     def test_instruction_callbacks_stop_when_contention_outlasts_wait_budget(self):
         self.configure()
         self.run_cli("apply")
@@ -172,7 +196,7 @@ class HookInstallation(InstructionFixture):
         before = (directory / "state.json").read_bytes()
         for command in (("agent-hook", "--agent", "codex"),):
             with self.subTest(command=command), lock(directory):
-                with patch("agent_env_man.process_lock.time.monotonic", side_effect=[0, 0, 5]), \
+                with patch("agent_env_man.process_lock.time.monotonic", side_effect=[0, 0, 0, 0, 5]), \
                         patch("agent_env_man.process_lock.time.sleep") as retry:
                     result = self.run_cli(*command, "personal")
                 retry.assert_called_once()
