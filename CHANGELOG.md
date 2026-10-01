@@ -8,6 +8,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Added
+
+- `locate --cd` and `catalog locate --cd` enter the selected directory through the Bash, Zsh, or PowerShell setup integration; standalone use prints the directory path.
+
 ## [0.4.2] &mdash; 2026-10-01
 
 ### Fixed

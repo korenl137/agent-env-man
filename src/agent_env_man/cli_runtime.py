@@ -96,13 +96,15 @@ class Runtime:
                    if machine or self.json_output else format_report(report))
 
     def run(self, operation, *, maintenance=False, missing_ok=False, preview=False,
-            status_fallback=False, callback=None, agent=None):
+            status_fallback=False, callback=None, agent=None, output=None):
         """Run an operation returning (report, failed) under the required locks.
 
         Help and usage parsing finish before this boundary. Preview commands
         opt out of locks only where their existing read-only contract allows it.
         Maintenance reads saved ownership without installation declarations;
         offline status can fall back to it when current declarations are invalid.
+        An optional output callable handles specialized successful reports, such
+        as plain directory paths for shell integration; errors retain stderr.
         """
         try:
             config = MachineFile(self.config_path, missing_ok=missing_ok)
@@ -135,7 +137,10 @@ class Runtime:
                         state = State(config.state_dir, maintenance=True)
                         saved_error = exc
                 report, failed = operation(Session(Manager(config, state), saved_error))
-                self.emit(report, machine=callback is not None)
+                if output is None:
+                    self.emit(report, machine=callback is not None)
+                else:
+                    output(report)
         except OPERATION_ERRORS as exc:
             if callback == "agent-hook":
                 self.emit(profile(agent).failure(f"AEM instruction root lookup failed: {exc}"), machine=True)

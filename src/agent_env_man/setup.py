@@ -188,7 +188,23 @@ def shell_block(name, config, executable, bin_dir):
     start, end = f'# >>> AEM {identity} >>>', f'# <<< AEM {identity} <<<'
     if name == 'powershell':
         quote = lambda value: "'" + str(value).replace("'", "''") + "'"
-        body = [f"if (($env:PATH -split [IO.Path]::PathSeparator) -notcontains {quote(bin_dir)}) {{",
+        # A child process cannot change its caller's directory. Capture only
+        # successful --cd output and treat it as a literal path, never as code.
+        body = ['function global:aem {',
+                '    $aemCommand = $null; $aemSkip = $false',
+                '    foreach ($aemArg in $args) {',
+                '        if ($aemSkip) { $aemSkip = $false; continue }',
+                '        if ($aemArg -eq "--config") { $aemSkip = $true; continue }',
+                '        if ($aemArg -like "-*") { continue }',
+                '        if ($aemCommand -eq "catalog") { $aemCommand = "catalog:$aemArg"; break }',
+                '        $aemCommand = $aemArg',
+                '        if ($aemCommand -ne "catalog") { break }', '    }',
+                '    if (($aemCommand -eq "locate" -or $aemCommand -eq "catalog:locate") -and $args -contains "--cd" -and $args -notcontains "--help" -and $args -notcontains "-h") {',
+                f"        $aemDirectory = & {quote(executable)} @args",
+                '        if ($LASTEXITCODE -ne 0) { return }',
+                '        Set-Location -LiteralPath $aemDirectory -ErrorAction Stop',
+                '    } else {', f"        & {quote(executable)} @args", '    }', '}',
+                f"if (($env:PATH -split [IO.Path]::PathSeparator) -notcontains {quote(bin_dir)}) {{",
                 f"    $env:PATH = {quote(bin_dir)} + [IO.Path]::PathSeparator + $env:PATH", '}',
                 "$aemBatch = [Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-(NonI.*|Command.*|EncodedCommand|File|c|f|ec)$' }",
                 'if ([Environment]::UserInteractive -and -not $aemBatch) {',
@@ -199,7 +215,20 @@ def shell_block(name, config, executable, bin_dir):
     else:
         command = shlex.join([str(executable), '--config', str(config), 'startup', '--trigger', 'shell-start'])
         directory = shlex.quote(str(bin_dir))
-        body = ['case $- in', '  *i*)', f'    case ":$PATH:" in *:{directory}:*) ;; *) export PATH={directory}:"$PATH" ;; esac',
+        executable_command = shlex.quote(str(executable))
+        body = ['aem() {', '    local aem_arg aem_cd=0 aem_help=0 aem_directory aem_status aem_command= aem_skip=0',
+                '    for aem_arg in "$@"; do',
+                '        case "$aem_arg" in --cd) aem_cd=1 ;; --help|-h) aem_help=1 ;; esac',
+                '    done',
+                '    for aem_arg in "$@"; do',
+                '        if [ "$aem_skip" = 1 ]; then aem_skip=0; continue; fi',
+                '        case "$aem_arg" in --config) aem_skip=1 ;; -*) ;; *) if [ "$aem_command" = catalog ]; then aem_command="catalog:$aem_arg"; break; fi; aem_command=$aem_arg; [ "$aem_command" = catalog ] || break ;; esac',
+                '    done',
+                '    if { [ "$aem_command" = locate ] || [ "$aem_command" = catalog:locate ]; } && [ "$aem_cd" = 1 ] && [ "$aem_help" = 0 ]; then',
+                f'        aem_directory=$({executable_command} "$@")',
+                '        aem_status=$?', '        [ "$aem_status" = 0 ] || return "$aem_status"',
+                '        builtin cd -- "$aem_directory"', '    else',
+                f'        {executable_command} "$@"', '    fi', '}', 'case $- in', '  *i*)', f'    case ":$PATH:" in *:{directory}:*) ;; *) export PATH={directory}:"$PATH" ;; esac',
                 f'    {command} >/dev/null 2>&1 || true', '    ;;', 'esac']
     return start, end, '\n'.join([start, *body, end]) + '\n'
 

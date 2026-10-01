@@ -1,5 +1,6 @@
 """Explicit commands for the bound catalog, independent of its content."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import click
@@ -14,9 +15,9 @@ def catalog():
     """Inspect, update, or publish the bound catalog."""
 
 
-def run(runtime, action, **options):
+def run(runtime, action, *, output=None, **options):
     args = SimpleNamespace(catalog_command=action, **options)
-    return runtime.run(lambda session: delivery.command(session.config, session.state, args))
+    return runtime.run(lambda session: delivery.command(session.config, session.state, args), output=output)
 
 
 @catalog.command()
@@ -29,10 +30,14 @@ def status(runtime, timeout):
 
 @catalog.command()
 @timeout_option
+@click.option("--cd", is_flag=True, help="Change directory with the installed shell integration; otherwise print the entry directory.")
 @pass_runtime
-def locate(runtime, timeout):
+def locate(runtime, timeout, cd):
     """Locate the bound catalog entry offline."""
-    return run(runtime, "locate", timeout=timeout)
+    if cd and runtime.json_output:
+        raise click.UsageError("--cd cannot be combined with --json")
+    return run(runtime, "locate", timeout=timeout,
+               output=(lambda report: click.echo(str(Path(report["entry"]).parent))) if cd else None)
 
 
 @catalog.command()

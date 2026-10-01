@@ -87,10 +87,14 @@ def detach(runtime, item, agent, dry_run):
 @click.argument("name")
 @click.option("--agent", default="codex", show_default=True, type=AGENT)
 @click.option("--source", is_flag=True, help="Locate the current catalog source for editing and publication.")
+@click.option("--cd", is_flag=True, help="Change directory with the installed shell integration; otherwise print the root.")
 @pass_runtime
-def locate(runtime, name, agent, source):
+def locate(runtime, name, agent, source, cd):
     """Locate installed content or its prepared source offline."""
-    return runtime.run(lambda session: (session.manager.locate(name, agent, source=source), False), maintenance=True)
+    if cd and runtime.json_output:
+        raise click.UsageError("--cd cannot be combined with --json")
+    return runtime.run(lambda session: (session.manager.locate(name, agent, source=source), False),
+                       maintenance=True, output=(lambda report: click.echo(report["root"])) if cd else None)
 
 
 @click.command()

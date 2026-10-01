@@ -188,7 +188,7 @@ For Git bindings it also includes `catalog`, with `status` (`cloned` or `already
 
 ```text
 aem catalog status [--timeout TIMEOUT]
-aem catalog locate [--timeout TIMEOUT]
+aem catalog locate [--timeout TIMEOUT] [--cd]
 aem catalog update [--timeout TIMEOUT]
 aem catalog auto --trigger EVENT [--dry-run]
 aem catalog publish [-m MESSAGE | --message MESSAGE] [--dry-run] [--timeout TIMEOUT]
@@ -375,8 +375,15 @@ Unknown fields and unselected records are preserved; no legacy config-merge pars
 ## locate
 
 ```text
-aem locate NAME [--agent AGENT] [--source]
+aem locate NAME [--agent AGENT] [--source] [--cd]
 ```
+
+Use `--cd` to change the current shell directory after registering the shell integration with `aem setup --shell bash`, `--shell zsh`, or `--shell powershell` and reloading the profile.
+It moves to the selected content root; `--source --cd` moves to the prepared source, while `catalog locate --cd` moves to the directory containing the catalog entry.
+Without the shell integration, `--cd` prints only the absolute directory path, so Bash/Zsh can also use `cd -- "$(aem locate NAME --cd)"`.
+The option cannot be combined with `--json`.
+Lookup failures leave the shell directory unchanged; help still prints normally.
+Existing shell registrations need setup run again to install this function.
 
 The agent defaults to `codex`; NAME is a catalog skill or instruction bundle name.
 By default, returns `root`, `entry`, `installed_root`, and `detached` from the selected agent's saved installation when one exists.
