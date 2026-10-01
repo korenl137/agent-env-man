@@ -4,7 +4,6 @@
 
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-During 0.x development, minor releases may break compatibility; patch releases preserve it.
 
 ## [Unreleased]
 
@@ -21,6 +20,7 @@ Local release preparation remains explicit in Git; publication is independent of
 
 ### Changed
 
+- Remove pre-1.0 versioning exceptions and update guidance from documentation; retain historical release identifiers.
 - Distinguish base local use, contribution environments, isolated builds, and explicit shell/agent setup in installation and validation guidance.
 
 ### Fixed
@@ -63,7 +63,6 @@ Local release preparation remains explicit in Git; publication is independent of
 
 ### Changed
 
-- During 0.x, permit compatible feature additions in PATCH releases, with MINOR chosen at maintainer discretion according to scope and significance; incompatible changes and public deprecation still require MINOR.
 - Contributor guidance requires reviewing and updating affected official skill guidance alongside user-facing changes; the `idk-aem` skill now covers directory navigation with `locate --cd`.
 
 ## [0.4.2] &mdash; 2026-10-01
@@ -74,8 +73,7 @@ Local release preparation remains explicit in Git; publication is independent of
 
 ## [0.4.1] &mdash; 2026-10-01
 
-This release preserves existing setup behavior and adds the official skill as an ancillary integration under the 0.x PATCH exception.
-It is eligible for `compatible` self-updates from 0.4.0.
+This release preserves existing setup behavior and adds the official skill as an ancillary integration.
 
 ### Added
 
@@ -87,13 +85,11 @@ Self-update validates owned skill links and local source edits before package re
 - Agent setup attempts the official skill link after completing core integrations and machine selection storage, reporting recoverable skill failures separately without failing setup.
 Agent removal also removes unchanged owned official links; changed links, edited sources, and substituted copies are preserved and released from ownership.
 User catalog installation and content editing remain independent of the official skill.
-- Permit compatible supporting refinements to existing workflows in PATCH releases during 0.x only; new functionality otherwise remains MINOR, and compatibility, ownership, and recovery guarantees remain required.
 
 ## [0.4.0] &mdash; 2026-10-01
 
 This release requires catalog v2 and changes CLI parsing and default report formatting.
 Follow the [catalog transition instructions](docs/removed-interfaces.md#catalog-v2-transition) before upgrading existing installations.
-During 0.x, `compatible` self-updates stay within the current minor series; upgrading from 0.3.x to 0.4.0 requires an explicit upgrade or `breaking` permission.
 
 ### Changed
 
@@ -115,7 +111,6 @@ Directory links, copies, and detach retain ignored regular contents; installed-c
 ## [0.3.0] &mdash; 2026-09-30
 
 Existing configurations retain policy-driven automation by default; full automation requires explicit opt-in.
-During 0.x, `compatible` self-updates stay within the current minor series; upgrading from 0.2.x to 0.3.0 requires an explicit upgrade or `breaking` permission.
 
 ### Added
 

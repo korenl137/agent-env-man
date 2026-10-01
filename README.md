@@ -35,9 +35,7 @@ These files match the installed package and can be read without a repository che
 ## Versioning and compatibility
 
 AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
-From 1.0.0 onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
-During 0.x development, minor releases may break compatibility; patch releases preserve it.
-During 0.x only, compatible feature additions may also ship in a patch release; maintainers may choose a minor release based on their scope and significance.
+It follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
 Review migration instructions before upgrading across an incompatible release.
 
 The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.
@@ -299,7 +297,7 @@ aem self update
 aem self status
 ```
 
-For final releases, `compatible` permits newer final releases in the same major version, or only patches in the same minor version during `0.x`.
+For final releases from `1.0.0` onward, `compatible` permits newer final releases in the same major version.
 For `a`/`b`/`rc` prereleases, it permits only subversion increases with the same base version and pre label; moving to a different series or a final release requires `breaking`.
 Explicit updates work with automation off and queue a worker; use `aem self status` to check completion.
 See [AEM update guidance](docs/automation.md#update-aem-itself) for automatic updates, incompatible releases, runtime requirements, and repair.

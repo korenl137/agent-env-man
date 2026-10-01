@@ -375,7 +375,7 @@ The repository installer uses uv to install this checkout as a user tool, then d
 Offer `off`, `compatible`, and `breaking` self-update modes on first interactive installation; unattended omission defaults to off, and omitted choices preserve saved settings.
 Self-update policy and the external installer runtime belong to machine configuration, never the content catalog.
 Release selection uses newer final or Python `a`/`b`/`rc` prerelease tags, with tag/package version agreement after treating an omitted pre number as zero.
-Final compatible updates select final releases only, preserving same-major compatibility from 1.x and same-minor compatibility during 0.x.
+Final compatible updates select final releases only, preserving same-major compatibility from 1.x.
 Prerelease compatible updates require the same base version and pre label and increase only the numeric subversion; label/base changes and graduation to final require breaking permission.
 Pre numbers may be omitted and mean zero; do not require earlier pre phases to exist.
 Keep parsing and ordering standard-library-only for the copied worker; exclude development, post, and local versions.

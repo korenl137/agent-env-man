@@ -312,7 +312,7 @@ Unknown fields are rejected.
 | `bin_dir` | Absolute path string | Installer-discovered executable directory; passed to uv to preserve executable locations. |
 
 All four runtime paths are required when enabling automatic updates or requesting an explicit update.
-For final releases, `compatible` permits the same major from `1.0.0` onward and the same minor during `0.x`.
+For final releases from `1.0.0` onward, `compatible` permits the same major.
 For a prerelease, `compatible` permits only a higher numeric subversion with the same base `X.Y.Z` and the same `a`, `b`, or `rc` label (for example, `1.0.0rc1` to `1.0.0rc2`).
 Changing the label, base version, or moving to a final release requires `breaking`.
 Final installations retain their existing compatible range and do not select prereleases in `compatible` mode.

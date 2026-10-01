@@ -63,7 +63,7 @@ aem self update                  # Queue an explicit compatible release update.
 aem self update --mode breaking  # Permit incompatible releases for this attempt.
 ```
 
-For final releases, `compatible` permits newer final releases in the same major version; during `0.x`, it permits only patches in the same minor version.
+For final releases from `1.0.0` onward, `compatible` permits newer final releases in the same major version.
 For a prerelease, `compatible` permits only a higher numeric subversion with the same base `X.Y.Z` and the same `a`, `b`, or `rc` label (for example, `1.0.0rc1` to `1.0.0rc2`).
 Changing the label, base version, or moving to a final release requires `breaking`.
 Final installations retain their existing compatible range and do not select prereleases in `compatible` mode.

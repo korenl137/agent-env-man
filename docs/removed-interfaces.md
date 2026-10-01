@@ -50,7 +50,7 @@ Keep any old checkout in place and run bootstrap to prepare the new named checko
 Inspect backup and conflict reports before continuing.
 
 AEM never automatically deletes or moves old checkouts, state, detached contents, or replacement backups.
-The new syntax requires a minor package increase under the current 0.x compatibility policy; no release or tag is implied by editing the catalog.
+Editing the catalog does not itself create a package release or Git tag.
 See the [configuration reference](configuration.md#catalog) for the complete grammar.
 
 ## Before upgrading an existing installation
