@@ -25,6 +25,7 @@ class Plan:
     materialize: Path | None = None
     records: dict = field(default_factory=dict)
     peers: list = field(default_factory=list)
+    delete: bool = False
 
 
 class Manager:
@@ -396,6 +397,10 @@ class Manager:
             raise Error(f"{item.key}: target ancestry changed after preflight")
         if observation(item.target) != plan.before:
             raise Error(f"{item.key}: target changed after preflight")
+        if plan.record.get('official_skill') and (plan.change or not plan.record.get('detached')):
+            from .official_skills import signature
+            if (not plan.delete or item.source.exists()) and signature(item.source) != plan.record['official_hash']:
+                raise Error(f'{item.key}: official skill source changed after preflight')
         if plan.materialize is None and item.kind != "setup" and self.payload(item) != plan.record["hash"]:
             raise Error(f"{item.key}: source changed after preflight")
         for peer in plan.peers:
@@ -409,12 +414,23 @@ class Manager:
         suffix = uuid.uuid4().hex
         stage = item.target.with_name(".aem-stage-" + suffix)
         backup = item.target.with_name(item.target.name + ".aem-backup-" + suffix)
+        if plan.delete:
+            if not plan.record.get('official_skill'):
+                raise Error('Deletion plans require official skill ownership')
+            # A sibling backup link would still be discovered as an agent skill.
+            # Keep it outside skills roots while retaining recoverable link identity.
+            backup = self.config.state_dir / 'setup-backups' / (item.target.name + '-' + suffix)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            if backup.parent.resolve() != backup.parent:
+                raise Error('Official skill backup directory redirects')
         try:
             if plan.materialize is not None:
                 exclude_git = plan.record.get("exclude_git", False)
                 copy_payload(plan.materialize, stage, exclude_git=exclude_git)
                 if fingerprint(stage) != plan.record["hash"] or fingerprint(plan.materialize, exclude_git=exclude_git) != plan.record["hash"]:
                     raise Error(f"{item.key}: linked contents changed during detach")
+            elif plan.delete:
+                pass  # Removal stages absence; the backup and journal allow rollback.
             elif item.mode == "link":
                 try:
                     stage.symlink_to(item.source, target_is_directory=item.source.is_dir())
@@ -434,6 +450,10 @@ class Manager:
                 os.chmod(stage, stat.S_IMODE(item.target.stat().st_mode) if exists(item.target) else 0o600)
             if observation(item.target) != plan.before:
                 raise Error(f"{item.key}: target changed during staging")
+            if plan.record.get('official_skill') and (not plan.delete or item.source.exists()):
+                from .official_skills import signature
+                if signature(item.source) != plan.record['official_hash']:
+                    raise Error(f'{item.key}: official skill source changed during staging')
             after = observation(stage)
             # Persist recovery paths before moving the old target. No journal is
             # needed for pure ownership adoption, which only writes state once.
@@ -441,8 +461,17 @@ class Manager:
                                           "backup": str(backup), "before": plan.before, "after": after}
             self.state.save()
             if exists(item.target):
-                os.replace(item.target, backup)
-            os.replace(stage, item.target)
+                if plan.delete:
+                    # Copy link identity, not its payload: state and skills may
+                    # live on different filesystems, where rename cannot work.
+                    backup.symlink_to(os.readlink(item.target), target_is_directory=True)
+                    if observation(item.target) != plan.before or observation(backup) != plan.before:
+                        raise Error(f'{item.key}: link changed during removal')
+                    item.target.unlink()
+                else:
+                    os.replace(item.target, backup)
+            if not plan.delete:
+                os.replace(stage, item.target)
             if observation(item.target) != after:
                 raise Error(f"{item.key}: installed target changed before commit")
             old_records = dict(self.state.data["items"])
@@ -470,7 +499,7 @@ class Manager:
         if not all(k in pending for k in ("target", "backup", "stage", "before", "after")):
             raise Error("Incomplete recovery journal; cannot safely recover")
         target, backup, stage = (saved_path(pending[k]) for k in ("target", "backup", "stage"))
-        if len({target, backup, stage}) != 3 or any(p.parent != target.parent for p in (backup, stage)):
+        if len({target, backup, stage}) != 3 or stage.parent != target.parent:
             raise Error("Recovery paths must be distinct siblings")
         for field in ("before", "after"):
             value = pending[field]
@@ -478,14 +507,28 @@ class Manager:
                     or (value["kind"] == "link" and not isinstance(value.get("to"), str))
                     or (value["kind"] in ("file", "directory") and not isinstance(value.get("hash"), str))):
                 raise Error("Invalid recovery observation; cannot safely recover")
+        record = self.state.data['items'].get(pending.get('key'), {})
+        official_removal = (record.get('official_skill') and record.get('kind') == 'setup'
+                            and record.get('mode') == 'link' and record.get('target') == str(target)
+                            and pending['before'] == {'kind': 'link', 'to': record.get('source')}
+                            and pending['after'] == {'kind': 'missing'}
+                            and backup.parent == self.config.state_dir / 'setup-backups'
+                            and backup.parent.resolve() == backup.parent)
+        if backup.parent != target.parent and not official_removal:
+            raise Error('Recovery paths must be distinct siblings')
         current = observation(target)
         before, after = pending["before"], pending["after"]
         if exists(backup):
-            if observation(backup) != before or current not in (after, {"kind": "missing"}):
+            allowed = (before, after) if official_removal else (after, {'kind': 'missing'})
+            if observation(backup) != before or current not in allowed:
                 raise Error("Recovery stopped: target or backup changed; preserve both and resolve manually")
-            if exists(target):
-                remove(target)
-            os.replace(backup, target)
+            if official_removal:
+                if current != before:
+                    target.symlink_to(os.readlink(backup), target_is_directory=True)
+            else:
+                if exists(target):
+                    remove(target)
+                os.replace(backup, target)
         elif current == before:
             pass  # Crash before the first rename, or recovery already restored it.
         elif before == {"kind": "missing"} and current == after:

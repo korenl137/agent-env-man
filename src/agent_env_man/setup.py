@@ -11,9 +11,103 @@ import sys
 import tomlkit
 
 from .agents import profile
-from .manager import Plan
+from .manager import Manager, Plan
 from .model import Config, Error, Item, absolute, overlaps
 from .storage import exists, is_reparse, observation
+
+
+def official_plans(manager, agents, *, removing=(), refresh=False):
+    """Plan official skill links independently of user catalog declarations."""
+    from importlib.metadata import version
+    from . import official_skills
+    from .storage import fingerprint, saved_path
+
+    plans, report = [], []
+    records, config = manager.state.data['items'], manager.config
+    package_version = version('agent-env-man')
+    for name in dict.fromkeys([*agents, *removing]):
+        key = f'setup:skill-{name}-{official_skills.NAME}'
+        old = records.get(key)
+        removal = name in removing
+        if removal and (not old or old.get('detached')):
+            continue
+        baseline = old if old and not old.get('detached') else None
+        if baseline and (not baseline.get('official_skill') or baseline.get('kind') != 'setup'
+                         or baseline.get('mode') != 'link' or baseline.get('id') != key.removeprefix('setup:')):
+            raise Error(f'{key}: not official skill ownership')
+        target = (saved_path(old['target']) if removal else
+                  absolute(agents[name]['skills']) / official_skills.NAME)
+        # The final component is deliberately allowed to be our managed link.
+        for parent in target.parents:
+            if exists(parent) and (parent.is_symlink() or is_reparse(parent)):
+                raise Error(f'Official skill target ancestry redirects: {parent}')
+        before = observation(target)
+        if removal:
+            original = saved_path(old.get('source'))
+            record = dict(old, detached=True)
+            unchanged = before == {'kind': 'link', 'to': old['source']}
+            if unchanged and target.exists():
+                try:
+                    unchanged = official_skills.signature(original) == old.get('official_hash')
+                except (OSError, ValueError):
+                    unchanged = False  # Unreadable or redirected edits are preserved too.
+            item = Item('setup', old['id'], '.', original, target, 'link', 'setup', agent=name)
+            plans.append(Plan(item, before, record, unchanged, delete=unchanged))
+            report.append({'integration': f'agent-skill:{name}', 'target': str(target),
+                           'action': 'remove' if unchanged else 'preserve'})
+            continue
+        original = official_skills.source().resolve(strict=True)
+        fingerprint(original)
+        if not (original / 'SKILL.md').is_file():
+            raise Error(f'Official skill entry is missing: {original}')
+        if baseline:
+            if baseline['target'] != str(target):
+                raise Error(f'{key}: remove the existing integration before relocating it')
+            official_skills.check({key: baseline}, payload=baseline.get('package_version') == package_version and not refresh)
+        elif exists(target):
+            raise Error(f'Unmanaged official skill target: {target}; preserve it before setup')
+        protected = [config.path, config.state_dir, config.checkout_root, original]
+        if overlaps(target.parent, config.state_dir):
+            raise Error(f'Official skill root overlaps manager state: {target.parent}')
+        protected.extend(absolute(p) for p in config.doc.get('external_paths', {}).values())
+        if config.catalog_path:
+            protected.append(config.catalog_source.path if config.catalog_source else config.catalog_path)
+        if any(overlaps(target, path) for path in protected):
+            raise Error(f'Official skill target overlaps manager storage: {target}')
+        for other_key, other in records.items():
+            if other_key != key and not other.get('detached') and overlaps(target, saved_path(other['target'])):
+                raise Error(f'Official skill target overlaps {other_key}')
+        # Unavailable catalogs must not block integration repair. When available,
+        # reject declared targets even before they acquire ownership.
+        if config.catalog_path and config.catalog_path.is_file():
+            try:
+                candidate = Config(config.path, document=config.doc)
+                declarations = manager.__class__(candidate, manager.state).items()
+            except Error:
+                declarations = []  # Repair setup independently of a broken catalog.
+            for declared in declarations:
+                if overlaps(target, declared.target):
+                    raise Error(f'Official skill target overlaps catalog item {declared.key}')
+        record = {'source_name': 'setup', 'id': key.removeprefix('setup:'), 'kind': 'setup',
+                  'mode': 'link', 'source': str(original), 'target': str(target), 'relative': '.',
+                  'hash': fingerprint(original), 'official_hash': official_skills.signature(original),
+                  'official_skill': True, 'package_version': package_version, 'detached': False,
+                  'agent': name, 'agents': [name]}
+        item = Item('setup', record['id'], '.', original, target, 'link', 'setup', agent=name)
+        changed = before != {'kind': 'link', 'to': str(original)}
+        plans.append(Plan(item, before, record, changed))
+        report.append({'integration': f'agent-skill:{name}', 'target': str(target),
+                       'action': 'write' if changed else 'unchanged'})
+    return plans, report
+
+
+def refresh_official(manager, *, replaced=False):
+    """Refresh links after package replacement without rebuilding startup hooks."""
+    manager.state.ready()
+    plans, report = official_plans(manager, manager.config.agents, refresh=replaced)
+    for plan in plans:
+        manager.install(plan)
+    return {'integrations': report}
 
 
 def regular(path):
@@ -228,6 +322,9 @@ def setup(manager, args):
         plans.append(plan)
         report.append({'integration': f'{kind}:{name}', 'target': str(path),
                        'action': 'remove' if removing else 'write' if plan.change else 'unchanged'})
+    skill_plans, skill_report = official_plans(Manager(candidate, state), agents, removing=args.remove_agent)
+    plans.extend(skill_plans)
+    report.extend(skill_report)
     # Detect overlaps among new selections before any profile is changed.
     for i, plan in enumerate(plans):
         if any(overlaps(plan.item.target, p.item.target) for p in plans[:i]):
@@ -320,6 +417,9 @@ def remove_integrations(manager, args):
         key, record = next(iter(group['records'].items()))
         item = Item('setup', key.removeprefix('setup:'), '.', config.path, path, 'agent-hook', 'setup')
         plans.append(Plan(item, group['before'], record, True, content, records=group['records']))
+    skill_plans, skill_report = official_plans(manager, {}, removing=args.remove_agent)
+    plans.extend(skill_plans)
+    report.extend(skill_report)
     for index, plan in enumerate(plans):
         if observation(plan.item.target) != plan.before:
             raise Error(f'{plan.item.key}: removal target changed during preflight')

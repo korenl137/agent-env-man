@@ -89,6 +89,8 @@ The standalone installer and external update worker remain standard-library-only
 The manager owns reusable installation and delivery behavior.
 Personal instructions, research guidance, skills, and settings remain user-supplied content outside this repository.
 Do not introduce personal policies as built-in payloads.
+The official `idk-aem` skill is the exception: it documents AEM user operations and ships with the package from `skills/idk-aem/SKILL.md`.
+It must not prescribe how to author managed content or restrict user-requested edits.
 
 Delivery prepares local source paths; installation consumes those paths without network access.
 Git must remain an end-to-end supported delivery path, not an external setup prerequisite that bypasses the core.
@@ -240,7 +242,7 @@ Test actual fresh-CLI continuation, stage ordering, new declarations, exclusions
 
 ## Ownership and safety
 
-Only declared catalog skills/instruction bundles may be installed; a content repository update cannot expand the local catalog.
+Only declared catalog skills/instruction bundles and the package-owned official integration skill may be installed; a content repository update cannot expand the local catalog.
 Catalog skill names identify ownership independently of repository URLs and paths.
 Instruction ownership uses the bundle name and bundle/entry/hook component.
 Do not infer ownership from an existing file or delete targets when declarations disappear.
@@ -299,13 +301,25 @@ Keep removal-only setup independent of runtime registration and policy edits.
 Exercise release boundaries, annotated tags, metadata mismatches, policy cancellation, contention, failure/retry, and worker lifetime with local repositories and fake uv processes.
 Package-manager rollback and real Windows replacement require separate evidence before strengthening their documented guarantees.
 Keep the installer standard-library-only; configuration and ownership logic belong in the package.
-Setup owns machine selection and startup registration, while bootstrap prepares content and apply installs it.
+Setup owns machine selection, startup registration, and official skill links, while bootstrap prepares catalog content and apply installs it.
+Agent integration includes the startup hook and a link to the packaged official skill at the selected skills root.
+Keep official skill ownership under setup, independently of catalog declarations and content policies.
+The package resource mapping in `pyproject.toml` must include the root-level skill in both wheel and sdist; update explicit package registration when adding a Python package.
+Self-update validates recorded links and source edits before replacement, then releases locks before invoking the fresh CLI to refresh official links.
+The continuation must validate its request token and saved policy binding and run at most once.
+Keep package replacement outcomes separate from official link refresh outcomes; full automation stops if link refresh fails.
+Older saved source hashes may differ after another configuration or an external installer replaces the package; compare payloads only for the recorded package version.
 Catalog update policies must never register hooks implicitly.
 
 Selections accumulate, and repeated setup must preserve unrelated content and avoid duplicate groups or blocks.
 Preflight all profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection last.
 A retry must recognize completed ownership records after a partial failure.
 Setup removal must not delete user content or silently detach installed skills and instructions.
+Official integration removal deletes only unchanged owned links, preserving their package sources and transaction backups.
+Store official removal backups under the machine state directory's `setup-backups`, outside agent discovery roots; sibling link backups would remain discoverable skills.
+Reject official skills roots containing machine state storage, and preserve link identity without requiring renames across filesystems during removal or restoration.
+Recovery permits this backup location only for recorded official link removal with a missing post-transaction target, retaining sibling-path validation for ordinary replacements.
+Changed official links, edited sources, and substituted copies are preserved and released from setup ownership, with their paths reported.
 A setup invocation containing only removals must touch only requested saved integrations, without rebuilding remaining integrations or consulting current profile defaults.
 Use saved shell blocks and hook groups, including retired integration names; ignore an executable override on removal-only calls.
 Preflight selected removals and machine-document edits before writing, detect concurrent edits, group removals sharing a hook file, and retain the same journal/retry boundaries as setup installation.

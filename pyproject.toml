@@ -14,5 +14,12 @@ dependencies = ["click>=8.2,<9", "tomlkit>=0.13,<1"]
 [project.scripts]
 aem = "agent_env_man.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["agent_env_man", "agent_env_man.commands", "agent_env_man.builtin_skills"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"agent_env_man.builtin_skills" = "skills"
+
+[tool.setuptools.package-data]
+"agent_env_man.builtin_skills" = ["idk-aem/SKILL.md"]

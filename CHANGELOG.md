@@ -8,6 +8,18 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Added
+
+- Official `idk-aem` skill for AEM user operations, authored at `skills/idk-aem/SKILL.md` and included in wheel and source distributions.
+Self-update validates owned skill links and local source edits before package replacement, then verifies or refreshes links through the fresh CLI with separate stage results.
+
+### Changed
+
+- **Breaking:** Agent setup now includes the official skill link under the agent's skills root and can fail on a conflicting target or unavailable link privileges.
+Agent removal also removes unchanged owned official links; changed links, edited sources, and substituted copies are preserved and released from ownership.
+User catalog installation and content editing remain independent of the official skill.
+- **Breaking:** Self-update results can temporarily report `continuing` while the fresh CLI verifies official links, with separate tool and official-skill stage results on completion.
+
 ## [0.4.0] &mdash; 2026-10-01
 
 This release requires catalog v2 and changes CLI parsing and default report formatting.

@@ -27,7 +27,7 @@ for command in (delivery.bootstrap, delivery.update, delivery.publish,
                 installation.status, installation.detach, installation.locate,
                 installation.recover, device.setup, device.self_group,
                 device.automation_command, device.startup, device.agent_hook,
-                device.full_run, catalog):
+                device.full_run, device.self_skill_refresh, catalog):
     cli.add_command(command)
 
 

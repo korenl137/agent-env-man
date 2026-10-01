@@ -1,6 +1,6 @@
 """Release-tag updates; the copied worker runs outside the uv tool environment.
 
-The worker intentionally uses only the standard library and process_lock.py.
+The worker and its copied locking/official-skill helpers use only the standard library.
 Its stdin is a lifetime pipe: replacement starts only after the requesting AEM
 process exits, including releasing its configuration and installation locks.
 """
@@ -19,6 +19,11 @@ import tempfile
 import time
 import tomllib
 import uuid
+
+if __package__:
+    from .official_skills import check as check_official_skills
+else:
+    from official_skills import check as check_official_skills
 
 MODES = ('off', 'compatible', 'breaking')
 REPOSITORY = 'https://github.com/mirinae3145/agent-env-man.git'
@@ -163,7 +168,7 @@ def launch(config, settings, attempt, *, filename='self-update.json', extra=None
                 raise ValueError(f'Updater {field} is missing; rerun scripts/setup.py')
         directory.mkdir(parents=True, exist_ok=True)
         from .storage import atomic_write
-        for name in ('self_update.py', 'process_lock.py'):
+        for name in ('self_update.py', 'process_lock.py', 'official_skills.py'):
             atomic_write(directory / name, Path(__file__).with_name(name).read_bytes())
         request = {'token': token, 'parent_pid': os.getpid(), 'config': str(config.path), 'settings': settings,
                    'saved_settings': dict(config.doc.get('self_update', {})), 'filename': filename, **(extra or {})}
@@ -207,7 +212,7 @@ def git_url(repository):
     return 'git+' + repository
 
 
-def perform(request):
+def perform(request, records=None):
     """Validate release metadata before asking uv to replace the registered tool."""
     settings = validate(request['settings'])
     repository = settings.get('repository', REPOSITORY)
@@ -218,6 +223,8 @@ def perform(request):
     installed = re.search(r'^agent-env-man v(\S+)', listing, re.MULTILINE)
     if installed is None:
         raise ValueError('Registered uv installation is missing; rerun scripts/setup.py')
+    if records is not None:
+        check_official_skills(records, package_version=installed[1])
     selected = select_release(git('ls-remote', '--tags', repository), installed[1], settings['mode'])
     if selected is None:
         return {'status': 'up-to-date'}
@@ -234,6 +241,8 @@ def perform(request):
             raise ValueError('Release tag does not match agent-env-man package metadata')
     command = [settings['uv'], 'tool', 'install', '--reinstall', '--python', settings['python'],
                '--from', git_url(repository) + '@' + selected['revision'], 'agent-env-man']
+    if records is not None:
+        check_official_skills(records, package_version=installed[1])
     subprocess.run(command, env=environment, check=True, capture_output=True, text=True, timeout=TIMEOUT)
     return {'status': 'updated', **selected}
 
@@ -281,6 +290,7 @@ def worker(request_path):
     state_dir = config.parent / (config.name + '.state')
     result = state_dir / request.get('filename', 'self-update.json')
     continue_full = False
+    refresh_skills = False
     try:
         parent_exited = wait_for_parent(request['parent_pid'])
         with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
@@ -300,18 +310,45 @@ def worker(request_path):
                 elif json.loads((state_dir / 'state.json').read_text(encoding='utf-8')).get('pending') is not None:
                     outcome = {'status': 'cancelled', 'reason': 'Recovery is pending'}
                 else:
+                    records = json.loads((state_dir / 'state.json').read_text(encoding='utf-8'))['items']
+                    check_official_skills(records, payload=False)
                     outcome = ({'status': 'disabled'} if request.get('full') and request['settings'].get('mode', 'off') == 'off'
-                               else perform(request))
+                               else perform(request, records))
                     continue_full = bool(request.get('full'))
+                    refresh_skills = bool(document.get('agents')) and (outcome['status'] in ('updated', 'up-to-date') or continue_full)
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 # Do not persist subprocess output: Git URLs/build logs may
                 # contain credentials. Explicit updates can retry immediately.
                 outcome = {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
                                                          else f'{type(exc).__name__}: release update failed')}
-            if continue_full:
-                write_json(result, {**previous, 'status': 'continuing', 'stages': {'tool': outcome}})
+            if continue_full or refresh_skills:
+                write_json(result, {**previous, 'status': 'continuing', 'skill_binding': full_binding(document),
+                                    'stages': {'tool': outcome}})
             else:
                 write_json(result, {**previous, **outcome, 'finished': time.time()})
+        if refresh_skills:
+            executable = Path(request['settings']['bin_dir']) / ('aem.exe' if os.name == 'nt' else 'aem')
+            try:
+                process = subprocess.run([str(executable), '--config', str(config), '--json', '_self-skill-refresh',
+                                          '--token', request['token'], '--result-file', result.name],
+                                         capture_output=True, text=True, timeout=TIMEOUT)
+                if process.returncode:
+                    raise ValueError('Official skill refresh failed; retry setup --agent codex')
+                refresh = {'status': 'completed', **json.loads(process.stdout)}
+            except (OSError, ValueError, subprocess.SubprocessError):
+                refresh = {'status': 'failed', 'error': 'Official skill refresh failed; retry setup --agent codex'}
+            with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
+                latest = read_result(result)
+                if latest.get('token') != request['token']:
+                    return
+                stages = {**latest.get('stages', {}), 'official_skill': refresh}
+                if not continue_full or refresh['status'] == 'failed':
+                    write_json(result, {**latest, **outcome, 'status': 'failed' if refresh['status'] == 'failed' else outcome['status'],
+                                        **({'error': refresh['error']} if refresh['status'] == 'failed' else {}),
+                                        'stages': stages, 'finished': time.time()})
+                    continue_full = False
+                else:
+                    write_json(result, {**latest, 'stages': stages})
         if continue_full:
             # Release both locks before the fresh CLI acquires them. Keep a
             # one-use token in the result so retries cannot repeat a continuation.

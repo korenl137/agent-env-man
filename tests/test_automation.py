@@ -149,6 +149,7 @@ class FullAutomation(SetupFixture):
     @unittest.skipIf(os.name == 'nt', 'Fake executable integration uses a POSIX shebang')
     def test_worker_restarts_fresh_cli_after_tool_install_before_catalog_and_content(self):
         manager = self.register(tool='compatible')
+        self.setup_cli('--agent', 'codex')
         release = self.root / 'release'
         release.mkdir()
         self.git(release, 'init', '-b', 'main')
@@ -175,8 +176,9 @@ class FullAutomation(SetupFixture):
             automation.schedule(config, 'interval')
         result = self.finish_worker(config)
         self.assertEqual(result['status'], 'completed', result)
-        self.assertEqual(marker.read_text().splitlines(), ['tool', 'fresh-cli'])
+        self.assertEqual(marker.read_text().splitlines(), ['tool', 'fresh-cli', 'fresh-cli'])
         self.assertEqual(result['stages']['tool']['version'], '0.2.1')
+        self.assertEqual(result['stages']['official_skill']['status'], 'completed')
         self.assertTrue((self.destination / 'report/SKILL.md').exists())
         self.assertTrue((self.agent / 'AGENTS.md').exists())
 

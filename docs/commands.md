@@ -28,7 +28,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 
 | Command | Purpose | Network |
 | --- | --- | --- |
-| `setup` | Connect or remove machine startup integrations. | None. |
+| `setup` | Connect or remove startup integrations and official agent skill links. | None. |
 | `self` | Inspect or queue updates of AEM itself. | Status and dry run are offline; queued workers fetch releases and install through uv. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
 | `catalog` | Inspect, update, or publish the catalog itself. | Update/publish only; publication dry run is offline. |
@@ -70,7 +70,11 @@ Initial integration setup requires at least one shell or agent selection.
 A call supplying only catalog/device automation policy options (and optionally `--dry-run`) can save policy without registering integrations or requiring an executable.
 Adding and removing the same integration in one call is invalid.
 `--executable` overrides the saved absolute executable path, otherwise it defaults beside the running Python interpreter.
-Setup edits startup integrations and saves machine selections; it does not bootstrap or apply content.
+Setup edits startup integrations, links the packaged `idk-aem` skill for selected agents, and saves machine selections; it does not bootstrap or apply user catalog content.
+General integration setup refreshes the official links of saved agents; shell-only initial setup and policy-only edits do not install official skills.
+Official skills use links without automatic fallback to copies; platforms without symlink privileges report an error.
+Unmanaged targets, changed links, overlapping ownership or catalog targets, and local source edits within the recorded package version stop setup before integration writes.
+Official skill records are setup-owned and do not enter content command selection.
 `--self-update` saves `off`, `compatible`, or `breaking`; omission preserves the saved mode.
 The `--update-*` options register the release source and external installer runtime described in [Configuration](configuration.md#aem-self-update-settings).
 Enabling updates requires runtime registration; the repository installer supplies those paths.
@@ -84,7 +88,9 @@ Removing an agent requires first detaching its managed content.
 Dry run writes no files, including lock files.
 When only `--remove-shell` / `--remove-agent` selections are supplied, setup uses saved ownership instead of validating installation declarations.
 Removal accepts retired integration names and old state versions 1/2; unknown machine fields and unselected records are preserved.
-It removes only the selected saved blocks/groups and corresponding selections, without rebuilding other integrations.
+It removes only the selected saved blocks/groups, unchanged official skill links, and corresponding selections, without rebuilding other integrations.
+Changed official links, locally edited official sources, or substituted copies are preserved with ownership released; their integration result has `action = "preserve"` and the remaining `target` path.
+Official skill integration results use `integration = "agent-skill:AGENT"`, with the existing `write`, `unchanged`, and `remove` actions for ordinary links.
 A supplied `--executable` is ignored on removal-only calls; no executable or current agent profile is needed.
 Locally edited selected blocks/groups, redirected targets, malformed records, and pending recovery still stop removal.
 Calls that also add a shell/agent or change self-update/catalog policy settings retain full installation validation.
@@ -111,6 +117,12 @@ Pending recovery blocks an update.
 The worker waits for the requesting AEM process to exit, locks the registered installation and configuration, then rechecks its request token, saved settings, and recovery state.
 A superseded request does no work; changed settings or pending recovery cancel it.
 The actual uv-installed version is checked under the installation lock so another configuration's completed update cannot cause a downgrade.
+Before replacement, the worker validates official link identity and checks source contents when their recorded package version matches the installed version.
+After replacement it releases locks and calls the fresh CLI to verify or refresh official links for this machine configuration.
+The result remains `continuing` during that step and records separate `stages.tool` and `stages.official_skill` outcomes.
+If package replacement succeeds but link refresh fails, the result is `failed`, retains the successful tool stage and release version/revision, and advises retrying `setup --agent codex`.
+Full automation also refreshes connected official links before catalog/content stages and stops if refresh fails.
+Other machine configurations verify their own links on subsequent general setup or self-update; external package-manager replacement requires general setup to refresh links and does not provide the worker's pre-replacement edit guard.
 Only newer final `vX.Y.Z` tags qualify; annotated tags resolve to their commits.
 The selected commit must contain `project.name = "agent-env-man"` and the matching release version in `pyproject.toml`.
 Installation pins that commit through `uv tool install --reinstall`; neither the development checkout nor managed content is changed.

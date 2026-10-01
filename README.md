@@ -62,15 +62,18 @@ On Windows:
 py -3 scripts/setup.py --shell powershell --agent codex
 ```
 
-The installer uses `uv tool install --reinstall` and then `aem setup` to connect startup integrations.
+The installer uses `uv tool install --reinstall` and then `aem setup` to connect startup integrations and link the official `idk-aem` skill for selected agents.
 On first interactive installation, select the device automation mode (`policies`, `full`, or `off`), then the AEM release range (`off`, `compatible`, or `breaking`) when automation is enabled.
 For unattended installation, supply `--automation full --self-update compatible` to enable the full sequence.
 Omission preserves existing settings; a new installation defaults to `policies` with tool updates off.
 Reinstallation preserves a saved mode and release repository unless explicitly overridden.
-It does not bind a catalog or install skills/instructions.
+It does not bind a catalog or install user catalog skills/instructions.
 Open a new selected shell to use the updated PATH.
 Bash, Zsh, PowerShell, and Codex are the built-in integrations.
 Repeat `--shell` or `--agent` to add selections; omitted selections remain configured.
+The official skill guides AEM operations, including locating and publishing sources; content authoring remains governed by your task and its applicable instructions.
+It ships with AEM and is linked from the agent skills directory to the installed package, independently of your catalog.
+After upgrading AEM with an external package manager, run `aem setup --agent codex` to verify or refresh the link.
 To change integrations without reinstalling:
 
 ```bash
@@ -403,6 +406,7 @@ Nested payload symlinks/junctions, special files, and submodules are unsupported
 Portable copy metadata is preserved; platform-specific ACLs, alternate streams, and power-loss atomicity are outside the guarantee.
 
 To remove integrations, detach managed agent content first, then use `aem setup --remove-agent codex` and the appropriate `--remove-shell` options.
+Agent removal also removes the unchanged official skill link; changed links, edited official sources, or substituted copies are preserved and their paths are reported.
 Disable any retained detached instruction hooks before uninstalling AEM with `uv tool uninstall agent-env-man`.
 
 ## License

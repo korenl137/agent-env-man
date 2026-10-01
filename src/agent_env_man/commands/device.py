@@ -33,7 +33,7 @@ from ..updates import TRIGGERS, startup_briefing
 @preview_option
 @pass_runtime
 def setup(runtime, **options):
-    """Configure machine policies and startup integrations; never install content."""
+    """Configure machine policies and integrations, including the official skill."""
     # Core setup accepts lists and distinguishes omitted policies from supplied
     # replacement lists. Click's empty multiple values must retain that distinction.
     for key in ("shell", "agent", "remove_shell", "remove_agent"):
@@ -55,6 +55,26 @@ def setup(runtime, **options):
 @click.group(name="self")
 def self_group():
     """Inspect or queue release updates of AEM itself."""
+
+
+@click.command(name='_self-skill-refresh', hidden=True)
+@click.option('--token', required=True)
+@click.option('--result-file', required=True, type=click.Choice(('self-update.json', 'automation.json')))
+@pass_runtime
+def self_skill_refresh(runtime, token, result_file):
+    """Worker continuation: repair official links using the newly installed CLI."""
+    from ..setup import refresh_official
+    from ..model import Error
+    def operation(session):
+        result = session.config.state_dir / result_file
+        saved = self_update.read_result(result)
+        if (saved.get('token') != token or saved.get('status') != 'continuing'
+                or saved.get('skill_refreshed') or saved.get('skill_binding') != self_update.full_binding(session.config.doc)):
+            raise Error('No matching official skill continuation')
+        report = refresh_official(session.manager, replaced=saved.get('stages', {}).get('tool', {}).get('status') == 'updated')
+        self_update.write_json(result, {**saved, 'skill_refreshed': True})
+        return report, False
+    return runtime.run(operation)
 
 
 @self_group.command(name="status")
