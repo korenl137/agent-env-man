@@ -8,6 +8,8 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.5.1] &mdash; 2026-10-01
+
 ### Fixed
 
 - Allow first publication of the registered local branch to a verified empty Git remote, including catalog and settings publication; keep authentication/network failures and missing branches in populated remotes fatal.
@@ -132,7 +134,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...v0.4.1
