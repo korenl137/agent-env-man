@@ -17,6 +17,7 @@ First beta of 1.0.0; Git tag `v1.0.0-beta` corresponds to Python package version
 Convert tag labels to Python package notation and treat an omitted subversion as zero in version ordering and tag/package comparisons.
 Prerelease compatible updates increase only the subversion within the same base version and pre label; breaking updates may cross series or graduate to final, while final compatible updates retain their existing range and exclude prereleases.
 
+- Claude Code integration through the existing agent-profile boundary, preserving unrelated settings and Codex callback behavior.
 - Optional statement and branch coverage measurement for the existing unittest suite, including Python subprocesses, with terminal, HTML, and JSON reports through the development extra.
 - Regression coverage for documentation build hooks, original update-worker failure and continuation paths, and mocked Windows locking and process-exit APIs.
 - A standalone verifier for installed wheels without development dependencies, plus standard-library-only installer and copied-worker regression checks.

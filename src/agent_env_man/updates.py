@@ -6,6 +6,7 @@ Policy resolution accepts mappings so it is independent of catalog transport.
 
 import math
 import time
+from pathlib import Path
 
 from .git_source import Git, now
 from .model import Error, identifier
@@ -167,6 +168,34 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
             attempt.update(status="failed", error=str(exc))
         manager.state.save()
     return report, failed
+
+
+def startup_skills_changed(outcomes, records, agent, sources):
+    """Include live links changed indirectly by an advanced shared checkout."""
+    applied = set()
+    advanced_checkouts = set()
+    for outcome in outcomes:
+        advanced = (outcome.get("previous_revision") is not None
+                    and outcome.get("revision") is not None
+                    and outcome["previous_revision"] != outcome["revision"])
+        if advanced:
+            source = sources.get(outcome["skill"])
+            if source is not None:
+                advanced_checkouts.add(source.path)
+        if outcome.get("status") == "synced":
+            applied.update(item["item"] for item in outcome.get("apply", [])
+                           if advanced or item["action"] == "install")
+    for key, record in records.items():
+        if (record.get("kind") != "skill" or record.get("detached")
+                or agent not in record.get("agents", [record.get("agent", "codex")])):
+            continue
+        if key in applied:
+            return True
+        if record.get("mode") == "link" and any(
+                Path(record["source"]).is_relative_to(checkout)
+                for checkout in advanced_checkouts):
+            return True
+    return False
 
 
 def startup_briefing(outcomes):

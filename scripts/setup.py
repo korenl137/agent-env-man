@@ -14,9 +14,9 @@ import tomllib
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--shell', action='append', default=[], choices=['bash', 'zsh', 'powershell'])
-    parser.add_argument('--agent', action='append', default=[], choices=['codex'])
+    parser.add_argument('--agent', action='append', default=[], choices=['codex', 'claude'])
     parser.add_argument('--remove-shell', action='append', default=[], choices=['bash', 'zsh', 'powershell'])
-    parser.add_argument('--remove-agent', action='append', default=[], choices=['codex'])
+    parser.add_argument('--remove-agent', action='append', default=[], choices=['codex', 'claude'])
     parser.add_argument('--config', type=Path)
     parser.add_argument('--self-update', choices=['off', 'compatible', 'breaking'],
                         help='automatic AEM release updates (initial noninteractive default: off)')

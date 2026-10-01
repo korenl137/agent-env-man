@@ -75,7 +75,9 @@ Omission preserves existing settings; a new installation defaults to `policies` 
 Reinstallation preserves a saved mode and release repository unless explicitly overridden.
 It does not bind a catalog or install user catalog skills/instructions.
 Open a new selected shell to use the updated PATH.
-Bash, Zsh, PowerShell, and Codex are the built-in integrations.
+Bash, Zsh, PowerShell, Codex, and Claude Code are the built-in integrations.
+Select both with `aem setup --agent codex --agent claude`.
+See [agent profiles](docs/agent-profiles.md) for shared contracts and product differences.
 Repeat `--shell` or `--agent` to add selections; omitted selections remain configured.
 The official skill guides AEM operations, including locating and publishing sources; content authoring remains governed by your task and its applicable instructions.
 If its link cannot be installed, setup completes the shell/agent connection and reports the skill failure separately; resolve the cause and repeat `aem setup --agent codex` to retry.

@@ -11,7 +11,7 @@ from ..cli_runtime import (pass_runtime, agent_option, preview_option, catalog_p
                            identifier_value, AGENT, SECONDS, INTERVAL, OPERATION_ERRORS)
 from ..git_source import now
 from ..setup import setup as configure, remove_integrations
-from ..updates import TRIGGERS, startup_briefing
+from ..updates import TRIGGERS, startup_briefing, startup_skills_changed
 
 
 @click.command()
@@ -138,8 +138,9 @@ def automation_command(runtime, trigger, dry_run):
 @click.command()
 @click.option("--trigger", required=True, type=click.Choice(TRIGGERS), help="Startup event to process.")
 @agent_option
+@click.option("--aem-hook-id", hidden=True)
 @pass_runtime
-def startup(runtime, trigger, agent):
+def startup(runtime, trigger, agent, aem_hook_id):
     """Fail-open startup callback with machine-readable output."""
     def operation(session):
         try:
@@ -148,7 +149,10 @@ def startup(runtime, trigger, agent):
             result = {"status": "failed", "failed": True, "error": str(exc), "outcomes": []}
         session.state.data["startup"] = {"trigger": trigger, "time": now(), **result}
         session.state.save()
-        report = profile(agent).startup_result(startup_briefing(result.get("outcomes", []))) if agent else {}
+        outcomes = result.get("outcomes", [])
+        report = (profile(agent).startup_result(startup_briefing(outcomes),
+                  skills_changed=startup_skills_changed(outcomes, session.state.data["items"], agent, session.config.sources))
+                  if agent else {})
         return report, False
     return runtime.run(operation, missing_ok=True, callback="startup", agent=agent)
 
@@ -156,8 +160,9 @@ def startup(runtime, trigger, agent):
 @click.command(name="agent-hook")
 @click.argument("name")
 @click.option("--agent", required=True, type=AGENT)
+@click.option("--aem-hook-id", hidden=True)
 @pass_runtime
-def agent_hook(runtime, name, agent):
+def agent_hook(runtime, name, agent, aem_hook_id):
     """Emit agent-specific saved instruction location context."""
     return runtime.run(lambda session: (session.manager.hook_context(name, agent), False),
                        maintenance=True, callback="agent-hook", agent=agent)
