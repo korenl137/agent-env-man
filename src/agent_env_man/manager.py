@@ -388,8 +388,15 @@ class Manager:
         locations = {"root": found["root"], "entry": found["entry"], "global_entry": str(target)}
         context = ("AEM instruction document locations (not instruction contents):\n"
                    + json.dumps(locations, ensure_ascii=True)
-                   + "\nFor relative document references in this global entry, use the original entry's "
-                   "directory as the base unless the user documents specify another base. "
+                   + "\nThe global_entry field identifies the installed entry file to which these locations apply. "
+                   "The entry field identifies its corresponding document location within the bundle; "
+                   "root identifies the bundle directory, not necessarily the entry's parent directory. "
+                   "These locations do not request another reading of the entry. If its contents are already "
+                   "present in your context, do not reread them solely to establish these paths. "
+                   "For relative references in the entry, use the parent directory of entry, not the "
+                   "installed entry's directory or the working directory. For references in supplemental "
+                   "documents, use each referring document's own directory. Use another base only when "
+                   "the user documents explicitly specify it. "
                    "Follow those documents for applicability and reading order.")
         return profile(agent).context(context)
 

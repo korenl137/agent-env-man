@@ -7,7 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
 - Claude Code integration through the existing agent-profile boundary, preserving unrelated settings and Codex callback behavior.
+### Fixed
+
+- Clarify instruction hook location metadata to discourage redundant entry reads and resolve references relative to each source document, including nested entries, without changing link installation or metadata fields.
 
 ## [1.0.0-beta] &mdash; 2026-10-01
 

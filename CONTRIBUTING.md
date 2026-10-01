@@ -181,6 +181,9 @@ additionalContext and a structured stop; Claude uses plain stdout and stderr wit
 exit 2 on failure, which does not stop SessionStart.
 Instruction callbacks wait at most 5 seconds total for the installation and configuration locks within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.
 Limit callback metadata to the effective `root`, `entry`, and `global_entry` reading locations.
+Explain their correspondence without assuming the entry's contents have already been loaded or requesting a redundant read when they have.
+Resolve entry-relative references from its parent directory and supplemental references from the referring document's directory, unless the user documents explicitly specify another base.
+Do not infer applicability or reading order from bundle placement or the entry filename.
 Keep `installed_root` and `detached` in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.

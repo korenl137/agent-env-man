@@ -328,6 +328,50 @@ class HookInstallation(InstructionFixture):
         self.run_cli("update", "other", code=1)
         self.assertTrue((self.agent / "AGENTS.md").is_file())
 
+    def test_nested_entry_reference_context_across_detach(self):
+        import tomlkit
+
+        self.configure()
+        (self.bundle / "entry").mkdir()
+        entry_text = "Read ../development/rules.md; unique entry payload"
+        (self.bundle / "entry/start.md").write_text(entry_text, encoding="utf-8")
+        document = tomlkit.parse(self.catalog.read_text())
+        document["instructions"]["personal"]["entry"] = "entry/start.md"
+        self.catalog.write_text(tomlkit.dumps(document), encoding="utf-8")
+        self.run_cli("apply")
+        installed_entry = self.agent / "AGENTS.md"
+        self.assertTrue(installed_entry.is_symlink())
+        self.assertEqual(installed_entry.read_text(), entry_text)
+
+        for stage in ("linked", "bundle-detached", "fully-detached"):
+            with self.subTest(stage=stage):
+                if stage == "bundle-detached":
+                    self.run_cli("detach", "personal:bundle")
+                    (self.bundle / "development/rules.md").write_text("Live change", encoding="utf-8")
+                elif stage == "fully-detached":
+                    self.run_cli("detach", "personal:entry")
+                    self.catalog.unlink()
+                    shutil.rmtree(self.external)
+                state_path = Path(str(self.config) + ".state/state.json")
+                before = state_path.read_bytes()
+                context = self.run_cli("agent-hook", "personal", "--agent", "codex")["hookSpecificOutput"]["additionalContext"]
+                locations = json.loads(context.split("\n")[1])
+                root = self.rules / "personal" if stage == "fully-detached" else self.bundle
+                self.assertEqual(locations, {"root": str(root), "entry": str(root / "entry/start.md"),
+                                             "global_entry": str(installed_entry)})
+                referenced = Path(locations["entry"]).parent / "../development/rules.md"
+                expected = "Live change" if stage == "bundle-detached" else "User-supplied guidance\n"
+                self.assertEqual(referenced.read_text(), expected)
+                self.assertNotEqual(Path(locations["entry"]).parent, Path(locations["root"]))
+                self.assertIn("If its contents are already present in your context", context)
+                self.assertIn("do not reread them solely to establish these paths", context)
+                self.assertIn("parent directory of entry", context)
+                self.assertIn("each referring document's own directory", context)
+                self.assertIn("user documents explicitly specify", context)
+                self.assertIn("applicability and reading order", context)
+                self.assertNotIn(entry_text, context)
+                self.assertEqual(state_path.read_bytes(), before)
+
     def test_partial_bundle_detach_keeps_hook_aligned_with_live_global_entry(self):
         self.configure()
         self.run_cli("apply")
