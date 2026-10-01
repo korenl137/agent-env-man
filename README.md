@@ -98,7 +98,7 @@ Agent hooks use absolute interpreter and machine paths.
 Setup rejects locally edited blocks, duplicate markers, invalid hook JSON, and redirected profiles.
 After a partial failure, fix the error and retry the same setup selections.
 
-For a development installation without startup integrations:
+For local use from this checkout without startup integrations:
 
 ```bash
 python3 -m venv .venv
@@ -108,6 +108,9 @@ python3 -m venv .venv
 
 On Windows use `py -3 -m venv .venv`, then `.\.venv\Scripts\python.exe` and `.\.venv\Scripts\aem.exe`.
 Activate the environment or use the executable's full path for the following examples.
+For contribution work and the full test suite, install with `python -m pip install -e ".[dev]"` in the activated environment; see [Contributing](https://github.com/mirinae3145/agent-env-man/blob/master/CONTRIBUTING.md).
+The development extra adds tools without changing AEM behavior or registering integrations.
+Run `aem setup` explicitly when you want to connect this environment to a shell or agent.
 
 ## Declare and install content
 
