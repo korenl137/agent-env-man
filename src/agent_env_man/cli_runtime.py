@@ -92,6 +92,9 @@ class Runtime:
     json_output: bool = False
 
     def emit(self, report, *, machine=False):
+        if machine and isinstance(report, str):
+            click.echo(report)
+            return
         click.echo(json.dumps(report, indent=2, ensure_ascii=True)
                    if machine or self.json_output else format_report(report))
 
@@ -143,7 +146,14 @@ class Runtime:
                     output(report)
         except OPERATION_ERRORS as exc:
             if callback == "agent-hook":
-                self.emit(profile(agent).failure(f"AEM instruction root lookup failed: {exc}"), machine=True)
+                adapter = profile(agent)
+                failure = adapter.failure(f"AEM instruction root lookup failed: {exc}")
+                if adapter.failure_to_stderr:
+                    click.echo(failure, err=True)
+                else:
+                    self.emit(failure, machine=True)
+                if adapter.failure_exit_code:
+                    raise click.exceptions.Exit(adapter.failure_exit_code) from exc
                 return 0
             click.echo(f"aem: {exc}", err=True)
             if callback == "startup":

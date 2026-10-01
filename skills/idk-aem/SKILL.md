@@ -48,3 +48,11 @@ Do not delete state, reset checkouts, or adopt/replace content merely to bypass 
 Use explicit selections for intentional adoption or replacement.
 After an interrupted replacement, inspect `status` and use `recover` before retrying.
 `detach` preserves current contents and releases management; it does not restore pre-installation contents.
+
+## Agent integrations
+
+Codex and Claude share content commands but use their own saved paths and hook
+formats. Preserve unrelated settings and hooks; AEM does not grant hook trust.
+For full asynchronous startup, inspect status and start a fresh product session
+after completion to discover updated skills. See the installed agent profile
+guide through `aem docs`.

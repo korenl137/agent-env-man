@@ -1,4 +1,4 @@
-"""Preserve unrelated Codex hooks while owning one explicit SessionStart group."""
+"""Preserve unrelated agent hooks while owning explicit SessionStart groups."""
 
 import base64
 import hashlib
@@ -22,11 +22,13 @@ def marker(config_path, identity, purpose):
     return f"AEM {purpose} [{digest}]"
 
 
-def command(config_path, arguments):
+def command(config_path, arguments, *, preserve_exit=False):
     args = [sys.executable, "-m", "agent_env_man", "--config", str(config_path), *arguments]
     result = ("& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
               if os.name == "nt" else shlex.join(args))
     if os.name == "nt":
+        if preserve_exit:
+            result += "; exit $LASTEXITCODE"
         encoded = base64.b64encode(result.encode("utf-16le")).decode("ascii")
         return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + encoded
     return result
@@ -60,22 +62,48 @@ def read(path: Path) -> dict:
     return doc
 
 
-def matching(doc: dict, marker: str) -> list[int]:
+def matching(doc: dict, marker: str, *, marker_field="statusMessage") -> list[int]:
+    def owns(handler):
+        value = handler.get(marker_field)
+        if marker_field != "command":
+            return value == marker
+        if not isinstance(value, str):
+            return False
+        prefix = "powershell.exe -NoProfile -NonInteractive -EncodedCommand "
+        if value.startswith(prefix):
+            try:
+                value = base64.b64decode(value[len(prefix):], validate=True).decode("utf-16le")
+            except (ValueError, UnicodeError):
+                return False
+        return marker in value
     return [i for i, group in enumerate(doc.get("hooks", {}).get("SessionStart", []))
-            if any(h.get("statusMessage") == marker for h in group["hooks"])]
+            if any(owns(h) for h in group["hooks"])]
 
 
-def current(path: Path, marker: str, group: dict) -> bool:
+def saved_matching(doc, marker, group):
+    """Use the saved group's supported identity field, even for retired profiles."""
+    handlers = group.get("hooks", [])
+    if not isinstance(handlers, list) or not handlers or any(not isinstance(h, dict) for h in handlers):
+        raise Error("Saved hook group must contain hook handlers")
+    if any(h.get("statusMessage") == marker for h in handlers):
+        return matching(doc, marker)
+    if matching({"hooks": {"SessionStart": [group]}}, marker, marker_field="command"):
+        return matching(doc, marker, marker_field="command")
+    raise Error("Saved hook group has no usable identity marker")
+
+
+def current(path: Path, marker: str, group: dict, *, marker_field="statusMessage") -> bool:
     doc = read(path)
-    indices = matching(doc, marker)
+    indices = matching(doc, marker, marker_field=marker_field)
     return len(indices) == 1 and doc["hooks"]["SessionStart"][indices[0]] == group
 
 
-def render(path: Path, marker: str, desired: dict, old: dict | None, *, adopt=False, replace=False) -> bytes:
+def render(path: Path, marker: str, desired: dict, old: dict | None, *, adopt=False, replace=False,
+           marker_field="statusMessage") -> bytes:
     """Merge only the saved group, preserving other events, groups and top-level fields."""
     doc = read(path)
     groups = doc.setdefault("hooks", {}).setdefault("SessionStart", [])
-    indices = matching(doc, marker)
+    indices = matching(doc, marker, marker_field=marker_field)
     if len(indices) > 1:
         raise Error("Duplicate AEM hook markers; reconcile hook configuration before applying")
     if indices:
@@ -95,10 +123,10 @@ def render(path: Path, marker: str, desired: dict, old: dict | None, *, adopt=Fa
     return (json.dumps(doc, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
 
 
-def remove(path, record):
+def remove(path, record, *, marker_field="statusMessage"):
     """Release just the recorded group; local edits require manual reconciliation."""
     doc = read(path)
-    indices = matching(doc, record["hook_marker"])
+    indices = matching(doc, record["hook_marker"], marker_field=marker_field)
     if len(indices) != 1 or doc["hooks"]["SessionStart"][indices[0]] != record["hook_group"]:
         raise Error("Managed hook changed or disappeared; reconcile before removal")
     del doc["hooks"]["SessionStart"][indices[0]]

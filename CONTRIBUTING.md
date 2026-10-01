@@ -176,7 +176,9 @@ Keep callbacks on saved instruction lookup only; never fall back from a broken s
 Source lookup validates paths and Git identity without requiring a clean checkout, fetching, or installing content.
 Keep copy/detached locations distinct from source editing paths so publication never implies collecting installed-copy edits.
 Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
-The callback emits only path metadata as `additionalContext`, never document contents, and requests a structured stop on lookup failure.
+Instruction callbacks emit only path metadata, never document contents. Codex uses
+additionalContext and a structured stop; Claude uses plain stdout and stderr with
+exit 2 on failure, which does not stop SessionStart.
 Instruction callbacks wait at most 5 seconds total for the installation and configuration locks within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.
 Limit callback metadata to the effective `root`, `entry`, and `global_entry` reading locations.
 Keep `installed_root` and `detached` in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
@@ -423,8 +425,10 @@ Preflight selected removals and machine-document edits before writing, detect co
 Do not grant agent hook trust or rewrite user execution policies.
 
 Resolve product-specific defaults, hook serialization, and callback output through internal agent profiles.
-Codex remains the only shipped profile; use a fake profile to validate injection and multiple destinations without claiming support for another product.
-Generate instruction callbacks through `agent-hook NAME --agent AGENT` and the internal profile.
+Codex and Claude Code are shipped profiles. Keep product syntax in internal profiles
+and delivery/ownership in the shared manager. Validate future extension with fake
+profiles without claiming third-product support. See [profile contracts](docs/agent-profiles.md).
+Generate instruction callbacks through agent-hook NAME --agent AGENT and the internal profile.
 Store per-target ownership and shared consumers independently from per-skill Git delivery and automatic attempt clocks.
 A shared target has one owner and cannot be materialized for just one of its consumers.
 Explicit catalog roots retain their meaning; omitted destinations use selected agent defaults.

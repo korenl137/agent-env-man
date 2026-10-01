@@ -169,6 +169,22 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
     return report, failed
 
 
+def startup_skills_changed(outcomes, records, agent):
+    """Report successful changes to the selected agent's installed skills."""
+    for outcome in outcomes:
+        if outcome.get("status") != "synced":
+            continue
+        advanced = (outcome.get("previous_revision") is not None
+                    and outcome.get("previous_revision") != outcome.get("revision"))
+        for item in outcome.get("apply", []):
+            record = records.get(item["item"], {})
+            if (record.get("kind") == "skill" and not record.get("detached")
+                    and agent in record.get("agents", [record.get("agent", "codex")])
+                    and (advanced or item["action"] == "install")):
+                return True
+    return False
+
+
 def startup_briefing(outcomes):
     """Summarize completed changes, not successful but unchanged sync attempts.
 

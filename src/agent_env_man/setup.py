@@ -476,7 +476,7 @@ def remove_integrations(manager, args):
             if not isinstance(marker, str) or not marker or not isinstance(group, dict):
                 raise Error(f'{key}: no usable saved hook ownership')
             entry = hook_targets.setdefault(path, {'document': hooks.read(path), 'records': {}, 'before': before})
-            indices = hooks.matching(entry['document'], marker)
+            indices = hooks.saved_matching(entry['document'], marker, group)
             if len(indices) != 1 or entry['document']['hooks']['SessionStart'][indices[0]] != group:
                 raise Error(f'{key}: managed hook changed or disappeared; reconcile before removal')
             del entry['document']['hooks']['SessionStart'][indices[0]]

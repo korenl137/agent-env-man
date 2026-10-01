@@ -49,7 +49,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 
 `TIMEOUT` below defaults to `30` seconds and must be positive and finite.
 It bounds each Git phase, not the entire command or filesystem copying.
-`AGENT` is currently `codex`.
+`AGENT` is `codex` or `claude`.
 `EVENT` is `shell-start`, `agent-start`, or `interval`.
 
 ## docs
@@ -584,3 +584,13 @@ Collection reports changed `paths`; release reports its `path`; resolve reports 
 Global JSON, exit-code, locking, explicit replacement, and preview contracts remain applicable.
 Operational conflicts exit 1; malformed CLI paths and mutually exclusive locate options exit 2 before file access.
 See [Staged settings](settings-management.md) for complete behavior, locate/status fields, intent metadata, and recovery.
+
+## Claude callback behavior
+
+Claude agent-hook emits plain stdout path context. Lookup failure uses stderr
+and exit 2; SessionStart continues. Startup may request reloadSkills after a
+successful synchronous skill installation/advancement affecting that consumer.
+No-op/check/throttled/failed runs do not request reload. In full asynchronous
+mode, wait for worker completion and start a fresh session to discover changes.
+The hidden --aem-hook-id identifies supported command-field ownership.
+See [profile contracts](agent-profiles.md).

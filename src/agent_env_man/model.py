@@ -377,6 +377,7 @@ class Config(MachineFile):
         names = sorted(self.agents, key=lambda n: (n != "codex", n)) if self.agents else ["codex"]
         by_target = {}
         for agent in names:
+            profile(agent).validate_skill_name(source.name)
             root = data.get("root", f"aem-skills-{agent}" if self.agents else "skills")
             target = self.target(root, Path(source.name))
             by_target.setdefault(target, []).append(agent)

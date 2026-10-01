@@ -94,6 +94,9 @@ class Interfaces(unittest.TestCase):
             bindings = {name: str(self.root / "externals" / name) for name, value in document.get("sources", {}).items() if value["type"] == "external"}
             machine = {"version": 1, "catalog": str(path), "external_paths": bindings,
                        "roots": {"agent": str(self.root / "agent"), "skills": str(self.root / "skills")}}
+            if document.get("documents"):
+                machine["agents"] = {name: {"root": str(self.root / name), "skills": str(self.root / name / "skills")}
+                                     for name in ("codex", "claude")}
             with self.subTest(path=path.name), patch.object(Git, "run", side_effect=AssertionError("Unexpected Git")):
                 config = Config(self.machine, document=machine)
                 config.catalog()
