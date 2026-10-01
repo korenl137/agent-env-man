@@ -50,6 +50,8 @@ Do not infer authorization to publish from a request to locate or edit content.
 Inspect reported targets and ownership before resolving a conflict.
 Do not delete state, reset a checkout, or use adoption/replacement merely to bypass a diagnostic.
 Use explicit selections for intentional adoption or replacement and preserve the user's local changes.
+Skill backups live in `<machine-file>.state/skill-backups`, outside skill discovery roots; preserve these along with state.
+Older sibling skill backups are retained and can be moved outside discovery roots after reviewing their contents.
 When a replacement is interrupted, inspect `status` and use `recover` before retrying.
 `detach` preserves contents and releases management; it does not restore the pre-installation contents.
 

@@ -43,9 +43,68 @@ class Workflow(unittest.TestCase):
         self.run_cli("apply", code=1)
         self.run_cli("apply", "--replace", code=1)
         self.run_cli("apply", "--item", "report", "--replace")
-        backups = list(self.destination.glob("report.aem-backup-*"))
+        backups = list((Config(self.config).state_dir / "skill-backups").glob("report-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual((backups[0] / "mine.txt").read_text(), "Keep me")
+        self.assertFalse(list(self.destination.glob("*.aem-backup-*")))
+
+    def test_skill_update_backup_is_outside_discovery_and_cross_filesystem_safe(self):
+        target = self.installed_copy()
+        before = fingerprint(target)
+        self.publish_skill_change()
+        self.run_cli("update")
+        replace = os.replace
+
+        def same_filesystem_only(source, destination):
+            if 'skill-backups' in Path(source).parts or 'skill-backups' in Path(destination).parts:
+                raise OSError("cross-filesystem rename")
+            return replace(source, destination)
+
+        with patch("agent_env_man.manager.os.replace", side_effect=same_filesystem_only):
+            self.run_cli("apply")
+        backups = list((Config(self.config).state_dir / "skill-backups").iterdir())
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(fingerprint(backups[0]), before)
+        self.assertEqual(list(self.destination.rglob("SKILL.md")), [target / "SKILL.md"])
+
+    def test_isolated_backup_recovery_preserves_backup_and_user_edits(self):
+        target = self.installed_copy()
+        state = State(Config(self.config).state_dir)
+        backup = Config(self.config).state_dir / "skill-backups" / "report-test"
+        backup.parent.mkdir(exist_ok=True)
+        shutil.copytree(target, backup)
+        before = observation(target)
+        stage = target.with_name(".aem-stage-test")
+        stage.mkdir()
+        (stage / "SKILL.md").write_text("replacement", encoding="utf-8")
+        after = observation(stage)
+        state.data["pending"] = {"operation": "skill-replacement", "key": "report",
+                                 "target": str(target), "backup": str(backup), "stage": str(stage),
+                                 "before": before, "after": after}
+        state.save()
+        # An interruption before removing the original is recoverable too.
+        self.run_cli("recover")
+        self.assertEqual(observation(target), before)
+        stage.mkdir()
+        (stage / "SKILL.md").write_text("replacement", encoding="utf-8")
+        state.save()
+        shutil.rmtree(target)
+        os.replace(stage, target)
+        (target / "user.txt").write_text("keep", encoding="utf-8")
+        self.run_cli("recover", code=1)
+        self.assertEqual((target / "user.txt").read_text(), "keep")
+        (target / "user.txt").unlink()
+        replace = os.replace
+
+        def same_filesystem_only(source, destination):
+            if 'skill-backups' in Path(source).parts or 'skill-backups' in Path(destination).parts:
+                raise OSError("cross-filesystem rename")
+            return replace(source, destination)
+
+        with patch("agent_env_man.manager.os.replace", side_effect=same_filesystem_only):
+            self.run_cli("recover")
+        self.assertEqual(observation(target), before)
+        self.assertEqual(observation(backup), before)
 
     def test_matching_copy_adoption_and_local_additions(self):
         self.copy_mode()
@@ -94,6 +153,8 @@ class Workflow(unittest.TestCase):
         (payload / "run.sh").chmod(0o755)
         expected = fingerprint(payload)
         self.run_cli("detach", "report")
+        self.assertFalse(list(self.destination.glob("*.aem-backup-*")))
+        self.assertEqual(list(self.destination.rglob("SKILL.md")), [self.destination / "report/SKILL.md"])
         shutil.rmtree(self.checkouts)
         self.assertEqual(fingerprint(self.destination / "report"), expected)
 

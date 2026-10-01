@@ -265,7 +265,9 @@ The root-level source `skills/idk-aem/SKILL.md` is included through setuptools p
 Ownership uses `setup:skill-AGENT-idk-aem`, with the existing `setup` kind and `link` mode, plus official source signature and package version fields.
 No catalog declaration, machine option, or format-version migration is required.
 Official link removal retains its backup in `<machine-file>.state/setup-backups`, outside the agent's skill discovery root.
-Official skill roots must not overlap machine state storage, so retained backups cannot become discoverable skills.
+Skill roots must not overlap machine state storage, so retained backups cannot become discoverable skills.
+Catalog skill replacement and detach backups are retained in `<machine-file>.state/skill-backups`; regular contents are copied and verified before the original is removed, and symbolic links retain their recorded link identity.
+Recovery continues to accept older sibling-backup journals.
 Existing agent integrations acquire the link on general setup; policy-only setup does not add it.
 Self-update refreshes successfully owned links and does not turn an uninstalled, failed, or detached ancillary skill into a new update prerequisite.
 

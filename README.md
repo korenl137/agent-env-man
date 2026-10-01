@@ -405,13 +405,16 @@ aem detach report                  # Keep contents and release ownership.
 aem detach personal:bundle personal:entry
 ```
 
-Backups are retained as `<target>.aem-backup-<id>`.
+Skill backups are retained in `<machine-file>.state/skill-backups/<target-name>-<id>`, outside agent skill discovery roots.
+They preserve previous contents or link identity and support recovery across filesystems.
+Other target backups are retained as `<target>.aem-backup-<id>`.
+Existing sibling backups are preserved; move reviewed old skill backups outside discovery roots if they appear as duplicate skills.
 A directory item owns its entire subtree; local additions count as modifications.
 Detach materializes links, preserves copies, and records a tombstone to prevent automatic reinstall.
 After moving the preserved target aside, explicitly reattach with `aem apply --item report --reattach`.
 Detaching instructions retains hook configuration and locator records for the preserved copy; disable the retained hook in Codex if no longer wanted.
 
-Apply preflights selected items and journals each replacement before renaming targets.
+Apply preflights selected items and journals each replacement before changing targets.
 Transactions are per target: earlier successful items can remain installed if a later item fails.
 After an interruption, inspect `status` and run `recover`.
 Recovery refuses to overwrite later user edits; keep state and backups.

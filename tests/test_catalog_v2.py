@@ -269,6 +269,6 @@ class CatalogV2(unittest.TestCase):
         self.run_cli('apply', '--item', 'report', '--reattach', '--replace')
         self.assertEqual(target.resolve(), named / 'skills/report')
         self.assertTrue((direct / '.git').is_dir())
-        backups = list(self.destination.glob('report.aem-backup-*'))
+        backups = list((Path(str(self.config) + '.state') / 'skill-backups').glob('report-*'))
         self.assertTrue(backups)
         self.assertIn('Preserved local edit', [(backup / 'SKILL.md').read_text() for backup in backups])

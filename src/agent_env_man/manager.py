@@ -196,6 +196,11 @@ class Manager:
         if any(overlaps(target, root) for target in list(owners.values()) + [i.target for i in items]
                for root in stage_roots):
             raise Error("Managed targets must be separate from settings stages")
+        skill_roots = {i.target.parent for i in items if i.kind == "skill"}
+        skill_roots.update(Path(r["target"]).parent for r in self.state.data["items"].values()
+                           if r.get("kind") == "skill")
+        if any(overlaps(root, self.config.state_dir) for root in skill_roots):
+            raise Error("Skill roots must be separate from manager state and backups")
         for item in items:
             old = self.state.data["items"].get(item.key)
             if old and not old.get("detached") and (old["target"] != str(item.target) or old["mode"] != item.mode
@@ -454,6 +459,12 @@ class Manager:
         suffix = uuid.uuid4().hex
         stage = item.target.with_name(".aem-stage-" + suffix)
         backup = item.target.with_name(item.target.name + ".aem-backup-" + suffix)
+        isolated_skill = item.kind == "skill" and plan.record.get("kind", "skill") == "skill"
+        if isolated_skill:
+            backup = self.config.state_dir / 'skill-backups' / (item.target.name + '-' + suffix)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            if backup.parent.resolve() != backup.parent or overlaps(item.target.parent, self.config.state_dir):
+                raise Error('Skill backup storage redirects or overlaps the skill root')
         if plan.delete:
             if not plan.record.get('official_skill'):
                 raise Error('Deletion plans require official skill ownership')
@@ -495,13 +506,26 @@ class Manager:
                 if signature(item.source) != plan.record['official_hash']:
                     raise Error(f'{item.key}: official skill source changed during staging')
             after = observation(stage)
+            if isolated_skill and exists(item.target):
+                # Copy before journaling/removal so cross-filesystem backups are
+                # complete and verified while the original is still usable.
+                if item.target.is_symlink():
+                    backup.symlink_to(os.readlink(item.target), target_is_directory=True)
+                else:
+                    copy_payload(item.target, backup)
+                if observation(backup) != plan.before or observation(item.target) != plan.before:
+                    raise Error(f'{item.key}: target changed during backup')
             # Persist recovery paths before moving the old target. No journal is
             # needed for pure ownership adoption, which only writes state once.
             self.state.data["pending"] = {"key": item.key, "target": str(item.target), "stage": str(stage),
                                           "backup": str(backup), "before": plan.before, "after": after}
+            if isolated_skill:
+                self.state.data["pending"]["operation"] = "skill-replacement"
             self.state.save()
             if exists(item.target):
-                if plan.delete:
+                if isolated_skill:
+                    remove(item.target)
+                elif plan.delete:
                     # Copy link identity, not its payload: state and skills may
                     # live on different filesystems, where rename cannot work.
                     backup.symlink_to(os.readlink(item.target), target_is_directory=True)
@@ -558,15 +582,45 @@ class Manager:
                             and pending['after'] == {'kind': 'missing'}
                             and backup.parent == self.config.state_dir / 'setup-backups'
                             and backup.parent.resolve() == backup.parent)
-        if backup.parent != target.parent and not official_removal:
+        isolated_skill = (pending.get('operation') == 'skill-replacement'
+                          and backup.parent == self.config.state_dir / 'skill-backups'
+                          and backup.parent.resolve() == backup.parent
+                          and backup.name.startswith(target.name + '-')
+                          and not overlaps(target.parent, self.config.state_dir))
+        if pending.get('operation') == 'skill-replacement' and not isolated_skill:
+            raise Error('Invalid skill backup recovery paths')
+        if backup.parent != target.parent and not official_removal and not isolated_skill:
             raise Error('Recovery paths must be distinct siblings')
         current = observation(target)
         before, after = pending["before"], pending["after"]
+        if exists(stage) and observation(stage) != after:
+            raise Error("Recovery stopped: staged content changed")
         if exists(backup):
-            allowed = (before, after) if official_removal else (after, {'kind': 'missing'})
+            if isolated_skill:
+                allowed = (before, after, {'kind': 'missing'})
+            else:
+                allowed = (before, after) if official_removal else (after, {'kind': 'missing'})
             if observation(backup) != before or current not in allowed:
                 raise Error("Recovery stopped: target or backup changed; preserve both and resolve manually")
-            if official_removal:
+            if isolated_skill:
+                if current != before:
+                    # Restore through a target-local stage, retaining the backup
+                    # so another interruption remains recoverable across devices.
+                    restore = target.with_name('.aem-restore-' + uuid.uuid4().hex)
+                    try:
+                        if backup.is_symlink():
+                            restore.symlink_to(os.readlink(backup), target_is_directory=True)
+                        else:
+                            copy_payload(backup, restore)
+                        if observation(restore) != before or observation(target) != current:
+                            raise Error('Recovery stopped: contents changed during restoration')
+                        if exists(target):
+                            remove(target)
+                        os.replace(restore, target)
+                    finally:
+                        if exists(restore):
+                            remove(restore)
+            elif official_removal:
                 if current != before:
                     target.symlink_to(os.readlink(backup), target_is_directory=True)
             else:

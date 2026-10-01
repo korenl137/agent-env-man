@@ -8,6 +8,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep catalog skill replacement and detach backups outside agent discovery roots to prevent duplicate skills, with verified copies and recovery across filesystems while preserving older recovery journals.
+
 ## [0.5.0] &mdash; 2026-10-01
 
 ### Added
