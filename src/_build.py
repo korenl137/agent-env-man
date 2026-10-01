@@ -1,4 +1,8 @@
-"""Copy canonical user documentation into wheels without changing source files."""
+"""Copy canonical user documentation into wheels without changing source files.
+
+Keep this hook in the configured src layout so isolated setuptools builds can
+resolve the cmdclass without the checkout root on the module search path.
+"""
 
 from pathlib import Path
 import shutil
@@ -9,7 +13,7 @@ from setuptools.command.build_py import build_py
 class BuildPy(build_py):
     def documentation_mapping(self):
         """Map installed resources to the same sources used by checkout readers."""
-        root = Path(__file__).resolve().parent
+        root = Path(__file__).resolve().parents[1]
         sources = [root / "README.md", root / "LICENSE.txt"]
         sources.extend(sorted((root / "docs").glob("*.md")))
         sources.extend(sorted((root / "examples").glob("*.toml")))

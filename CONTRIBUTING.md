@@ -286,7 +286,8 @@ Exclude CONTRIBUTING.md and CHANGELOG.md from installed documentation resources.
 Links to contribution instructions and release history use repository web URLs as optional references, not required paths for ordinary tool use.
 User-facing compatibility policy lives in [Compatibility](docs/compatibility.md); both contributor guidance and user documentation reference this single policy.
 Use relative links among bundled documents and examples so they work in a checkout and an installation.
-Verify wheel contents, wheel builds from the sdist, installed local lookup, and local link/anchor resolution when changing packaging or documentation structure.
+Build hooks must resolve from the configured source layout without relying on the caller's Python module search path.
+Verify isolated wheel builds, wheel contents, wheel builds from the sdist, installed local lookup, and local link/anchor resolution when changing packaging or documentation structure.
 
 ## Official skill guidance
 

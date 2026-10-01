@@ -1,1 +1,1 @@
-include _build.py
+include src/_build.py
