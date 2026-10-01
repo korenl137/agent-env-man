@@ -259,13 +259,15 @@ AEM derives `aem-agent-codex` and `aem-skills-codex` roots from the agent bindin
 `setup.shells` maps `bash`, `zsh`, or `powershell` to absolute profile paths.
 Manage these selections with `aem setup`; editing TOML does not itself install or remove profile blocks, hook groups, or official skill links.
 Setup rejects an invalid executable path before writing profiles and requires an existing executable except during dry run.
-Each connected agent also owns an `idk-aem` link under its configured `skills` directory, pointing to the official skill shipped in the installed AEM package.
+General setup also attempts to install an owned `idk-aem` link for each connected agent under its configured `skills` directory, pointing to the official skill shipped in the installed AEM package.
+This ancillary link is attempted after core setup is saved; a recoverable link failure is reported separately without preventing the agent selection from being connected or removed.
 The root-level source `skills/idk-aem/SKILL.md` is included through setuptools package-resource mapping; a development checkout is not required for installed use.
 Ownership uses `setup:skill-AGENT-idk-aem`, with the existing `setup` kind and `link` mode, plus official source signature and package version fields.
 No catalog declaration, machine option, or format-version migration is required.
 Official link removal retains its backup in `<machine-file>.state/setup-backups`, outside the agent's skill discovery root.
 Official skill roots must not overlap machine state storage, so retained backups cannot become discoverable skills.
-Existing agent integrations acquire the link on general setup or a new worker's self-update continuation; policy-only setup does not add it.
+Existing agent integrations acquire the link on general setup; policy-only setup does not add it.
+Self-update refreshes successfully owned links and does not turn an uninstalled, failed, or detached ancillary skill into a new update prerequisite.
 
 ### Storage and validation boundaries
 

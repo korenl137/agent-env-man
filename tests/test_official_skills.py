@@ -8,7 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from agent_env_man import automation, official_skills, self_update
+from agent_env_man import agents, automation, official_skills, self_update
 from agent_env_man.manager import Manager
 from agent_env_man.model import Config, Error
 from agent_env_man.setup import official_plans
@@ -34,7 +34,7 @@ class OfficialSkills(SetupFixture):
         report = self.setup_cli('--agent', 'codex')
         target = self.target()
         self.assertEqual(target.resolve(), self.original)
-        self.assertIn('agent-skill:codex', [entry['integration'] for entry in report['integrations']])
+        self.assertIn('agent-skill:codex', [entry['integration'] for entry in report['official_skills']])
         self.setup_cli('--agent', 'codex')
         self.assertEqual(target.resolve(), self.original)
         self.run_cli('setup', '--remove-agent', 'codex')
@@ -57,24 +57,25 @@ class OfficialSkills(SetupFixture):
                     target.mkdir()
                     (target / 'user.txt').write_text('keep')
                 report = self.run_cli('setup', '--remove-agent', 'codex')
-                self.assertIn('preserve', [entry['action'] for entry in report['integrations']])
+                self.assertIn('preserve', [entry['action'] for entry in report['official_skills']])
                 self.assertTrue(target.exists())
                 if target.is_symlink():
                     target.unlink()
                 else:
                     shutil.rmtree(target)
 
-    def test_local_source_edits_block_setup_and_update_check_and_preserve_removal(self):
+    def test_local_source_edits_skip_skill_but_complete_setup_and_guard_update(self):
         self.setup_cli('--agent', 'codex')
         target = self.target()
         (self.original / 'extra.txt').write_text('local addition')
-        self.setup_cli('--shell', 'bash', code=1)
-        self.assertFalse((self.home / '.bashrc').exists())
+        report = self.setup_cli('--shell', 'bash')
+        self.assertTrue((self.home / '.bashrc').exists())
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
         with self.assertRaisesRegex(ValueError, 'changed locally'):
             official_skills.check(self.state()['items'])
         report = self.run_cli('setup', '--remove-agent', 'codex')
         self.assertTrue(target.is_symlink())
-        self.assertIn('preserve', [entry['action'] for entry in report['integrations']])
+        self.assertIn('preserve', [entry['action'] for entry in report['official_skills']])
 
     def test_redirected_source_addition_is_preserved_on_removal(self):
         self.setup_cli('--agent', 'codex')
@@ -82,20 +83,25 @@ class OfficialSkills(SetupFixture):
         (self.original / 'nested-link').symlink_to(self.home, target_is_directory=True)
         report = self.run_cli('setup', '--remove-agent', 'codex')
         self.assertTrue(target.is_symlink())
-        self.assertIn('preserve', [entry['action'] for entry in report['integrations']])
+        self.assertIn('preserve', [entry['action'] for entry in report['official_skills']])
 
-    def test_unmanaged_collision_is_preflighted_before_hook_write(self):
+    def test_unmanaged_collision_preserves_target_and_completes_core_setup(self):
         target = self.home / '.agents/skills' / official_skills.NAME
         target.mkdir(parents=True)
         (target / 'user.txt').write_text('keep')
-        self.setup_cli('--agent', 'codex', code=1)
-        self.assertFalse((self.home / '.codex/hooks.json').exists())
-        self.assertFalse(self.config.exists())
+        report = self.setup_cli('--agent', 'codex', '--shell', 'bash')
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+        self.assertTrue((self.home / '.bashrc').exists())
+        self.assertTrue(self.config.exists())
+        self.assertEqual((target / 'user.txt').read_text(), 'keep')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertEqual(set(Config(self.config).agents), {'codex'})
 
     def test_skill_root_cannot_discover_manager_backup_storage(self):
         self.config.write_text('version = 1\n[roots]\nskills = ' + json.dumps(str(self.root)) + '\n')
-        self.setup_cli('--agent', 'codex', code=1)
-        self.assertFalse((self.home / '.codex/hooks.json').exists())
+        report = self.setup_cli('--agent', 'codex')
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
 
     def test_link_removal_and_recovery_do_not_require_cross_filesystem_rename(self):
         self.setup_cli('--agent', 'codex')
@@ -124,7 +130,10 @@ class OfficialSkills(SetupFixture):
 
     def test_link_capability_failure_does_not_copy(self):
         with patch.object(Path, 'symlink_to', side_effect=OSError('no links')):
-            self.setup_cli('--agent', 'codex', code=1)
+            report = self.setup_cli('--agent', 'codex')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+        self.assertTrue(self.config.exists())
         self.assertFalse((self.home / '.agents/skills' / official_skills.NAME).exists())
         self.setup_cli('--agent', 'codex')
         self.assertTrue(self.target().is_symlink())
@@ -156,14 +165,93 @@ class OfficialSkills(SetupFixture):
         document = tomlkit.parse(catalog.read_text())
         document['skills'][official_skills.NAME] = document['skills']['report']
         catalog.write_text(tomlkit.dumps(document))
-        self.setup_cli('--agent', 'codex', code=1)
-        self.assertFalse((self.agent / 'hooks.json').exists())
+        report = self.setup_cli('--agent', 'codex')
+        self.assertTrue((self.agent / 'hooks.json').exists())
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
         document['skills'].pop(official_skills.NAME)
         catalog.write_text(tomlkit.dumps(document))
         self.setup_cli('--agent', 'codex')
         second = self.root / 'second.toml'
         second.write_text('version = 1\n[roots]\nskills = ' + json.dumps(str(self.target().parent)) + '\n')
-        self.setup_cli('--agent', 'codex', config=second, code=1)
+        report = self.setup_cli('--agent', 'codex', config=second)
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertTrue(second.exists())
+
+    def test_missing_packaged_skill_does_not_prevent_core_setup_or_preview(self):
+        with patch('agent_env_man.official_skills.source', side_effect=ValueError('missing resource')):
+            preview = self.setup_cli('--agent', 'codex', '--dry-run')
+            self.assertEqual(preview['official_skills'][0]['action'], 'failed')
+            self.assertFalse(self.config.exists())
+            report = self.setup_cli('--agent', 'codex')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+
+    def test_one_agent_skill_collision_does_not_skip_other_agent(self):
+        home = self.home
+        class Fake(agents.Codex):
+            def defaults(self):
+                return {'root': str(home / 'fake-agent'), 'skills': str(home / 'fake-skills')}
+        collision = self.home / '.agents/skills/idk-aem'
+        collision.mkdir(parents=True)
+        (collision / 'user.txt').write_text('keep')
+        with patch.dict(agents.PROFILES, {'fake': Fake(name='fake')}):
+            report = self.setup_cli('--agent', 'codex', '--agent', 'fake')
+            self.assertEqual(set(Config(self.config).agents), {'codex', 'fake'})
+        outcomes = {entry['integration']: entry['action'] for entry in report['official_skills']}
+        self.assertEqual(outcomes, {'agent-skill:codex': 'failed', 'agent-skill:fake': 'write'})
+        self.assertTrue((home / 'fake-skills/idk-aem').is_symlink())
+        self.assertTrue((home / 'fake-agent/hooks.json').is_file())
+        self.assertTrue((home / '.codex/hooks.json').is_file())
+
+    def test_optional_removal_failure_keeps_core_removal_and_allows_retry(self):
+        self.setup_cli('--agent', 'codex')
+        target = self.target()
+        with patch.object(Path, 'symlink_to', side_effect=OSError('backup link denied')):
+            report = self.run_cli('setup', '--remove-agent', 'codex')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertEqual(Config(self.config).agents, {})
+        self.assertTrue(target.is_symlink())
+        self.assertIsNone(self.state()['pending'])
+        self.run_cli('setup', '--remove-agent', 'codex')
+        self.assertFalse(target.is_symlink())
+
+    def test_optional_state_commit_failure_rolls_back_and_preserves_core_success(self):
+        save = State.save
+        failed = False
+        def fail_once(state):
+            nonlocal failed
+            if not failed and state.data['pending'] is None and any(record.get('official_skill') for record in state.data['items'].values()):
+                failed = True
+                raise OSError('optional state commit failed')
+            return save(state)
+        with patch.object(State, 'save', new=fail_once):
+            report = self.setup_cli('--agent', 'codex', '--shell', 'bash')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        self.assertTrue((self.home / '.bashrc').exists())
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+        self.assertIsNone(self.state()['pending'])
+        self.assertNotIn('setup:skill-codex-idk-aem', self.state()['items'])
+        self.assertFalse(self.target().is_symlink())
+        self.setup_cli('--agent', 'codex')
+        self.assertTrue(self.target().is_symlink())
+
+    def test_unresolved_optional_recovery_is_not_hidden_as_success(self):
+        save = State.save
+        failed = False
+        def fail_commit_and_recovery(state):
+            nonlocal failed
+            if state.data['pending'] is None and any(record.get('official_skill') for record in state.data['items'].values()):
+                failed = True
+            if failed:
+                raise OSError('state storage unavailable')
+            return save(state)
+        with patch.object(State, 'save', new=fail_commit_and_recovery):
+            self.setup_cli('--agent', 'codex', code=1)
+        self.assertTrue((self.home / '.codex/hooks.json').exists())
+        self.assertTrue(self.config.exists())
+        self.assertIsNotNone(self.state()['pending'])
+        self.run_cli('recover')
+        self.setup_cli('--agent', 'codex')
 
     def test_internal_refresh_requires_worker_token(self):
         self.setup_cli('--agent', 'codex')
@@ -184,6 +272,32 @@ class OfficialUpdate(SetupFixture):
     register = test_self_update.SelfUpdate.register
     release = test_self_update.SelfUpdate.release
     finish_worker = test_self_update.SelfUpdate.finish_worker
+
+    @unittest.skipIf(os.name == 'nt', 'Fake installers use POSIX shebangs')
+    def test_uninstalled_skill_does_not_become_an_update_prerequisite(self):
+        self.require_links()
+        self.register()
+        target = self.home / '.agents/skills/idk-aem'
+        target.mkdir(parents=True)
+        (target / 'user.txt').write_text('keep')
+        report = self.setup_cli('--agent', 'codex')
+        self.assertEqual(report['official_skills'][0]['action'], 'failed')
+        config = Config(self.config)
+        self.release('0.4.1')
+        marker = self.root / 'installed'
+        self.uv.write_text('#!' + sys.executable + '\nimport sys\nfrom pathlib import Path\n'
+                           'if sys.argv[-1] == "list": print("agent-env-man v0.4.0")\n'
+                           'else: Path(' + repr(str(marker)) + ').write_text("installed")\n')
+        self.uv.chmod(0o755)
+        self.run_cli('self', 'update')
+        child = self_update._children[-1]
+        self.finish_worker(config)
+        self.assertEqual(child.wait(timeout=15), 0)
+        result = self_update.read_result(self_update.result_path(config))
+        self.assertEqual(result['status'], 'updated', result)
+        self.assertTrue(marker.exists())
+        self.assertEqual((target / 'user.txt').read_text(), 'keep')
+        self.assertNotIn('stages', result)
 
     @unittest.skipIf(os.name == 'nt', 'Fake CLI uses POSIX shebangs')
     def test_full_without_tool_update_stops_on_edited_official_source(self):
@@ -226,7 +340,11 @@ class OfficialUpdate(SetupFixture):
         self.release('0.4.1')
         self.bin.mkdir()
         executable = self.bin / 'aem'
-        executable.write_text('#!' + sys.executable + '\nfrom agent_env_man.cli import main\nraise SystemExit(main())\n')
+        progress = self.root / 'progress-status'
+        executable.write_text('#!' + sys.executable + '\nimport json\nfrom pathlib import Path\n'
+                              'Path(' + repr(str(progress)) + ').write_text(json.loads(Path(' +
+                              repr(str(self_update.result_path(config))) + ').read_text())["status"])\n'
+                              'from agent_env_man.cli import main\nraise SystemExit(main())\n')
         executable.chmod(0o755)
         marker = self.root / 'installed'
         self.uv.write_text('#!' + sys.executable + '\nimport sys\nfrom pathlib import Path\n'
@@ -248,5 +366,6 @@ class OfficialUpdate(SetupFixture):
         result = self_update.read_result(self_update.result_path(config))
         self.assertEqual(result['status'], 'updated', result)
         self.assertEqual(result['stages']['official_skill']['status'], 'completed')
+        self.assertEqual(progress.read_text(), 'queued')
         target = Path(Config(self.config).agents['codex']['skills']) / official_skills.NAME
         self.assertEqual(target.resolve(), official_skills.source().resolve())

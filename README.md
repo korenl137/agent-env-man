@@ -30,6 +30,7 @@ Prepared sources remain usable offline.
 AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
 From 1.0.0 onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
 During 0.x development, minor releases may break compatibility; patch releases preserve it.
+During 0.x only, compatible supporting refinements to existing workflows may also ship in a patch release; new standalone capabilities still require a minor release.
 Review migration instructions before upgrading across an incompatible release.
 
 The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.
@@ -72,6 +73,7 @@ Open a new selected shell to use the updated PATH.
 Bash, Zsh, PowerShell, and Codex are the built-in integrations.
 Repeat `--shell` or `--agent` to add selections; omitted selections remain configured.
 The official skill guides AEM operations, including locating and publishing sources; content authoring remains governed by your task and its applicable instructions.
+If its link cannot be installed, setup completes the shell/agent connection and reports the skill failure separately; resolve the cause and repeat `aem setup --agent codex` to retry.
 It ships with AEM and is linked from the agent skills directory to the installed package, independently of your catalog.
 After upgrading AEM with an external package manager, run `aem setup --agent codex` to verify or refresh the link.
 To change integrations without reinstalling:
@@ -406,7 +408,7 @@ Nested payload symlinks/junctions, special files, and submodules are unsupported
 Portable copy metadata is preserved; platform-specific ACLs, alternate streams, and power-loss atomicity are outside the guarantee.
 
 To remove integrations, detach managed agent content first, then use `aem setup --remove-agent codex` and the appropriate `--remove-shell` options.
-Agent removal also removes the unchanged official skill link; changed links, edited official sources, or substituted copies are preserved and their paths are reported.
+Agent removal also attempts to remove the unchanged official skill link; failures are reported separately, and changed links, edited official sources, or substituted copies are preserved with their paths reported.
 Disable any retained detached instruction hooks before uninstalling AEM with `uv tool uninstall agent-env-man`.
 
 ## License

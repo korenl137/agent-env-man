@@ -15,10 +15,10 @@ Self-update validates owned skill links and local source edits before package re
 
 ### Changed
 
-- **Breaking:** Agent setup now includes the official skill link under the agent's skills root and can fail on a conflicting target or unavailable link privileges.
+- Agent setup attempts the official skill link after completing core integrations and machine selection storage, reporting recoverable skill failures separately without failing setup.
 Agent removal also removes unchanged owned official links; changed links, edited sources, and substituted copies are preserved and released from ownership.
 User catalog installation and content editing remain independent of the official skill.
-- **Breaking:** Self-update results can temporarily report `continuing` while the fresh CLI verifies official links, with separate tool and official-skill stage results on completion.
+- Permit compatible supporting refinements to existing workflows in PATCH releases during 0.x only; new functionality otherwise remains MINOR, and compatibility, ownership, and recovery guarantees remain required.
 
 ## [0.4.0] &mdash; 2026-10-01
 

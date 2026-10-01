@@ -29,12 +29,17 @@ New optional inputs are compatible only when omitting them preserves existing be
 Backward compatibility means a newer package continues to support previously valid use; it does not require an older package to accept newly introduced inputs.
 
 From 1.0.0 onward, use PATCH for backward-compatible bug fixes, MINOR for backward-compatible functionality or public deprecation, and MAJOR for incompatible public-contract changes.
-During 0.x development, use MINOR for functionality, public deprecation, or incompatible changes, and PATCH only for backward-compatible fixes.
+During 0.x development, use MINOR for new functionality, public deprecation, or incompatible changes, and PATCH for backward-compatible fixes.
+Only during 0.x, compatible refinements confined to supporting material, ancillary integrations, or advisory output for existing workflows may also use PATCH.
+This exception does not cover new independently usable capabilities or relax compatibility: previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership/recovery guarantees without user migration.
+An ancillary integration must report its own recoverable failure separately rather than prevent the existing workflow from completing; unsafe shared state and unresolved recovery remain fatal.
+Additive manager-owned side effects may qualify under this exception when they preserve user content and existing choices; required reconfiguration, new fatal prerequisites, and incompatible enum values do not.
+From 1.0.0 onward, compatible functionality remains MINOR, including ancillary additions.
 Classify a release by its most significant change, based on the previous released contract rather than intermediate development states.
 Documentation corrections and internal maintenance that preserve the contract may ship in a PATCH release.
 Do not modify an already released version's contents.
 A bug-fix label alone does not justify breaking previously valid documented use in a PATCH release.
-Removing an option, changing a default or selection scope, invalidating an existing catalog, breaking an installed callback, or dropping a supported runtime requires the incompatible-change increment.
+Removing an option, changing a default or selection scope so previously valid use loses its promised behavior, invalidating an existing catalog, breaking an installed callback, or dropping a supported runtime requires the incompatible-change increment.
 Document replacements and any required user migration when deprecating or breaking an interface.
 
 Catalog, machine, and state format versions are integer interpretation markers, not independently released product versions.
@@ -302,17 +307,21 @@ Exercise release boundaries, annotated tags, metadata mismatches, policy cancell
 Package-manager rollback and real Windows replacement require separate evidence before strengthening their documented guarantees.
 Keep the installer standard-library-only; configuration and ownership logic belong in the package.
 Setup owns machine selection, startup registration, and official skill links, while bootstrap prepares catalog content and apply installs it.
-Agent integration includes the startup hook and a link to the packaged official skill at the selected skills root.
+Agent integration includes the startup hook and an ancillary link to the packaged official skill at the selected skills root.
+Complete and persist core setup integrations before attempting optional skill installation/removal, and report their outcomes separately in `official_skills` without changing the core `integrations` results or successful exit status.
+Preflight ancillary skills independently per agent, preserve conflicting targets, and permit explicit setup retries after resolving their cause.
+Do not suppress unresolved recovery journals or shared-state errors; the worker's strict refresh and pre-replacement edit guard remain independent of best-effort setup.
 Keep official skill ownership under setup, independently of catalog declarations and content policies.
 The package resource mapping in `pyproject.toml` must include the root-level skill in both wheel and sdist; update explicit package registration when adding a Python package.
 Self-update validates recorded links and source edits before replacement, then releases locks before invoking the fresh CLI to refresh official links.
+Refresh only active owned official integrations; a failed or uninstalled ancillary integration must not become a prerequisite for existing update workflows.
 The continuation must validate its request token and saved policy binding and run at most once.
 Keep package replacement outcomes separate from official link refresh outcomes; full automation stops if link refresh fails.
 Older saved source hashes may differ after another configuration or an external installer replaces the package; compare payloads only for the recorded package version.
 Catalog update policies must never register hooks implicitly.
 
 Selections accumulate, and repeated setup must preserve unrelated content and avoid duplicate groups or blocks.
-Preflight all profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection last.
+Preflight all core profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection after core target transactions and before ancillary skill attempts.
 A retry must recognize completed ownership records after a partial failure.
 Setup removal must not delete user content or silently detach installed skills and instructions.
 Official integration removal deletes only unchanged owned links, preserving their package sources and transaction backups.

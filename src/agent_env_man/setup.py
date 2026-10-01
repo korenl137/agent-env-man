@@ -102,12 +102,60 @@ def official_plans(manager, agents, *, removing=(), refresh=False):
 
 
 def refresh_official(manager, *, replaced=False):
-    """Refresh links after package replacement without rebuilding startup hooks."""
+    """Refresh owned links without making an uninstalled ancillary skill mandatory."""
     manager.state.ready()
-    plans, report = official_plans(manager, manager.config.agents, refresh=replaced)
+    from .official_skills import NAME
+    owned = {name: binding for name, binding in manager.config.agents.items()
+             if (record := manager.state.data['items'].get(f'setup:skill-{name}-{NAME}', {})).get('official_skill')
+             and not record.get('detached')}
+    plans, report = official_plans(manager, owned, refresh=replaced)
     for plan in plans:
         manager.install(plan)
     return {'integrations': report}
+
+
+def prepare_optional_skills(manager, agents, removing, core_plans):
+    """Preflight each ancillary integration without blocking existing setup work."""
+    from .official_skills import NAME
+    from importlib.metadata import PackageNotFoundError
+
+    plans, report = [], []
+    for name in dict.fromkeys([*agents, *removing]):
+        removal = name in removing
+        old = manager.state.data['items'].get(f'setup:skill-{name}-{NAME}', {})
+        target = old.get('target') if removal else str(Path(agents[name]['skills']) / NAME)
+        try:
+            selected, outcomes = official_plans(manager, {} if removal else {name: agents[name]},
+                                                removing=[name] if removal else ())
+            for plan in selected:
+                if any(overlaps(plan.item.target, other.item.target) for other in [*core_plans, *plans]):
+                    raise Error(f'Official skill target overlaps another integration: {plan.item.target}')
+        except (Error, OSError, ValueError, PackageNotFoundError) as exc:
+            report.append({'integration': f'agent-skill:{name}', 'target': target, 'action': 'failed',
+                           'error': str(exc), 'next': f'Retry setup --{"remove-agent" if removal else "agent"} {name} after resolving the cause.'})
+        else:
+            plans.extend(selected)
+            report.extend(outcomes)
+    return plans, report
+
+
+def install_optional_skills(manager, plans, report):
+    """Keep recoverable skill failures separate from completed core integrations."""
+    from .storage import State
+
+    for plan in plans:
+        try:
+            manager.install(plan)
+        except (Error, OSError, ValueError) as exc:
+            # Never hide a shared-state failure or unresolved recovery journal.
+            # Reload durable ownership after the installer's rollback before
+            # another optional integration can write state.
+            state = State(manager.config.state_dir, maintenance=True)
+            state.ready()
+            manager.state = state
+            entry = next(entry for entry in report if entry['integration'] == f'agent-skill:{plan.item.agent}')
+            entry.update(action='failed', error=str(exc),
+                         next=f'Retry setup --{"remove-agent" if plan.record.get("detached") else "agent"} {plan.item.agent} after resolving the cause.')
 
 
 def regular(path):
@@ -322,18 +370,17 @@ def setup(manager, args):
         plans.append(plan)
         report.append({'integration': f'{kind}:{name}', 'target': str(path),
                        'action': 'remove' if removing else 'write' if plan.change else 'unchanged'})
-    skill_plans, skill_report = official_plans(Manager(candidate, state), agents, removing=args.remove_agent)
-    plans.extend(skill_plans)
-    report.extend(skill_report)
     # Detect overlaps among new selections before any profile is changed.
     for i, plan in enumerate(plans):
         if any(overlaps(plan.item.target, p.item.target) for p in plans[:i]):
             raise Error('Selected integrations have overlapping target files')
     plans.append(machine_plan(config, document))
+    skill_plans, skill_report = prepare_optional_skills(Manager(candidate, state), agents, args.remove_agent, plans)
     if not args.dry_run:
         for plan in plans:
             manager.install(plan)
-    return {'integrations': report, 'agents': list(agents), 'shells': list(shells),
+        install_optional_skills(manager, skill_plans, skill_report)
+    return {'integrations': report, 'official_skills': skill_report, 'agents': list(agents), 'shells': list(shells),
             'self_update': document.get('self_update', {'mode': 'off'}),
             'catalog_update': candidate.catalog_update,
             'automation': candidate.automation,
@@ -417,9 +464,6 @@ def remove_integrations(manager, args):
         key, record = next(iter(group['records'].items()))
         item = Item('setup', key.removeprefix('setup:'), '.', config.path, path, 'agent-hook', 'setup')
         plans.append(Plan(item, group['before'], record, True, content, records=group['records']))
-    skill_plans, skill_report = official_plans(manager, {}, removing=args.remove_agent)
-    plans.extend(skill_plans)
-    report.extend(skill_report)
     for index, plan in enumerate(plans):
         if observation(plan.item.target) != plan.before:
             raise Error(f'{plan.item.key}: removal target changed during preflight')
@@ -445,7 +489,10 @@ def remove_integrations(manager, args):
                   hash=hashlib.sha256(content).hexdigest(), detached=False, agents=[], agent='')
     plans.append(Plan(Item('setup', 'machine', '.', config.path, config.path, 'setup-config', 'setup'),
                       before_config, record, content != config.raw, content))
+    skill_plans, skill_report = prepare_optional_skills(manager, {}, args.remove_agent, plans)
     if not args.dry_run:
         for plan in plans:
             manager.install(plan)
-    return {'integrations': report, 'next': 'Requested integrations removed; other selections were preserved.'}
+        install_optional_skills(manager, skill_plans, skill_report)
+    return {'integrations': report, 'official_skills': skill_report,
+            'next': 'Requested core integrations removed; inspect official_skills for any remaining links.'}

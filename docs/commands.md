@@ -72,8 +72,10 @@ Adding and removing the same integration in one call is invalid.
 `--executable` overrides the saved absolute executable path, otherwise it defaults beside the running Python interpreter.
 Setup edits startup integrations, links the packaged `idk-aem` skill for selected agents, and saves machine selections; it does not bootstrap or apply user catalog content.
 General integration setup refreshes the official links of saved agents; shell-only initial setup and policy-only edits do not install official skills.
-Official skills use links without automatic fallback to copies; platforms without symlink privileges report an error.
-Unmanaged targets, changed links, overlapping ownership or catalog targets, and local source edits within the recorded package version stop setup before integration writes.
+Official skills use links without automatic fallback to copies; platforms without symlink privileges report an official skill failure.
+Unmanaged targets, changed links, overlapping ownership or catalog targets, and local source edits within the recorded package version skip that official skill without preventing core shell/hook setup and machine selection storage.
+Core setup completes first; each ancillary skill attempt is reported separately in the additive `official_skills` array, leaving the existing `integrations` results unchanged.
+Recoverable skill failures keep setup's successful exit status; shared-state errors and unresolved recovery still fail the command.
 Official skill records are setup-owned and do not enter content command selection.
 `--self-update` saves `off`, `compatible`, or `breaking`; omission preserves the saved mode.
 The `--update-*` options register the release source and external installer runtime described in [Configuration](configuration.md#aem-self-update-settings).
@@ -89,8 +91,10 @@ Dry run writes no files, including lock files.
 When only `--remove-shell` / `--remove-agent` selections are supplied, setup uses saved ownership instead of validating installation declarations.
 Removal accepts retired integration names and old state versions 1/2; unknown machine fields and unselected records are preserved.
 It removes only the selected saved blocks/groups, unchanged official skill links, and corresponding selections, without rebuilding other integrations.
-Changed official links, locally edited official sources, or substituted copies are preserved with ownership released; their integration result has `action = "preserve"` and the remaining `target` path.
-Official skill integration results use `integration = "agent-skill:AGENT"`, with the existing `write`, `unchanged`, and `remove` actions for ordinary links.
+Changed official links, locally edited official sources, or substituted copies are preserved with ownership released; their `official_skills` result has `action = "preserve"` and the remaining `target` path.
+Each official skill result uses `integration = "agent-skill:AGENT"`, `target`, and `action` (`write`, `unchanged`, `remove`, `preserve`, or `failed`).
+A failed attempt adds `error` and a retry instruction in `next`; existing ownership and content remain intact, and other agents' skill attempts continue independently.
+Removal also completes core integration removal before ancillary skill attempts; a failed official link removal can be retried using the same `--remove-agent` selection even after that agent selection has been removed.
 A supplied `--executable` is ignored on removal-only calls; no executable or current agent profile is needed.
 Locally edited selected blocks/groups, redirected targets, malformed records, and pending recovery still stop removal.
 Calls that also add a shell/agent or change self-update/catalog policy settings retain full installation validation.
@@ -118,8 +122,9 @@ The worker waits for the requesting AEM process to exit, locks the registered in
 A superseded request does no work; changed settings or pending recovery cancel it.
 The actual uv-installed version is checked under the installation lock so another configuration's completed update cannot cause a downgrade.
 Before replacement, the worker validates official link identity and checks source contents when their recorded package version matches the installed version.
-After replacement it releases locks and calls the fresh CLI to verify or refresh official links for this machine configuration.
-The result remains `continuing` during that step and records separate `stages.tool` and `stages.official_skill` outcomes.
+After replacement it releases locks and calls the fresh CLI to verify or refresh active owned official links for this machine configuration.
+Previously uninstalled, failed, or detached official integrations are not installed by self-update; use general setup to install or retry them.
+The self-update result keeps its existing `queued` status during that step and records separate `stages.tool` and `stages.official_skill` outcomes; full automation retains its existing `continuing` status.
 If package replacement succeeds but link refresh fails, the result is `failed`, retains the successful tool stage and release version/revision, and advises retrying `setup --agent codex`.
 Full automation also refreshes connected official links before catalog/content stages and stops if refresh fails.
 Other machine configurations verify their own links on subsequent general setup or self-update; external package-manager replacement requires general setup to refresh links and does not provide the worker's pre-replacement edit guard.

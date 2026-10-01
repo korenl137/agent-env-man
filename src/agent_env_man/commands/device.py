@@ -68,7 +68,8 @@ def self_skill_refresh(runtime, token, result_file):
     def operation(session):
         result = session.config.state_dir / result_file
         saved = self_update.read_result(result)
-        if (saved.get('token') != token or saved.get('status') != 'continuing'
+        expected_status = 'continuing' if result_file == 'automation.json' else 'queued'
+        if (saved.get('token') != token or saved.get('status') != expected_status
                 or saved.get('skill_refreshed') or saved.get('skill_binding') != self_update.full_binding(session.config.doc)):
             raise Error('No matching official skill continuation')
         report = refresh_official(session.manager, replaced=saved.get('stages', {}).get('tool', {}).get('status') == 'updated')

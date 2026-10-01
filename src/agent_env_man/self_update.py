@@ -315,14 +315,16 @@ def worker(request_path):
                     outcome = ({'status': 'disabled'} if request.get('full') and request['settings'].get('mode', 'off') == 'off'
                                else perform(request, records))
                     continue_full = bool(request.get('full'))
-                    refresh_skills = bool(document.get('agents')) and (outcome['status'] in ('updated', 'up-to-date') or continue_full)
+                    owned_skill = any(record.get('official_skill') and not record.get('detached')
+                                      and record.get('agent') in document.get('agents', {}) for record in records.values())
+                    refresh_skills = owned_skill and (outcome['status'] in ('updated', 'up-to-date') or continue_full)
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 # Do not persist subprocess output: Git URLs/build logs may
                 # contain credentials. Explicit updates can retry immediately.
                 outcome = {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
                                                          else f'{type(exc).__name__}: release update failed')}
             if continue_full or refresh_skills:
-                write_json(result, {**previous, 'status': 'continuing', 'skill_binding': full_binding(document),
+                write_json(result, {**previous, 'status': 'continuing' if continue_full else 'queued', 'skill_binding': full_binding(document),
                                     'stages': {'tool': outcome}})
             else:
                 write_json(result, {**previous, **outcome, 'finished': time.time()})
