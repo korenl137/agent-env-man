@@ -11,8 +11,13 @@ During 0.x development, minor releases may break compatibility; patch releases p
 ### Added
 
 - Optional statement and branch coverage measurement for the existing unittest suite, including Python subprocesses, with terminal, HTML, and JSON reports through the development extra.
+- Regression coverage for documentation build hooks, original update-worker failure and continuation paths, and mocked Windows locking and process-exit APIs.
 - `aem self publish` publishes a prepared clean AEM checkout's current branch and matching release tag to origin with atomic push, using the recorded local installation source or an explicit `--checkout`.
 Local release preparation remains explicit in Git; publication is independent of machine/catalog state and offers an offline preview.
+
+### Fixed
+
+- Recreate documentation output directories on repeated builds despite setuptools directory caching, and preserve existing documentation during build dry-runs.
 
 ## [0.5.3] &mdash; 2026-10-01
 

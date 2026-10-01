@@ -11,11 +11,12 @@ import tempfile
 import time
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 import tomlkit
 
-from agent_env_man import self_update
+from agent_env_man import process_lock, self_update
 from agent_env_man.model import Config, Error
 from agent_env_man.storage import State, lock
 from test_setup import SetupFixture
@@ -79,6 +80,227 @@ class Releases(unittest.TestCase):
                 with self.subTest(settings=settings), self.assertRaises(Error):
                     Config(path, document={'version': 1, 'self_update': settings})
             Config(path, document={'version': 1, 'self_update': {'mode': 'off'}})
+
+
+class OriginalWorker(unittest.TestCase):
+    """Exercise source worker policy under real locks, alongside copied-worker tests."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='aem-original-worker-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.config = self.root / 'machine.toml'
+        self.state_dir = self.root / 'machine.toml.state'
+        self.result = self.state_dir / 'self-update.json'
+        self.directory = self.state_dir / 'self-update-worker' / 'request-token'
+        self.request_path = self.directory / 'request.json'
+        self.settings = {'mode': 'compatible', 'tool_dir': str(self.root / 'tools'),
+                         'bin_dir': str(self.root / 'bin')}
+        self.document = {'version': 1, 'self_update': self.settings}
+        self.request = {'token': 'request-token', 'parent_pid': 123, 'config': str(self.config),
+                        'settings': self.settings, 'saved_settings': dict(self.settings)}
+        self.records = {}
+
+    def run_worker(self, *, parent_exited=True, outcome=None, run=None, perform_error=None,
+                   pending=None, result_token='request-token'):
+        self.config.write_text(tomlkit.dumps(self.document), encoding='utf-8')
+        self_update.write_json(self.state_dir / 'state.json', {'items': self.records, 'pending': pending})
+        self_update.write_json(self.request_path, self.request)
+        self_update.write_json(self.result, {'token': result_token, 'status': 'queued'})
+        with patch.dict(sys.modules, {'process_lock': process_lock}), \
+                patch.object(self_update, 'sys', SimpleNamespace(stdin=SimpleNamespace(buffer=io.BytesIO()))), \
+                patch.object(self_update, 'wait_for_parent', return_value=parent_exited), \
+                patch.object(self_update, 'check_official_skills'), \
+                patch.object(self_update, 'perform', return_value=outcome or {'status': 'updated'},
+                             side_effect=perform_error) as perform, \
+                patch.object(self_update.subprocess, 'run', side_effect=run) as subprocess_run:
+            self_update.worker(self.request_path)
+        self.assertFalse(self.directory.exists(), 'Worker request was not cleaned up')
+        return self_update.read_result(self.result), perform, subprocess_run
+
+    def test_superseded_request_and_pending_recovery_do_not_replace(self):
+        result, perform, run = self.run_worker(result_token='new-request')
+        self.assertEqual(result, {'token': 'new-request', 'status': 'queued'})
+        perform.assert_not_called()
+        run.assert_not_called()
+        result, perform, run = self.run_worker(pending={})
+        self.assertEqual(result['status'], 'cancelled')
+        self.assertEqual(result['reason'], 'Recovery is pending')
+        perform.assert_not_called()
+        run.assert_not_called()
+
+    def test_unconfirmed_parent_and_changed_policy_block_replacement(self):
+        result, perform, run = self.run_worker(parent_exited=False)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('process exit', result['error'])
+        perform.assert_not_called()
+        run.assert_not_called()
+        self.document['self_update'] = {'mode': 'off'}
+        result, perform, _ = self.run_worker()
+        self.assertEqual(result['status'], 'cancelled')
+        perform.assert_not_called()
+
+    def test_changed_automation_cancels_automatic_and_full_requests(self):
+        for full in (False, True):
+            with self.subTest(full=full):
+                self.request.update({'automatic': not full, 'full': full,
+                                     'saved_automation': {'mode': 'full'}})
+                self.document['automation'] = {'mode': 'off'}
+                result, perform, run = self.run_worker()
+                self.assertEqual(result['status'], 'cancelled')
+                perform.assert_not_called()
+                run.assert_not_called()
+
+    def test_replacement_failures_do_not_persist_subprocess_credentials(self):
+        errors = (ValueError('metadata mismatch'), OSError('secret credential'),
+                  subprocess.CalledProcessError(1, ['secret credential'], stderr='secret credential'))
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                result, _, run = self.run_worker(perform_error=error)
+                self.assertEqual(result['status'], 'failed')
+                self.assertNotIn('secret credential', json.dumps(result))
+                run.assert_not_called()
+
+    def test_refresh_runs_after_unlock_and_records_success(self):
+        self.records = {'official': {'official_skill': True, 'agent': 'codex'}}
+        self.document['agents'] = {'codex': {}}
+        def refresh(command, **kwargs):
+            self.assertIn('_self-skill-refresh', command)
+            # The fresh CLI needs both locks; taking them here checks the
+            # handoff rather than just observing mock acquisition calls.
+            with process_lock.lock(self_update.installation_lock(self.settings)), process_lock.lock(self.state_dir):
+                pass
+            return subprocess.CompletedProcess(command, 0, stdout='{"official_skills": {}}')
+        result, perform, run = self.run_worker(run=refresh)
+        self.assertEqual(result['status'], 'updated')
+        self.assertEqual(result['stages']['official_skill']['status'], 'completed')
+        perform.assert_called_once()
+        run.assert_called_once()
+
+    def full_request(self):
+        self.document['automation'] = {'mode': 'full'}
+        self.request.update({'full': True, 'saved_automation': {'mode': 'full'}})
+
+    def test_refresh_failure_blocks_full_continuation(self):
+        self.full_request()
+        self.records = {'official': {'official_skill': True, 'agent': 'codex'}}
+        self.document['agents'] = {'codex': {}}
+        for response in (subprocess.CompletedProcess([], 1),
+                         subprocess.CompletedProcess([], 0, stdout='invalid JSON'),
+                         OSError('secret credential')):
+            with self.subTest(response=type(response).__name__):
+                def fail(command, **kwargs):
+                    self.assertIn('_self-skill-refresh', command)
+                    if isinstance(response, Exception):
+                        raise response
+                    return response
+                result, _, run = self.run_worker(run=fail)
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['stages']['official_skill']['status'], 'failed')
+                self.assertNotIn('secret credential', json.dumps(result))
+                run.assert_called_once()
+
+    def test_disabled_tool_still_continues_full_automation_after_unlock(self):
+        self.full_request()
+        self.settings['mode'] = 'off'
+        self.request['saved_settings'] = dict(self.settings)
+        def continue_full(command, **kwargs):
+            self.assertIn('_full-run', command)
+            with process_lock.lock(self_update.installation_lock(self.settings)), process_lock.lock(self.state_dir):
+                result = self_update.read_result(self.result)
+                self.assertEqual(result['stages']['tool']['status'], 'disabled')
+                self_update.write_json(self.result, {**result, 'status': 'completed'})
+            return subprocess.CompletedProcess(command, 0)
+        result, perform, run = self.run_worker(run=continue_full)
+        self.assertEqual(result['status'], 'completed')
+        perform.assert_not_called()
+        run.assert_called_once()
+
+    def test_failed_continuation_preserves_result_written_by_new_request(self):
+        self.full_request()
+        for replace_token in (False, True):
+            with self.subTest(replace_token=replace_token):
+                def fail(command, **kwargs):
+                    if replace_token:
+                        self_update.write_json(self.result, {'token': 'new-request', 'status': 'queued'})
+                    return subprocess.CompletedProcess(command, 1)
+                result, _, _ = self.run_worker(run=fail)
+                self.assertEqual(result['status'], 'queued' if replace_token else 'failed')
+                self.assertEqual(result['token'], 'new-request' if replace_token else 'request-token')
+
+    def test_refresh_success_precedes_full_continuation(self):
+        self.full_request()
+        self.records = {'official': {'official_skill': True, 'agent': 'codex'}}
+        self.document['agents'] = {'codex': {}}
+        commands = []
+        def fresh_cli(command, **kwargs):
+            with process_lock.lock(self_update.installation_lock(self.settings)), process_lock.lock(self.state_dir):
+                result = self_update.read_result(self.result)
+                if '_self-skill-refresh' in command:
+                    commands.append('refresh')
+                    return subprocess.CompletedProcess(command, 0, stdout='{}')
+                commands.append('continue')
+                self.assertEqual(result['stages']['official_skill']['status'], 'completed')
+                self_update.write_json(self.result, {**result, 'status': 'completed'})
+                return subprocess.CompletedProcess(command, 0)
+        result, _, _ = self.run_worker(run=fresh_cli)
+        self.assertEqual(commands, ['refresh', 'continue'])
+        self.assertEqual(result['status'], 'completed')
+
+    def test_continuation_launch_failure_is_recorded_without_credentials(self):
+        self.full_request()
+        def fail(command, **kwargs):
+            raise OSError('secret credential')
+        result, _, _ = self.run_worker(run=fail)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['error'], 'Fresh AEM continuation failed')
+        self.assertNotIn('secret credential', json.dumps(result))
+
+
+class ParentExit(unittest.TestCase):
+    def test_posix_parent_waits_until_reparenting_or_timeout(self):
+        with patch.object(self_update, 'os', SimpleNamespace(name='posix', getppid=Mock(side_effect=[123, 1]))), \
+                patch.object(self_update.time, 'sleep') as sleep:
+            self.assertTrue(self_update.wait_for_parent(123))
+            sleep.assert_called_once()
+        with patch.object(self_update, 'os', SimpleNamespace(name='posix', getppid=lambda: 123)), \
+                patch.object(self_update.time, 'monotonic', side_effect=[0, self_update.TIMEOUT]):
+            self.assertFalse(self_update.wait_for_parent(123))
+        self.assertTrue(self_update.wait_for_parent(0))
+
+    def test_mocked_windows_parent_exit_closes_handle_on_all_wait_outcomes(self):
+        import ctypes
+        for wait_result in (0, 258, 0xFFFFFFFF, OSError('wait failed')):
+            with self.subTest(wait_result=wait_result):
+                kernel = SimpleNamespace(OpenProcess=Mock(return_value=42),
+                                         WaitForSingleObject=Mock(), CloseHandle=Mock())
+                if isinstance(wait_result, Exception):
+                    kernel.WaitForSingleObject.side_effect = wait_result
+                else:
+                    kernel.WaitForSingleObject.return_value = wait_result
+                with patch.object(self_update, 'os', SimpleNamespace(name='nt')), \
+                        patch.object(ctypes, 'WinDLL', return_value=kernel, create=True):
+                    if isinstance(wait_result, Exception):
+                        with self.assertRaises(OSError):
+                            self_update.wait_for_parent(123)
+                    else:
+                        self.assertEqual(self_update.wait_for_parent(123), wait_result == 0)
+                kernel.OpenProcess.assert_called_once_with(0x00100000, False, 123)
+                kernel.WaitForSingleObject.assert_called_once_with(42, self_update.TIMEOUT * 1000)
+                kernel.CloseHandle.assert_called_once_with(42)
+
+    def test_mocked_windows_missing_parent_distinguishes_invalid_pid_from_denial(self):
+        import ctypes
+        for error in (87, 5):
+            with self.subTest(error=error):
+                kernel = SimpleNamespace(OpenProcess=Mock(return_value=0),
+                                         WaitForSingleObject=Mock(), CloseHandle=Mock())
+                with patch.object(self_update, 'os', SimpleNamespace(name='nt')), \
+                        patch.object(ctypes, 'WinDLL', return_value=kernel, create=True), \
+                        patch.object(ctypes, 'get_last_error', return_value=error, create=True):
+                    self.assertEqual(self_update.wait_for_parent(123), error == 87)
+                kernel.WaitForSingleObject.assert_not_called()
+                kernel.CloseHandle.assert_not_called()
 
 
 class SelfUpdate(SetupFixture):

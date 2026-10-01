@@ -26,12 +26,16 @@ class BuildPy(build_py):
         # Editable installs read canonical sources through the runtime locator.
         # Clean only our generated tree so removed documents cannot leak into a
         # later wheel through a reused build directory.
-        if not self.editable_mode:
+        if not self.editable_mode and not self.dry_run:
             destination = Path(self.build_lib) / "agent_env_man" / "_documentation"
             if destination.exists():
                 shutil.rmtree(destination)
             for target, source in self.documentation_mapping().items():
-                self.mkpath(str(Path(target).parent))
+                # distutils caches mkpath calls even after we remove the tree.
+                # Recreate directories directly so repeated builds can copy
+                # resources. Guard copying above: some setuptools versions
+                # do not honor dry-run in their copy_file helper.
+                Path(target).parent.mkdir(parents=True, exist_ok=True)
                 self.copy_file(source, target)
 
     def get_source_files(self):

@@ -16,7 +16,7 @@ Use Python 3.11 or later and Git.
 Create a virtual environment and install the project with `python -m pip install -e ".[dev]"`.
 Runtime dependencies are Click and TOML Kit.
 Tests use the standard-library `unittest` runner and Click's `CliRunner` to check command behavior.
-The development extra adds coverage.py for optional coverage measurement.
+The development extra adds coverage.py for optional coverage measurement and setuptools for build-hook regression tests.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -65,6 +65,8 @@ Record the source revision, environment, test outcomes and skips, statement and 
 Linux/WSL measurement does not establish coverage of Windows-only behavior.
 The same commands work with the native Windows environment's Python, but report its results separately.
 Workers copied into temporary request directories are outside the configured source roots; subprocess measurement does not map those copies back to their originals.
+Test the original worker's policy, failure, and continuation behavior separately from copied-worker lifetime integration.
+Mocked Windows API tests check branching and resource handling; they do not establish native Windows lock or process behavior.
 
 ## Architectural contracts
 
