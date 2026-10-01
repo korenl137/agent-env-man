@@ -65,11 +65,52 @@ class Releases(unittest.TestCase):
         self.assertEqual(self_update.select_release(refs, '0.2.0', 'compatible'),
                          {'version': '0.2.10', 'revision': 'a' * 40})
         self.assertEqual(self_update.select_release(refs, '1.0.0', 'compatible')['version'], '1.2.0')
-        self.assertEqual(self_update.select_release(refs, '0.2.0', 'breaking')['version'], '2.0.0')
+        self.assertEqual(self_update.select_release(refs, '0.2.0', 'breaking')['version'], '3.0.0rc1')
         self.assertIsNone(self_update.select_release(refs, '2.0.0', 'compatible'))
         self.assertIsNone(self_update.select_release(refs, '0.2.0', 'off'))
         with self.assertRaises(ValueError):
             self_update.select_release(refs, '0.2.0.dev1', 'compatible')
+
+    def test_prerelease_series_and_numeric_ordering(self):
+        versions = ['1.0.0a1', '1.0.0a2', '1.0.0b1', '1.0.0rc1',
+                    '1.0.0rc2', '1.0.0rc10', '1.0.0', '1.0.1rc1', '1.1.0']
+        refs = '\n'.join('a' * 40 + '\trefs/tags/v' + v for v in versions)
+        refs += '\n' + 'b' * 40 + '\trefs/tags/v1.0.0rc10^{}'
+        for baseline, expected in [('1.0.0a1', '1.0.0a2'), ('1.0.0b0', '1.0.0b1'),
+                                   ('1.0.0rc1', '1.0.0rc10'), ('1.0.0', '1.1.0')]:
+            with self.subTest(baseline=baseline):
+                self.assertEqual(self_update.select_release(refs, baseline, 'compatible')['version'], expected)
+        self.assertEqual(self_update.select_release(refs, '1.0.0rc1', 'compatible')['revision'], 'b' * 40)
+        self.assertIsNone(self_update.select_release(refs, '1.0.0rc10', 'compatible'))
+        self.assertIsNone(self_update.select_release(refs, '1.0.0rc1', 'off'))
+        self.assertEqual(self_update.select_release(refs, '1.0.0rc10', 'breaking')['version'], '1.1.0')
+        finals = 'a' * 40 + '\trefs/tags/v1.0.0'
+        self.assertEqual(self_update.select_release(finals, '1.0.0rc10', 'breaking')['version'], '1.0.0')
+        for invalid in ['1.0.0rc01', '1.0.0.dev1', '1.0.0.post1',
+                        '1.0.0+local', '1.0.0-preview.1', '01.0.0a1', None]:
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(self_update.release_version(invalid))
+
+    def test_omitted_prerelease_number_is_zero(self):
+        for label in ('a', 'b', 'rc'):
+            with self.subTest(label=label):
+                bare = '1.0.0' + label
+                zero, next_version = bare + '0', bare + '1'
+                self.assertEqual(self_update.release_version(bare), self_update.release_version(zero))
+                refs = 'a' * 40 + '\trefs/tags/v' + bare
+                self.assertIsNone(self_update.select_release(refs, zero, 'compatible'))
+                self.assertEqual(self_update.select_release(refs, '0.9.0', 'breaking')['version'], bare)
+                refs += '\n' + 'b' * 40 + '\trefs/tags/v' + next_version
+                self.assertEqual(self_update.select_release(refs, bare, 'compatible')['version'], next_version)
+
+    def test_equivalent_zero_tags_keep_peeled_commit_of_selected_spelling(self):
+        lines = ['a' * 40 + '\trefs/tags/v1.0.0rc',
+                 'b' * 40 + '\trefs/tags/v1.0.0rc^{}',
+                 'c' * 40 + '\trefs/tags/v1.0.0rc0',
+                 'd' * 40 + '\trefs/tags/v1.0.0rc0^{}']
+        for refs in ('\n'.join(lines), '\n'.join(reversed(lines))):
+            self.assertEqual(self_update.select_release(refs, '0.9.0', 'breaking'),
+                             {'version': '1.0.0rc0', 'revision': 'd' * 40})
 
     def test_configuration_validation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -404,6 +445,50 @@ class SelfUpdate(SetupFixture):
         with patch('agent_env_man.self_update.subprocess.run', side_effect=run), self.assertRaises(ValueError):
             self_update.perform({'settings': self.settings})
         self.assertEqual(len(calls), 1)  # Metadata failure never reaches install.
+
+    def test_copied_worker_updates_only_same_prerelease_series(self):
+        config = self.register()
+        for value in ['1.0.0rc2', '1.0.0rc10', '1.0.0', '1.1.0rc1']:
+            self.release(value)
+        calls = self.root / 'pre-uv-calls.json'
+        self.uv.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
+                           'if sys.argv[-1] == "list":\n print("agent-env-man v1.0.0rc1\\n - aem")\n'
+                           'else:\n Path(' + repr(str(calls)) + ').write_text(json.dumps(sys.argv[1:]))\n')
+        self.uv.chmod(0o755)
+        attempt = self_update.schedule(config)
+        child = self_update._children[-1]
+        self.finish_worker(config)
+        self.assertEqual(child.wait(timeout=15), 0)
+        result = self_update.read_result(self_update.result_path(config))
+        self.assertEqual(result['token'], attempt['token'])
+        self.assertEqual(result['status'], 'updated')
+        self.assertEqual(result['version'], '1.0.0rc10')
+        command = json.loads(calls.read_text())
+        self.assertIn('install', command)
+        self.assertIn('@' + result['revision'], command[-2])
+
+    def test_implicit_zero_tag_and_metadata_equivalence(self):
+        self.register('breaking')
+        calls = []
+        real_run = subprocess.run
+        def run(command, **kwargs):
+            if command[0] == str(self.uv):
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='agent-env-man v0.2.0\n - aem\n')
+            return real_run(command, **kwargs)
+        for package, tag in [('1.0.0b0', 'v1.0.0b'), ('1.0.0rc', 'v1.0.0rc0')]:
+            with self.subTest(package=package, tag=tag):
+                self.release(package, tag=tag)
+                calls.clear()
+                with patch('agent_env_man.self_update.subprocess.run', side_effect=run):
+                    outcome = self_update.perform({'settings': self.settings})
+                self.assertEqual(outcome['version'], tag[1:])
+                self.assertIn('@' + outcome['revision'], calls[-1][-2])
+        self.release('1.1.0rc1', tag='v1.1.0rc')
+        calls.clear()
+        with patch('agent_env_man.self_update.subprocess.run', side_effect=run), self.assertRaises(ValueError):
+            self_update.perform({'settings': self.settings})
+        self.assertEqual(len(calls), 1)
 
     def test_actual_installed_version_prevents_cross_config_downgrade(self):
         self.register()

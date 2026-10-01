@@ -73,6 +73,24 @@ class SelfPublication(unittest.TestCase):
         self.assertEqual(self.snapshot()[0], before[0])
         self.assertEqual(self.git(self.checkout, "rev-parse", "v1.0.0^{commit}"), result["revision"])
 
+    def test_prerelease_publication_and_retry(self):
+        self.release("2.0.0rc1", annotated=True)
+        for _ in range(2):
+            result = self.call()
+            self.assertEqual(result["status"], "published")
+            self.assertEqual(result["version"], "2.0.0rc1")
+            self.assertEqual(self.git(self.remote, "rev-parse", "v2.0.0rc1^{commit}"), result["revision"])
+
+    def test_bare_prerelease_publication(self):
+        for label in ('a', 'b', 'rc'):
+            with self.subTest(label=label):
+                version = '2.0.0' + label
+                self.release(version, annotated=True)
+                result = self.call()
+                self.assertEqual(result['status'], 'published')
+                self.assertEqual(result['version'], version)
+                self.assertEqual(self.git(self.remote, 'rev-parse', 'v' + version + '^{commit}'), result['revision'])
+
     def test_forward_publication_preserves_annotated_tag_object(self):
         self.call()
         self.release("1.0.1", annotated=True)
@@ -135,8 +153,8 @@ class SelfPublication(unittest.TestCase):
         self.assertIn("prepare local tag", self.call(code=1)["error"])
         for document, diagnostic in (
                 ('[project]\nname="another"\nversion="1.0.1"', "project.name"),
-                ('[project]\nname="agent-env-man"\nversion="1.0.1rc1"', "final X.Y.Z"),
-                ('[project]\nname="agent-env-man"\nversion=1', "final X.Y.Z")):
+                ('[project]\nname="agent-env-man"\nversion="1.0.1.dev1"', "X.Y.Z"),
+                ('[project]\nname="agent-env-man"\nversion=1', "X.Y.Z")):
             (self.checkout / "pyproject.toml").write_text(document, encoding="utf-8")
             self.git(self.checkout, "commit", "-am", "Invalid package")
             self.assertIn(diagnostic, self.call(code=1)["error"])

@@ -77,7 +77,7 @@ def prepared(git, path):
         raise Error("self: checkout must contain project.name = 'agent-env-man'")
     version = project.get("version")
     if not isinstance(version, str) or release_version(version) is None:
-        raise Error("self: project.version must be a final X.Y.Z release version")
+        raise Error("self: project.version must be an X.Y.Z or X.Y.Z{a|b|rc}[N] release version")
     tag = "v" + version
     ref = "refs/tags/" + tag
     tagged = git.run(path, "rev-parse", "--verify", ref + "^{commit}", check=False)

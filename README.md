@@ -299,13 +299,14 @@ aem self update
 aem self status
 ```
 
-`compatible` permits newer final releases in the same major version, or only patches in the same minor version during `0.x`.
+For final releases, `compatible` permits newer final releases in the same major version, or only patches in the same minor version during `0.x`.
+For `a`/`b`/`rc` prereleases, it permits only subversion increases with the same base version and pre label; moving to a different series or a final release requires `breaking`.
 Explicit updates work with automation off and queue a worker; use `aem self status` to check completion.
 See [AEM update guidance](docs/automation.md#update-aem-itself) for automatic updates, incompatible releases, runtime requirements, and repair.
 
 To publish a prepared AEM release, use `aem self publish --dry-run`, then `aem self publish`.
 This uses the recorded local installation source, or accepts `--checkout PATH` to select another AEM checkout.
-Prepare a clean committed checkout and its matching `vX.Y.Z` tag with Git first; publication creates neither commits nor tags.
+Prepare a clean committed checkout and its matching `vVERSION` tag with Git first; publication creates neither commits nor tags.
 The current branch and release tag are published to `origin` with atomic push.
 See [release publication](docs/commands.md#self-publish) for prerequisites and preview limits.
 

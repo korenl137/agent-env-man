@@ -107,7 +107,7 @@ def self_update_command(runtime, mode, dry_run):
 @preview_option
 @pass_runtime
 def self_publish_command(runtime, checkout, timeout, dry_run):
-    """Publish the prepared current branch and matching vX.Y.Z tag to origin.
+    """Publish the prepared current branch and matching release tag to origin.
 
     Require a clean checkout with its release tag already pointing to HEAD;
     prepare commits, versions, and tags with Git. No commit/tag creation occurs.

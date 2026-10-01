@@ -63,7 +63,7 @@ def main(argv=None):
         if mode is None and not args.dry_run and selected_automation != 'off':
             saved = tomllib.loads(machine.expanduser().read_text(encoding='utf-8')) if machine.expanduser().exists() else {}
             if 'self_update' not in saved and sys.stdin.isatty() and not (args.remove_shell or args.remove_agent):
-                print('Automatic AEM updates: off / compatible (compatible releases) / breaking (all final releases)')
+                print('Automatic AEM updates: off / compatible (compatible releases) / breaking (all releases)')
                 while mode not in ('off', 'compatible', 'breaking'):
                     mode = input('Update mode [off]: ').strip() or 'off'
         executable = bin_dir / ('aem.exe' if os.name == 'nt' else 'aem')

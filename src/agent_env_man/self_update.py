@@ -56,15 +56,28 @@ def validate(settings):
 
 
 def release_version(value):
-    match = re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value)
-    return tuple(map(int, match.groups())) if match else None
+    """Return an ordering key for final or Python a/b/rc releases.
+
+    Keep this parser standard-library-only for the copied update worker.
+    Final releases sort after every prerelease of the same base version.
+    An omitted prerelease subversion is zero, matching Python packaging.
+    Development, post, local, and other noncanonical versions are excluded.
+    """
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:(a|b|rc)(0|[1-9]\d*)?)?', value)
+    if not match:
+        return None
+    major, minor, patch, pre, number = match.groups()
+    return (int(major), int(minor), int(patch),
+            {'a': 0, 'b': 1, 'rc': 2, None: 3}[pre], int(number or 0))
 
 
 def select_release(output, current, mode):
-    """Select only newer vX.Y.Z tags, preferring peeled annotated-tag commits."""
+    """Select newer release tags, preferring peeled annotated-tag commits."""
     baseline = release_version(current)
     if baseline is None:
-        raise ValueError('Self-update requires an installed X.Y.Z release version')
+        raise ValueError('Self-update requires an installed X.Y.Z or X.Y.Z{a|b|rc}[N] release version')
     releases = {}
     for line in output.splitlines():
         parts = line.split()
@@ -75,16 +88,22 @@ def select_release(output, current, mode):
         candidate = release_version(match[1]) if match else None
         if candidate is None or candidate <= baseline:
             continue
-        if mode == 'compatible' and candidate[:2 if baseline[0] == 0 else 1] != baseline[:2 if baseline[0] == 0 else 1]:
-            continue
+        if mode == 'compatible':
+            if baseline[3] != 3:
+                # Only the subversion may change within a prerelease series.
+                if candidate[:4] != baseline[:4]:
+                    continue
+            elif candidate[3] != 3 or candidate[:2 if baseline[0] == 0 else 1] != baseline[:2 if baseline[0] == 0 else 1]:
+                continue
         if mode == 'off':
             continue
-        if candidate not in releases or match[2]:
-            releases[candidate] = revision
-    if not releases:
-        return None
-    selected = max(releases)
-    return {'version': '.'.join(map(str, selected)), 'revision': releases[selected]}
+        previous = releases.get(candidate)
+        # Bare and explicit-zero tags name the same version. Prefer the
+        # explicit spelling deterministically; peel only that selected tag.
+        if (previous is None or match[1] > previous['version']
+                or (match[1] == previous['version'] and match[2])):
+            releases[candidate] = {'version': match[1], 'revision': revision}
+    return releases[max(releases)] if releases else None
 
 
 def full_binding(document):
@@ -243,7 +262,10 @@ def perform(request, records=None):
             raise ValueError('Release pyproject.toml must be a tracked regular file')
         metadata = tomllib.loads(git('show', 'FETCH_HEAD:pyproject.toml', cwd=checkout))
         project = metadata.get('project', {})
-        if not isinstance(project, dict) or project.get('name') != 'agent-env-man' or project.get('version') != selected['version']:
+        # Package tools normalize a bare pre label to subversion zero.
+        # Accept only this supported equivalence, preserving metadata checks.
+        if (not isinstance(project, dict) or project.get('name') != 'agent-env-man'
+                or release_version(project.get('version')) != release_version(selected['version'])):
             raise ValueError('Release tag does not match agent-env-man package metadata')
     command = [settings['uv'], 'tool', 'install', '--reinstall', '--python', settings['python'],
                '--from', git_url(repository) + '@' + selected['revision'], 'agent-env-man']

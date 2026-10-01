@@ -63,10 +63,19 @@ aem self update                  # Queue an explicit compatible release update.
 aem self update --mode breaking  # Permit incompatible releases for this attempt.
 ```
 
-`compatible` permits newer releases in the same major version; during `0.x`, it permits only patches in the same minor version.
-`breaking` permits any newer final release, including incompatible changes; review migration instructions before enabling it.
-Prereleases and untagged commits are excluded.
-AEM reads `vX.Y.Z` tags from its upstream Git repository, verifies the matching package metadata, and installs the selected commit through uv.
+For final releases, `compatible` permits newer final releases in the same major version; during `0.x`, it permits only patches in the same minor version.
+For a prerelease, `compatible` permits only a higher numeric subversion with the same base `X.Y.Z` and the same `a`, `b`, or `rc` label (for example, `1.0.0rc1` to `1.0.0rc2`).
+Changing the label, base version, or moving to a final release requires `breaking`.
+Final installations retain their existing compatible range and do not select prereleases in `compatible` mode.
+`breaking` permits any newer final or prerelease version, including incompatible changes; review migration instructions before enabling it.
+Supported prereleases use Python package notation `X.Y.ZaN`, `X.Y.ZbN`, or `X.Y.ZrcN`, with an optional nonnegative numeric subversion without leading zeroes.
+An omitted number is `0`: `1.0.0rc` and `1.0.0rc0` are equivalent, and `1.0.0rc1` is their next compatible release.
+When both equivalent tags exist, update selection prefers the explicit-zero spelling.
+A release may start at any supported label; earlier phases need not exist.
+Tag and package metadata comparisons accept the same omitted-zero equivalence.
+Ordering is numeric by base version, then `a` < `b` < `rc` < final, then numeric subversion.
+Development, post, local versions, and untagged commits are excluded.
+AEM reads `vVERSION` tags from its upstream Git repository, verifies the matching package metadata, and installs the selected commit through uv.
 Use the installer's `--update-repository URL` to select another release repository.
 Development checkout edits are not published or installed by this path.
 
