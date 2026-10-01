@@ -20,7 +20,8 @@ Documented commands, behavior, exit codes, and JSON fields are covered by the pa
 JSON consumers must ignore unknown object fields; field additions may appear in compatible feature releases.
 Enum values are closed unless their interface explicitly documents unknown-value handling.
 JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
-Commands lock one configuration; installations registered for self-updates also share a lock for their uv tools directory.
+Commands using machine state lock one configuration; installations registered for self-updates also share a lock for their uv tools directory.
+`docs` and `self publish` operate independently of machine state and acquire neither lock.
 Content and catalog updates allow Git-ignored regular caches in their checkouts and refuse any fast-forward that would overwrite them.
 In content status, `sources[].checkout` is `dirty` for tracked edits or nonignored untracked files; ignored files alone leave it `clean`.
 External editors and other package-manager processes do not participate in these locks.
@@ -30,7 +31,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | --- | --- | --- |
 | `docs` | Locate version-matched local documentation and examples. | None. |
 | `setup` | Connect or remove startup integrations and official agent skill links. | None. |
-| `self` | Inspect or queue updates of AEM itself. | Status and dry run are offline; queued workers fetch releases and install through uv. |
+| `self` | Inspect, update, or publish a prepared release of AEM itself. | Status and dry runs are offline; update workers fetch/install releases; publish inspects, fetches, and pushes Git refs. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
 | `catalog` | Inspect, update, or publish the catalog itself. | Update/publish only; publication dry run is offline. |
 | `update` | Fetch and fast-forward prepared sources. | Yes for Git. |
@@ -121,6 +122,7 @@ The repository installer `python scripts/setup.py` installs AEM using uv and del
 ```text
 aem self status
 aem self update [--mode compatible|breaking] [--dry-run]
+aem self publish [--checkout PATH] [--dry-run] [--timeout SECONDS]
 ```
 
 `status` is offline and reports `version`, `mode`, `repository`, `runtime_registered`, and `last_attempt`.
@@ -155,6 +157,52 @@ The initially empty `last_attempt` subsequently contains those queued fields and
 Completed results include `finished` (Unix seconds); an updated result also includes `version` and `revision`, failures include `error`, and cancellations include `reason`.
 An interrupted worker can leave a queued result; explicit update queues a fresh attempt immediately.
 During startup, disabled/throttled work is reported in the saved startup outcome as `disabled`/`throttled` and does not replace the last attempt.
+
+### self publish
+
+Publish an already prepared AEM release without machine configuration, a catalog, or self-update runtime registration.
+This command does not create commits or tags, change versions, install AEM, or schedule updates.
+It does not read or change installation records or automatic attempt clocks.
+
+`--checkout PATH` selects the Git working-tree root; relative paths are resolved against the current directory.
+When omitted, use the local directory recorded in the installed package's `direct_url.json`, including a non-editable local installation.
+If no local directory is recorded, use the running module's own `src/agent_env_man` checkout when available; otherwise require `--checkout`.
+A stale or invalid recorded local directory fails rather than selecting a different checkout.
+The current directory, homes, and uv receipts are not searched for a replacement source.
+Installed package code and bundled documentation directories are not publication sources.
+
+Prepare the release with Git before invoking publication:
+
+- The entire working tree must have no tracked edits or nonignored untracked files, and no unfinished Git operation.
+- HEAD must be attached to a branch; the selected path must be the working-tree root.
+- HEAD must contain a tracked regular `pyproject.toml` with `project.name = "agent-env-man"` and a final `X.Y.Z` version.
+- The matching local `vX.Y.Z` tag must already resolve to HEAD; lightweight and annotated tags are supported.
+- `origin` must have the same single fetch and push destination.
+
+The target is `origin` and the current branch; no separate publication binding or remote/branch override is provided.
+Use Git directly for other combinations.
+Publication inspects all advertised remote refs and allows first publication only when the remote is verified empty.
+A populated remote must contain the current branch; after fetching it, behind or diverged local history is rejected without merging or rewriting.
+An existing remote release tag must resolve to the reviewed HEAD commit.
+Equivalent remote tags are retained, including their existing annotation/signature; differing tag targets are rejected.
+
+Push explicitly selects the reviewed commit for the current branch and, when absent remotely, the existing local release tag object.
+Atomic push is required, even when the release tag already exists; unsupported or rejected atomic pushes fail without sequential fallback.
+No force push or implicit additional branches/tags are permitted.
+Authentication is noninteractive; `--timeout` bounds all Git operations together and defaults to 30 seconds.
+The command preserves local commits, tags, index, and worktree on success or failure; actual execution may refresh the remote-tracking branch and `FETCH_HEAD`.
+External Git processes do not participate in AEM coordination; keep the checkout stable during publication.
+
+Dry run validates the local prepared release without contacting the remote or writing files.
+It reports the remote relation only against cached tracking refs and cannot confirm remote history, tag compatibility, credentials, or atomic-push support.
+Review the reported checkout, repository, branch, version, tag, and revision before publishing.
+
+The JSON result is one object with `status` (`planned`, `published`, or `failed`), `network` (whether network work is enabled), and `remote_verified` (whether remote history and tag preflight completed).
+After local validation it includes `checkout`, `repository`, `branch`, `version`, `tag`, `revision`, `changes`, `diff`, `commits`, and `remote_relation` from the checkout inspection.
+`checkout` may appear before validation completes; other fields may be absent on early failure.
+Actual execution adds `initial_publish = true` for a verified empty remote or `observed_revision` for a fetched branch, and `tag_present` after successful remote tag inspection.
+`failed` includes `error` and exits `1`; `planned` and `published` exit `0`.
+Operational failures are returned in this report on stdout, including with `--json`; usage errors remain on stderr with exit `2`.
 
 ## bootstrap
 

@@ -1,5 +1,6 @@
 """Machine setup, device automation, and installed callback commands."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import click
@@ -54,7 +55,7 @@ def setup(runtime, **options):
 
 @click.group(name="self")
 def self_group():
-    """Inspect or queue release updates of AEM itself."""
+    """Inspect, update, or publish a prepared release of AEM itself."""
 
 
 @click.command(name='_self-skill-refresh', hidden=True)
@@ -98,6 +99,28 @@ def self_update_command(runtime, mode, dry_run):
         return self_update.schedule(session.config, mode="compatible" if selected_mode == "off" else selected_mode,
                                     dry_run=dry_run), False
     return runtime.run(operation, maintenance=True, missing_ok=True, preview=dry_run)
+
+
+@self_group.command(name="publish")
+@click.option("--checkout", type=click.Path(path_type=Path), help="AEM Git checkout root; defaults to the local installation source.")
+@click.option("--timeout", type=SECONDS, default=30.0, show_default=True, help="Total seconds for Git operations.")
+@preview_option
+@pass_runtime
+def self_publish_command(runtime, checkout, timeout, dry_run):
+    """Publish the prepared current branch and matching vX.Y.Z tag to origin.
+
+    Require a clean checkout with its release tag already pointing to HEAD;
+    prepare commits, versions, and tags with Git. No commit/tag creation occurs.
+    When no local installation source is recorded, use this running module's
+    development checkout or require --checkout. Other remote/branch combinations
+    require Git directly. Atomic push is required; preview is offline and cannot
+    verify the remote. No machine configuration or setup is required.
+    """
+    from ..self_publish import publish
+    report, failed = publish(checkout, dry_run=dry_run, timeout=timeout)
+    runtime.emit(report)
+    if failed:
+        raise click.exceptions.Exit(1)
 
 
 @click.command(name="automation")

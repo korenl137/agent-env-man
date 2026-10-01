@@ -177,6 +177,12 @@ Preserve staged changes and commits after failures, report each repository's out
 External synchronization, fork/PR workflows, and collecting installed-copy edits are outside this command's scope.
 Exercise shared skill/instruction consumers, unrelated files, existing commits, offline preview, rejected histories, remote failure, and retry using local Git fixtures.
 
+Self publication is a separate prepared-release contract: require a clean AEM checkout and an existing version tag resolving to HEAD, and never generate commits, tags, or version edits.
+Resolve its default checkout from local installation provenance or the running module's own development tree, never by searching the current directory or user homes; invalid recorded paths require explicit correction.
+Keep it independent of machine/catalog state and self-update scheduling.
+Use the checkout's origin and current branch, validate remote history and existing tag targets, and atomically publish only the reviewed branch commit and missing release tag.
+Preserve equivalent existing remote tag objects, local release contents, and ordinary content/catalog publication contracts; do not fall back to sequential push or force.
+
 ## Automatic update contracts
 
 Resolve policies by explicit field override: built-in defaults, catalog-wide defaults, one named policy, then skill-local fields.

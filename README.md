@@ -300,6 +300,12 @@ aem self status
 Explicit updates work with automation off and queue a worker; use `aem self status` to check completion.
 See [AEM update guidance](docs/automation.md#update-aem-itself) for automatic updates, incompatible releases, runtime requirements, and repair.
 
+To publish a prepared AEM release, use `aem self publish --dry-run`, then `aem self publish`.
+This uses the recorded local installation source, or accepts `--checkout PATH` to select another AEM checkout.
+Prepare a clean committed checkout and its matching `vX.Y.Z` tag with Git first; publication creates neither commits nor tags.
+The current branch and release tag are published to `origin` with atomic push.
+See [release publication](docs/commands.md#self-publish) for prerequisites and preview limits.
+
 ## Conflicts, detach, and recovery
 
 AEM refuses unmanaged targets and locally modified copies unless explicitly authorized.

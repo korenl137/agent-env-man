@@ -8,6 +8,11 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Added
+
+- `aem self publish` publishes a prepared clean AEM checkout's current branch and matching release tag to origin with atomic push, using the recorded local installation source or an explicit `--checkout`.
+Local release preparation remains explicit in Git; publication is independent of machine/catalog state and offers an offline preview.
+
 ## [0.5.3] &mdash; 2026-10-01
 
 ### Fixed

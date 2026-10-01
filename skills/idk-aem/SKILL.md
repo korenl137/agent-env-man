@@ -22,6 +22,7 @@ For staged settings, consult `aem settings --help` and the chosen subcommand's h
 `setup` connects agents and shells; `bootstrap` prepares catalog content; `apply` installs from prepared local paths.
 Agent setup includes this official skill but does not install user catalog content or grant hook trust.
 Catalog updates, content updates, and AEM self-updates are separate operations.
+`self publish` publishes an already prepared AEM checkout and release tag; it does not prepare a release or update the installation.
 Content `update` changes linked installations immediately; copies need `apply`, and `sync` combines update and application.
 
 Use `locate` to distinguish installed content from its editable source, and request `--source` when editing content for publication.
@@ -36,7 +37,8 @@ Settings are excluded from automatic/full runs.
 ## Publication and preservation
 
 Publication acts on the entire selected repository, including changes outside the selected content directory.
-Supplying a commit message stages all nonignored changes; inspect the repository changes and publication preview to verify scope.
+For content/catalog publication, supplying a commit message stages all nonignored changes; inspect the repository changes and publication preview to verify scope.
+Self publication instead requires a clean committed release with its matching tag already prepared in Git; verify the reported checkout and destination before publishing.
 A preview is offline and cannot confirm remote state; a remote failure does not establish an empty remote.
 A request to locate or edit content does not itself authorize publication.
 External-source synchronization remains the responsibility of its existing service.
