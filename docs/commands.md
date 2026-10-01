@@ -143,7 +143,8 @@ The self-update result keeps its existing `queued` status during that step and r
 If package replacement succeeds but link refresh fails, the result is `failed`, retains the successful tool stage and release version/revision, and advises retrying `setup --agent codex`.
 Full automation also refreshes connected official links before catalog/content stages and stops if refresh fails.
 Other machine configurations verify their own links on subsequent general setup or self-update; external package-manager replacement requires general setup to refresh links and does not provide the worker's pre-replacement edit guard.
-Newer final or `a`/`b`/`rc` prerelease tags (`vVERSION`) qualify within the selected mode; annotated tags resolve to their commits.
+Newer final or supported prerelease tags (`vVERSION`) qualify within the selected mode; annotated tags resolve to their commits.
+SemVer-style `-alpha`/`-beta`/`-rc` tags with optional `.N` numbers convert to Python `a`/`b`/`rc` package versions; an omitted number means zero.
 Prerelease `compatible` updates change only the numeric subversion within the same base version and label; final `compatible` updates retain their existing range and exclude prereleases.
 See [release syntax and ordering](automation.md#update-aem-itself).
 The selected commit must contain `project.name = "agent-env-man"` and the matching release version in `pyproject.toml`.
@@ -178,7 +179,9 @@ Prepare the release with Git before invoking publication:
 - The entire working tree must have no tracked edits or nonignored untracked files, and no unfinished Git operation.
 - HEAD must be attached to a branch; the selected path must be the working-tree root.
 - HEAD must contain a tracked regular `pyproject.toml` with `project.name = "agent-env-man"` and an `X.Y.Z` or `X.Y.ZaN`/`X.Y.ZbN`/`X.Y.ZrcN` version; the pre number may be omitted and means zero.
-- The matching local `vVERSION` tag must already resolve to HEAD; lightweight and annotated tags are supported.
+- A matching local `vVERSION` tag in Python or supported SemVer-style notation must already resolve to HEAD; lightweight and annotated tags are supported.
+The exact package spelling is preferred when present, then equivalent Python spellings, then SemVer spellings.
+An exact package tag pointing elsewhere is rejected even when an equivalent alias points to HEAD.
 - `origin` must have the same single fetch and push destination.
 
 The target is `origin` and the current branch; no separate publication binding or remote/branch override is provided.

@@ -10,7 +10,7 @@ from urllib.request import url2pathname
 
 from .git_source import Git
 from .model import Error, Source
-from .self_update import release_version
+from .self_update import release_version, tag_version
 
 
 def checkout_path(checkout=None):
@@ -78,7 +78,14 @@ def prepared(git, path):
     version = project.get("version")
     if not isinstance(version, str) or release_version(version) is None:
         raise Error("self: project.version must be an X.Y.Z or X.Y.Z{a|b|rc}[N] release version")
-    tag = "v" + version
+    # Match package versions to either Python or supported SemVer tag names.
+    # Prefer the exact package spelling so an existing mismatched tag cannot
+    # be bypassed by adding an equivalent alias pointing to another commit.
+    tags = git.run(path, "for-each-ref", "--format=%(refname:strip=2)", "refs/tags/v*").stdout.splitlines()
+    matching = [name for name in tags
+                if release_version(tag_version(name[1:])) == release_version(version)]
+    tag = max(matching, key=lambda name: (name == "v" + version,
+                                         release_version(name[1:]) is not None, name)) if matching else "v" + version
     ref = "refs/tags/" + tag
     tagged = git.run(path, "rev-parse", "--verify", ref + "^{commit}", check=False)
     if tagged.returncode or tagged.stdout != revision:

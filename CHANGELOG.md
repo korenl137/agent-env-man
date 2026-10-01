@@ -9,7 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Recognize Python `a`/`b`/`rc` prereleases in AEM self-update and prepared release publication, treating an omitted subversion as zero in version ordering and tag/package comparisons.
+- Recognize Python `a`/`b`/`rc` and SemVer-style `-alpha`/`-beta`/`-rc` prerelease tags in AEM self-update and prepared release publication.
+Convert tag labels to Python package notation and treat an omitted subversion as zero in version ordering and tag/package comparisons.
 Prerelease compatible updates increase only the subversion within the same base version and pre label; breaking updates may cross series or graduate to final, while final compatible updates retain their existing range and exclude prereleases.
 
 - Optional statement and branch coverage measurement for the existing unittest suite, including Python subprocesses, with terminal, HTML, and JSON reports through the development extra.

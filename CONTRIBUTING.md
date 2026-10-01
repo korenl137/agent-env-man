@@ -8,7 +8,7 @@ It covers package versioning, supported interfaces, and machine/state format com
 ## Changelog and releases
 
 Maintain [CHANGELOG.md](CHANGELOG.md) alongside notable user-visible changes and contributor workflow changes.
-Release entries correspond to the package version in `pyproject.toml` and its `vVERSION` Git tag, using the compatibility policy above.
+Release entries identify their `vVERSION` Git tag and the corresponding Python package version in `pyproject.toml`, using the supported tag conversion and compatibility policy above.
 
 ## Development and validation
 
@@ -374,7 +374,9 @@ Verify that referenced documentation is available and retained guidance agrees w
 The repository installer uses uv to install this checkout as a user tool, then delegates integration to `aem setup`.
 Offer `off`, `compatible`, and `breaking` self-update modes on first interactive installation; unattended omission defaults to off, and omitted choices preserve saved settings.
 Self-update policy and the external installer runtime belong to machine configuration, never the content catalog.
-Release selection uses newer final or Python `a`/`b`/`rc` prerelease tags, with tag/package version agreement after treating an omitted pre number as zero.
+Release selection accepts newer final, Python `a`/`b`/`rc`, or SemVer-style `-alpha`/`-beta`/`-rc` prerelease tags with optional `.N` numbers.
+Convert SemVer pre labels to Python package notation before ordering or metadata comparison; an omitted pre number is zero.
+Prefer exact package tags during self publication and Python tags during update selection when equivalent aliases coexist; never bypass a mismatched exact tag with an alias.
 Final compatible updates select final releases only, preserving same-major compatibility from 1.x.
 Prerelease compatible updates require the same base version and pre label and increase only the numeric subversion; label/base changes and graduation to final require breaking permission.
 Pre numbers may be omitted and mean zero; do not require earlier pre phases to exist.

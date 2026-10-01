@@ -91,6 +91,27 @@ class SelfPublication(unittest.TestCase):
                 self.assertEqual(result['version'], version)
                 self.assertEqual(self.git(self.remote, 'rev-parse', 'v' + version + '^{commit}'), result['revision'])
 
+    def test_semver_tag_publication_with_python_package_version(self):
+        for version, tag in [('2.0.0a0', 'v2.0.0-alpha'), ('2.0.0b0', 'v2.0.0-beta'),
+                             ('2.0.0b1', 'v2.0.0-beta.1'), ('2.0.0rc', 'v2.0.0-rc')]:
+            with self.subTest(version=version, tag=tag):
+                self.release(version, annotated=True)
+                self.git(self.checkout, 'tag', '-d', 'v' + version)
+                self.git(self.checkout, 'tag', '-a', '-m', 'SemVer release', tag)
+                for _ in range(2):
+                    result = self.call()
+                    self.assertEqual(result['status'], 'published')
+                    self.assertEqual(result['tag'], tag)
+                    self.assertEqual(result['version'], version)
+                    self.assertEqual(self.git(self.remote, 'rev-parse', tag + '^{commit}'), result['revision'])
+
+    def test_exact_package_tag_mismatch_cannot_be_bypassed_by_semver_alias(self):
+        self.release('2.0.0b0')
+        self.git(self.checkout, 'tag', '-f', 'v2.0.0b0', 'HEAD~1')
+        self.git(self.checkout, 'tag', 'v2.0.0-beta')
+        result = self.call(code=1)
+        self.assertIn('prepare local tag v2.0.0b0', result['error'])
+
     def test_forward_publication_preserves_annotated_tag_object(self):
         self.call()
         self.release("1.0.1", annotated=True)

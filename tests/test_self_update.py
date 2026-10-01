@@ -112,6 +112,29 @@ class Releases(unittest.TestCase):
             self.assertEqual(self_update.select_release(refs, '0.9.0', 'breaking'),
                              {'version': '1.0.0rc0', 'revision': 'd' * 40})
 
+    def test_semver_prerelease_tags_convert_to_package_versions(self):
+        for label, pre in [('alpha', 'a'), ('beta', 'b'), ('rc', 'rc')]:
+            with self.subTest(label=label):
+                refs = 'a' * 40 + '\trefs/tags/v1.0.0-' + label
+                self.assertEqual(self_update.select_release(refs, '0.5.3', 'breaking')['version'], '1.0.0' + pre + '0')
+                self.assertIsNone(self_update.select_release(refs, '1.0.0' + pre + '0', 'compatible'))
+                refs += '\n' + 'b' * 40 + '\trefs/tags/v1.0.0-' + label + '.10'
+                refs += '\n' + 'c' * 40 + '\trefs/tags/v1.0.0-' + label + '.10^{}'
+                self.assertEqual(self_update.select_release(refs, '1.0.0' + pre, 'compatible'),
+                                 {'version': '1.0.0' + pre + '10', 'revision': 'c' * 40})
+        for invalid in ['1.0.0-preview', '1.0.0-beta.01', '1.0.0-beta.x', '1.0.0-beta.1.2', '1.0.0-beta1']:
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(self_update.tag_version(invalid))
+
+    def test_equivalent_python_and_semver_tags_prefer_python_commit(self):
+        lines = ['a' * 40 + '\trefs/tags/v1.0.0-beta',
+                 'b' * 40 + '\trefs/tags/v1.0.0-beta^{}',
+                 'c' * 40 + '\trefs/tags/v1.0.0b0',
+                 'd' * 40 + '\trefs/tags/v1.0.0b0^{}']
+        for refs in ('\n'.join(lines), '\n'.join(reversed(lines))):
+            self.assertEqual(self_update.select_release(refs, '0.5.3', 'breaking'),
+                             {'version': '1.0.0b0', 'revision': 'd' * 40})
+
     def test_configuration_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'machine.toml'
@@ -489,6 +512,24 @@ class SelfUpdate(SetupFixture):
         with patch('agent_env_man.self_update.subprocess.run', side_effect=run), self.assertRaises(ValueError):
             self_update.perform({'settings': self.settings})
         self.assertEqual(len(calls), 1)
+
+    def test_copied_worker_converts_semver_beta_tag(self):
+        config = self.register()
+        self.release('1.0.0b1', tag='v1.0.0-beta.1')
+        self.release('1.0.0rc1', tag='v1.0.0-rc.1')
+        calls = self.root / 'semver-uv-calls.json'
+        self.uv.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
+                           'if sys.argv[-1] == "list":\n print("agent-env-man v1.0.0b0\\n - aem")\n'
+                           'else:\n Path(' + repr(str(calls)) + ').write_text(json.dumps(sys.argv[1:]))\n')
+        self.uv.chmod(0o755)
+        self_update.schedule(config)
+        child = self_update._children[-1]
+        self.finish_worker(config)
+        self.assertEqual(child.wait(timeout=15), 0)
+        result = self_update.read_result(self_update.result_path(config))
+        self.assertEqual(result['status'], 'updated')
+        self.assertEqual(result['version'], '1.0.0b1')
+        self.assertIn('@' + result['revision'], json.loads(calls.read_text())[-2])
 
     def test_actual_installed_version_prevents_cross_config_downgrade(self):
         self.register()

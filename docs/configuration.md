@@ -317,7 +317,8 @@ For a prerelease, `compatible` permits only a higher numeric subversion with the
 Changing the label, base version, or moving to a final release requires `breaking`.
 Final installations retain their existing compatible range and do not select prereleases in `compatible` mode.
 `breaking` permits any newer final or `a`/`b`/`rc` prerelease.
-Release tags use `vVERSION`, matching the package version after treating an omitted pre number as zero.
+Release tags use `vVERSION` in Python notation or supported SemVer-style `-alpha`/`-beta`/`-rc` notation with an optional `.N` number.
+Tag conversion and omitted-zero normalization must match the Python package version.
 Development, post, local versions, and untagged commits are excluded.
 See [version syntax and ordering](automation.md#update-aem-itself).
 Attempts share a fixed 86,400-second interval across startup events and are recorded before launching the worker.

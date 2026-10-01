@@ -305,6 +305,7 @@ See [AEM update guidance](docs/automation.md#update-aem-itself) for automatic up
 To publish a prepared AEM release, use `aem self publish --dry-run`, then `aem self publish`.
 This uses the recorded local installation source, or accepts `--checkout PATH` to select another AEM checkout.
 Prepare a clean committed checkout and its matching `vVERSION` tag with Git first; publication creates neither commits nor tags.
+Tags may use Python notation or `-alpha`/`-beta`/`-rc` with optional `.N` numbers; for example, `v1.0.0-beta` matches package version `1.0.0b0`.
 The current branch and release tag are published to `origin` with atomic push.
 See [release publication](docs/commands.md#self-publish) for prerequisites and preview limits.
 

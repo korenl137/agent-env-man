@@ -70,7 +70,9 @@ Final installations retain their existing compatible range and do not select pre
 `breaking` permits any newer final or prerelease version, including incompatible changes; review migration instructions before enabling it.
 Supported prereleases use Python package notation `X.Y.ZaN`, `X.Y.ZbN`, or `X.Y.ZrcN`, with an optional nonnegative numeric subversion without leading zeroes.
 An omitted number is `0`: `1.0.0rc` and `1.0.0rc0` are equivalent, and `1.0.0rc1` is their next compatible release.
-When both equivalent tags exist, update selection prefers the explicit-zero spelling.
+Git tags may also use `vX.Y.Z-alpha`, `vX.Y.Z-beta`, or `vX.Y.Z-rc`, with an optional `.N` number (for example, `v1.0.0-beta.1` maps to package version `1.0.0b1`).
+Bare `v1.0.0-beta` maps to `1.0.0b0`; package metadata and installed versions continue to use Python notation.
+When equivalent tags coexist, update selection prefers Python notation, then an explicit-zero spelling, and resolves annotated tags to their commits.
 A release may start at any supported label; earlier phases need not exist.
 Tag and package metadata comparisons accept the same omitted-zero equivalence.
 Ordering is numeric by base version, then `a` < `b` < `rc` < final, then numeric subversion.

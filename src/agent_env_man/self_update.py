@@ -73,19 +73,39 @@ def release_version(value):
             {'a': 0, 'b': 1, 'rc': 2, None: 3}[pre], int(number or 0))
 
 
+def tag_version(value):
+    """Convert supported Git version spellings to Python package notation.
+
+    Git accepts SemVer-style alpha/beta/rc labels while package metadata
+    remains in Python notation. An omitted tag subversion means zero.
+    This deliberately does not accept arbitrary SemVer prerelease labels.
+    """
+    if release_version(value) is not None:
+        return value
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r'((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-(alpha|beta|rc)(?:\.(0|[1-9][0-9]*))?', value)
+    if not match:
+        return None
+    base, label, number = match.groups()
+    return base + {'alpha': 'a', 'beta': 'b', 'rc': 'rc'}[label] + (number or '0')
+
+
 def select_release(output, current, mode):
     """Select newer release tags, preferring peeled annotated-tag commits."""
     baseline = release_version(current)
     if baseline is None:
         raise ValueError('Self-update requires an installed X.Y.Z or X.Y.Z{a|b|rc}[N] release version')
     releases = {}
+    preferences = {}
     for line in output.splitlines():
         parts = line.split()
         if len(parts) != 2 or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', parts[0]):
             continue
         revision, ref = parts
         match = re.fullmatch(r'refs/tags/v(.+?)(\^\{\})?', ref)
-        candidate = release_version(match[1]) if match else None
+        package_version = tag_version(match[1]) if match else None
+        candidate = release_version(package_version)
         if candidate is None or candidate <= baseline:
             continue
         if mode == 'compatible':
@@ -97,12 +117,12 @@ def select_release(output, current, mode):
                 continue
         if mode == 'off':
             continue
-        previous = releases.get(candidate)
-        # Bare and explicit-zero tags name the same version. Prefer the
-        # explicit spelling deterministically; peel only that selected tag.
-        if (previous is None or match[1] > previous['version']
-                or (match[1] == previous['version'] and match[2])):
-            releases[candidate] = {'version': match[1], 'revision': revision}
+        # Prefer Python tags over equivalent SemVer tags, then explicit zero
+        # over bare labels. Peel only the selected spelling's annotated tag.
+        preference = (release_version(match[1]) is not None, match[1], bool(match[2]))
+        if candidate not in releases or preference > preferences[candidate]:
+            preferences[candidate] = preference
+            releases[candidate] = {'version': package_version, 'revision': revision}
     return releases[max(releases)] if releases else None
 
 
