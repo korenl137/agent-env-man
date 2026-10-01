@@ -8,6 +8,7 @@ from .cli_runtime import Runtime
 from .commands import delivery, installation, device
 from .commands.catalog import catalog
 from .commands.settings import settings, export_command
+from .commands.documentation import docs
 from .model import default_config
 
 
@@ -26,7 +27,7 @@ def cli(ctx, config, json_output):
     ctx.obj = Runtime(config, json_output)
 
 
-for command in (delivery.bootstrap, delivery.update, delivery.publish,
+for command in (docs, delivery.bootstrap, delivery.update, delivery.publish,
                 installation.apply, installation.sync, installation.auto,
                 installation.status, installation.detach, installation.locate,
                 installation.recover, device.setup, device.self_group,

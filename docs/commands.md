@@ -16,7 +16,7 @@ Invalid numeric CLI durations (non-finite values, nonpositive timeouts, or negat
 Help exits `0`; invoking a command group without a required subcommand shows usage/help and exits `2`.
 Successful operations exit `0`; status also exits `0` when its report contains conflicts or unavailable sources.
 Callbacks have the exceptions described below.
-Documented commands, behavior, exit codes, and JSON fields are covered by the package's [compatibility policy](../CONTRIBUTING.md#versioning-and-compatibility).
+Documented commands, behavior, exit codes, and JSON fields are covered by the package's [compatibility policy](compatibility.md).
 JSON consumers must ignore unknown object fields; field additions may appear in compatible feature releases.
 Enum values are closed unless their interface explicitly documents unknown-value handling.
 JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
@@ -28,6 +28,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 
 | Command | Purpose | Network |
 | --- | --- | --- |
+| `docs` | Locate version-matched local documentation and examples. | None. |
 | `setup` | Connect or remove startup integrations and official agent skill links. | None. |
 | `self` | Inspect or queue updates of AEM itself. | Status and dry run are offline; queued workers fetch releases and install through uv. |
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
@@ -49,6 +50,18 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 It bounds each Git phase, not the entire command or filesystem copying.
 `AGENT` is currently `codex`.
 `EVENT` is `shell-start`, `agent-start`, or `interval`.
+
+## docs
+
+```text
+aem [--json] docs
+```
+
+Print the absolute path to the bundled README.md.
+With global `--json`, return `root` (the local documentation directory) and `entry` (the README path).
+The directory also contains docs/, examples/, and LICENSE.txt with working relative links.
+Lookup is offline and independent of machine configuration, catalogs, state, and setup integrations.
+Editable/source development resolves to the repository's canonical documentation.
 
 ## setup
 

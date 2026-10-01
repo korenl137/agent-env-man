@@ -8,7 +8,13 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Added
+
+- Version-matched local README, detailed docs, catalog examples, and license resources, located offline with `aem docs` independently of setup or machine configuration.
+
 ### Changed
+
+- Move the authoritative compatibility policy into bundled user documentation; keep contribution and release-history references as optional repository links and document the installed documentation strategy.
 
 - Expand CLI help with selection scope, settings stage locations and field choices, shell navigation requirements, and publication defaults without changing command behavior; define contributor guidance for concise, sufficient installed help.
 - Move detailed automation, AEM self-update, and maintenance/recovery guidance into dedicated docs guides; retain core workflows and preservation reminders in the README, and clarify contributor guidance without changing its structure or contracts.

@@ -25,8 +25,12 @@ Prepared sources remain usable offline.
 - [Automation and AEM updates](docs/automation.md): device modes, independent policies, and tool updates.
 - [Maintenance and recovery](docs/maintenance.md): conflicts, detach, backups, repair, and uninstalling.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
-- [Changelog](CHANGELOG.md): release history and upcoming changes.
-- [Contributing](CONTRIBUTING.md): development and validation contracts.
+- [Changelog](https://github.com/mirinae3145/agent-env-man/blob/master/CHANGELOG.md): release history and upcoming changes.
+- [Contributing](https://github.com/mirinae3145/agent-env-man/blob/master/CONTRIBUTING.md): development and validation contracts.
+
+The installed package includes this README, detailed docs, catalog examples, and the license text.
+Run `aem docs` to print the local README path, or `aem --json docs` for the documentation root and entry paths.
+These files match the installed package and can be read without a repository checkout or network access.
 
 ## Versioning and compatibility
 
@@ -40,7 +44,7 @@ The catalog is the user-authored interface; its integer `version` identifies a f
 In the default workflow, AEM writes machine settings through setup/bootstrap and manages saved state.
 Documented manual settings and continued operation of generated configuration and hooks are also covered by the package's compatibility policy.
 Users do not need to coordinate separate file-format releases or manually change version markers.
-See the [compatibility policy](CONTRIBUTING.md#versioning-and-compatibility) and [existing-installation precautions](docs/removed-interfaces.md).
+See the [compatibility policy](docs/compatibility.md) and [existing-installation precautions](docs/removed-interfaces.md).
 
 CLI commands show readable fields and indented lists by default.
 For scripts, add the global `--json` option before the command, for example `aem --json status`.

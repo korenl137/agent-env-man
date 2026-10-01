@@ -12,7 +12,7 @@ Their integer `version` fields identify format generations and need not change f
 Default workflows let setup/bootstrap write machine settings; direct edits to documented settings remain supported.
 AEM is responsible for compatibility handling of generated machine configuration and state, within the supported versions described below.
 Do not manually change version markers to bypass validation.
-See the [versioning policy](../CONTRIBUTING.md#versioning-and-compatibility).
+See the [versioning policy](compatibility.md).
 
 ## Paths and identifiers
 

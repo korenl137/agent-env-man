@@ -14,6 +14,7 @@ Start with `aem --help` and the relevant command's `--help` to learn the install
 Use JSON reports when subsequent actions depend on command results; a queued update is not a completed update.
 
 Read the relevant command's local help before choosing selectors or sequencing operations.
+For behavior beyond help, use `aem docs` to locate the installed README and follow its local links to the relevant command, configuration, settings, or recovery documentation.
 For staged settings, consult `aem settings --help` and the chosen subcommand's help before collection, deletion, release, or conflict resolution.
 
 ## Important operation boundaries

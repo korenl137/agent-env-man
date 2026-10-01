@@ -23,3 +23,6 @@ packages = ["agent_env_man", "agent_env_man.commands", "agent_env_man.builtin_sk
 
 [tool.setuptools.package-data]
 "agent_env_man.builtin_skills" = ["idk-aem/SKILL.md"]
+
+[tool.setuptools.cmdclass]
+build_py = "_build.BuildPy"
