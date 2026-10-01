@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Claude Code integration through the existing agent-profile boundary, preserving unrelated settings and Codex callback behavior.
 - Native Windows integration tests for encoded PowerShell hooks, literal-path shell navigation, interprocess locking, process-exit waits, and official skill link refresh.
 
+### Changed
+
+- Expand contributor guidance for designing portable implementations and tests, controlling environment-dependent fixtures, and reporting validation limits when a supported environment is unavailable.
+
 ### Fixed
 
 - Recognize Windows extended drive and UNC link destination spellings as the recorded source for skills, instruction bundles, and official skill checks, while preserving raw recovery observations and rejecting substituted aliases.
