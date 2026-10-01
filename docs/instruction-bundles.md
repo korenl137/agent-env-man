@@ -55,32 +55,35 @@ Keep the catalog outside that source folder; bootstrap generates the device bind
 Save [examples/instructions.toml](../examples/instructions.toml) as `/home/me/ai-config/instructions.toml`:
 
 ```toml
-version = 1
+version = 2
 
-[externals.personal-documents]
+[sources.personal-documents]
+type = "external"
 
 [instructions.personal]
-external = "personal-documents"
+source = "personal-documents"
 subdir = "guidance"
 entry = "start.md"
-entry_root = "agent"
-entry_destination = "AGENTS.md"
+
+[instructions.personal.install.entry]
+root = "agent"
+destination = "AGENTS.md"
 ```
 
 | Field or table | How AEM interprets this example |
 | --- | --- |
-| `version = 1` | Selects catalog schema version 1. It is not the document bundle's version. |
-| `[externals.personal-documents]` | Declares a logical external source named `personal-documents`. The empty table is intentional; its actual path belongs in machine configuration. It neither creates the source directory nor configures synchronization. |
+| `version = 2` | Selects catalog schema version 2. It is not the document bundle's version. |
+| `[sources.personal-documents]` | Declares a logical external source named `personal-documents`. Set `type = "external"`; its actual path belongs in machine configuration. It neither creates the source directory nor configures synchronization. |
 | `[instructions.personal]` | Registers a bundle named `personal`. This name identifies the source in commands and produces ownership IDs `personal:bundle`, `personal:entry`, and `personal:hook`. It does not automatically choose the installed directory name. |
-| `external = "personal-documents"` | Looks up `external_paths.personal-documents` in machine configuration to find the source root. For a Git source, use `repo` instead, as shown below. Exactly one is required. |
+| `source = "personal-documents"` | Looks up `external_paths.personal-documents` in machine configuration to find the source root. For a Git source, reference a source declared with `type = "git"`, as shown below. |
 | `subdir = "guidance"` | Appends `guidance` to the source root, selecting `/home/me/Syncthing/agent-documents/guidance`. Omit it or use `"."` to select the entire source root. |
 | `entry = "start.md"` | Selects the original file inside that bundle: `/home/me/Syncthing/agent-documents/guidance/start.md`. This is the link source, not the global destination filename. |
-| `root` (omitted) | AEM chooses `/home/me/.config/agent-env-man/machine.toml.bundles` beside the machine file. No `roots.rules` setting is needed. An explicit value can still select a configured machine root. |
-| `destination` (omitted) | Defaults to the bundle name `personal`, producing `/home/me/.config/agent-env-man/machine.toml.bundles/personal`. An explicit relative path can override it. |
-| `entry_root = "agent"` | Looks up the Codex home base `roots.agent`, here `/home/me/.codex`. The name `agent` is a lookup key; hook registration uses `hooks.json` in this directory. |
-| `entry_destination = "AGENTS.md"` | Appends this filename to the entry base. AEM links `/home/me/.codex/AGENTS.md` directly to the original `guidance/start.md`; its text remains unchanged. |
+| `install.bundle.root` (omitted) | AEM chooses `/home/me/.config/agent-env-man/machine.toml.bundles` beside the machine file. No `roots.rules` setting is needed. An explicit value can still select a configured machine root. |
+| `install.bundle.destination` (omitted) | Defaults to the bundle name `personal`, producing `/home/me/.config/agent-env-man/machine.toml.bundles/personal`. An explicit relative path can override it. |
+| `install.entry.root = "agent"` | Looks up the Codex home base `roots.agent`, here `/home/me/.codex`. The name `agent` is a lookup key; hook registration uses `hooks.json` in this directory. |
+| `install.entry.destination = "AGENTS.md"` | Appends this filename to the entry base. AEM links `/home/me/.codex/AGENTS.md` directly to the original `guidance/start.md`; its text remains unchanged. |
 
-`subdir`, `entry`, `destination`, and `entry_destination` use literal `/`-separated relative paths, not shell expressions.
+`subdir`, `entry`, `install.bundle.destination`, and `install.entry.destination` use literal `/`-separated relative paths, not shell expressions.
 Traversal such as `../` and absolute paths are rejected; only `subdir` permits `.`.
 The three installed targets must not overlap: the entry and `hooks.json` must be outside the directory owned by `personal:bundle`.
 Within one machine configuration, one instruction bundle can own the AEM hook group in a given hooks file; use distinct Codex home roots for distinct bundles.
@@ -121,13 +124,13 @@ agent = "/home/me/.codex"
 | `catalog` | Reads declarations from this local file. An absolute path selects it directly; a relative path is resolved relative to `machine.toml`'s directory. AEM does not download the catalog. |
 | `checkout_root` (omitted) | AEM reserves `/home/me/.config/agent-env-man/machine.toml.checkouts` for managed Git clones. The external-only example does not clone anything here. An explicit machine path can override it. |
 | `external_paths.personal-documents` | Binds the shared logical source name to an existing folder on this device. AEM expects `guidance/start.md` inside it for this catalog. |
-| `roots.agent` | Supplies the base to which `entry_destination` is appended. Use the Codex home where global AGENTS.md and hooks.json are discovered. |
+| `roots.agent` | Supplies the base to which `install.entry.destination` is appended. Use the Codex home where global AGENTS.md and hooks.json are discovered. |
 
 The default config directory is `$XDG_CONFIG_HOME/agent-env-man` or `~/.config/agent-env-man` on Linux/WSL, and `%LOCALAPPDATA%/agent-env-man` on Windows (falling back to `~/AppData/Local`).
 The default `agent` root is `CODEX_HOME` or `~/.codex`; `skills` defaults to `~/.agents/skills`.
 Saved roots take precedence over later environment changes.
 Optional `--root NAME=ABSOLUTE_PATH` and `--checkout-root PATH` select custom locations during bootstrap.
-An explicitly named `entry_root` other than `agent` must be supplied through `--root` or machine configuration.
+An explicitly named `install.entry.root` other than `agent` must be supplied through `--root` or machine configuration.
 For separate configurations, use `aem --config /custom/machine.toml bootstrap CATALOG ...` and retain that `--config` argument in subsequent commands.
 [examples/instructions-machine.toml](../examples/instructions-machine.toml) remains an optional manual equivalent.
 
@@ -321,18 +324,21 @@ If you detach only the directory while leaving the global entry linked, the hook
 For a new installation backed by Git, use this complete alternative catalog:
 
 ```toml
-version = 1
+version = 2
 
-[repositories.personal-documents]
+[sources.personal-documents]
+type = "git"
 repository = "https://github.com/OWNER/PERSONAL-DOCUMENTS.git"
 branch = "main"
 
 [instructions.personal]
-repo = "personal-documents"
+source = "personal-documents"
 subdir = "guidance"
 entry = "start.md"
-entry_root = "agent"
-entry_destination = "AGENTS.md"
+
+[instructions.personal.install.entry]
+root = "agent"
+destination = "AGENTS.md"
 ```
 
 Replace the example URL with your repository; it must contain the same `guidance/start.md` and auxiliary document tree as tracked files.
@@ -343,10 +349,10 @@ The other machine fields and installation commands remain the same.
 
 | Changed field | Result |
 | --- | --- |
-| `[repositories.personal-documents]` | Names one managed Git checkout that bundles and skills can explicitly share. |
+| `[sources.personal-documents]` | Names one managed Git checkout that bundles and skills can explicitly share. |
 | `repository` | Supplies the clone URL. A local Git fixture can instead use an absolute repository path. |
 | `branch = "main"` | Selects the branch to clone and fast-forward. If omitted, bootstrap discovers and records the remote's default branch. |
-| `repo = "personal-documents"` | Selects that named repository instead of looking up `external_paths`. Do not also set `external`. |
+| `source = "personal-documents"` | Selects that named repository instead of looking up `external_paths`. Set `type = "git"` on that source. |
 
 Bootstrap clones to `/home/me/.config/agent-env-man/machine.toml.checkouts/.aem-repositories/personal-documents`.
 Apply links `/home/me/.config/agent-env-man/machine.toml.bundles/personal` directly to that checkout's `guidance` directory.
@@ -356,22 +362,23 @@ Switching an already installed bundle between external and Git sources changes i
 
 ## Add Git skills alongside the external bundle
 
-The original external-only catalog needs no `[skills]` or `[repositories]` declarations.
+The original external-only catalog needs no `[skills]` or Git source declarations.
 To manage both kinds of content together, use [examples/combined-catalog.toml](../examples/combined-catalog.toml), which adds:
 
 ```toml
-[repositories.tools]
+[sources.tools]
+type = "git"
 repository = "https://github.com/OWNER/TOOLS.git"
 
 [skills.report]
-repo = "tools"
+source = "tools"
 subdir = "skills/report"
 ```
 
 Replace the repository URL with your skill repository and add `skills = "/home/me/.agents/skills"` inside the existing machine `[roots]` table.
 Bind `catalog` to the combined catalog's actual local filename.
-`repositories.tools` names the Git source; `skills.report.repo` selects it, and `subdir` selects the directory containing its tracked SKILL.md.
-The skill's omitted `root` defaults to `skills`, and its omitted `mode` defaults to `link`.
+`sources.tools` names the Git source; `skills.report.source` selects it, and `subdir` selects the directory containing its tracked SKILL.md.
+The skill's omitted `install.root` defaults to `skills`, and its omitted `install.mode` defaults to `link`.
 The registration name `report` determines the installed skill directory name.
 
 Bootstrap now prepares the tools checkout as well as validating the external instruction bundle.
@@ -388,9 +395,10 @@ The skill is not a prerequisite for the instruction bundle; they simply share on
 
 ## Existing installations
 
-Explicit `root` and `destination` settings remain supported; keeping them avoids relocating an existing installation.
-For example, `root = "rules"`, `destination = "personal"`, and machine `roots.rules = "/home/me/.agent-rules"` retain the earlier destination.
+Explicit `install.bundle.root` and `install.bundle.destination` settings remain supported; retaining their values avoids relocating an existing installation.
+For example, `install.bundle.root = "rules"`, `install.bundle.destination = "personal"`, and machine `roots.rules = "/home/me/.agent-rules"` retain the earlier destination.
 Removing those fields from an installed bundle can change its target path, so detach and deliberately reattach if you want to move to the default.
+For old catalogs, follow the [catalog v2 transition](removed-interfaces.md#catalog-v2-transition).
 Older state and generated-guide installations are not upgraded in place; follow [Removed interfaces](removed-interfaces.md) before installing the current version.
 
 ## Validation performed

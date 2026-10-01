@@ -102,21 +102,25 @@ Activate the environment or use the executable's full path for the following exa
 Save a catalog outside managed checkout storage:
 
 ```toml
-version = 1
+version = 2
 
-[repositories.tools]
+[sources.tools]
+type = "git"
 repository = "https://github.com/OWNER/TOOLS.git"
 
 [skills.report]
-repo = "tools"
+source = "tools"
 subdir = "skills/report"
 
-[externals.documents]
+[sources.documents]
+type = "external"
 
 [instructions.personal]
-external = "documents"
+source = "documents"
 entry = "AGENTS.md"
-entry_root = "agent"
+
+[instructions.personal.install.entry]
+root = "agent"
 ```
 
 Replace the repository with one containing the selected directory and its `SKILL.md`.
@@ -336,7 +340,7 @@ See `aem catalog status` or `aem status` for the last automatic result.
 
 ## Automatic updates
 
-In `policies` mode, automatic skill updates default to disabled (`trigger = "manual"`).
+In `policies` mode, automatic skill updates default to disabled (`trigger = []`).
 Opt in through the catalog:
 
 ```toml
@@ -347,7 +351,7 @@ min_interval = 600
 timeout = 5
 
 [skills.report.update]
-trigger = "manual"
+trigger = []
 ```
 
 Policies apply only to skills and do not install integrations.

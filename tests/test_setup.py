@@ -188,7 +188,7 @@ class MachineSetup(SetupFixture):
         self.require_links()
         self.setup_cli('--agent', 'codex')
         doc = tomlkit.parse(self.catalog.read_text())
-        doc['updates'] = {'defaults': {'trigger': 'agent-start', 'min_interval': 0}}
+        doc['updates'] = {'defaults': {'trigger': ['agent-start'], 'min_interval': 0}}
         self.catalog.write_text(tomlkit.dumps(doc))
         self.run_cli('bootstrap', self.catalog)
         first = self.run_cli('startup', '--trigger', 'agent-start', '--agent', 'codex')
@@ -219,10 +219,7 @@ class MachineSetup(SetupFixture):
     def test_shared_checkout_briefing_keeps_initial_revision_for_each_skill(self):
         self.require_links()
         self.setup_cli('--agent', 'codex')
-        self.catalog.write_text(tomlkit.dumps({'version': 1,
-            'repositories': {'shared': {'repository': str(self.repo)}},
-            'skills': {name: {'repo': 'shared', 'subdir': 'skills/report'} for name in ('first', 'second')},
-            'updates': {'defaults': {'trigger': 'agent-start', 'min_interval': 0}}}))
+        self.catalog.write_text(tomlkit.dumps({'version': 2, 'sources': {'shared': {'type': 'git', 'repository': str(self.repo)}}, 'skills': {name: {'subdir': 'skills/report', 'source': 'shared'} for name in ('first', 'second')}, 'updates': {'defaults': {'trigger': ['agent-start'], 'min_interval': 0}}}))
         self.run_cli('bootstrap', self.catalog)
         self.run_cli('apply')
         (self.repo / 'skills/report/helper.py').write_text('new shared revision')
@@ -264,8 +261,8 @@ class AgentInjection(SetupFixture):
     def test_multiple_agents_delivery_selection_detach_and_offline_context(self):
         self.configure()
         doc = tomlkit.parse(self.catalog.read_text())
-        del doc['instructions']['personal']['entry_root']
-        del doc['instructions']['personal']['entry_destination']
+        del doc['instructions']['personal']['install']['entry']['root']
+        del doc['instructions']['personal']['install']['entry']['destination']
         self.catalog.write_text(tomlkit.dumps(doc))
         self.setup_cli('--agent', 'codex', '--agent', 'fake')
         self.run_cli('apply')
@@ -305,7 +302,7 @@ class AgentInjection(SetupFixture):
         self.require_links()
         self.setup_cli('--agent', 'codex', '--agent', 'fake')
         doc = tomlkit.parse(self.catalog.read_text())
-        doc['updates'] = {'defaults': {'trigger': 'shell-start', 'min_interval': 0}}
+        doc['updates'] = {'defaults': {'trigger': ['shell-start'], 'min_interval': 0}}
         self.catalog.write_text(tomlkit.dumps(doc))
         self.run_cli('bootstrap', self.catalog)
         self.run_cli('apply')

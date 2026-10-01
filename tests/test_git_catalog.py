@@ -32,15 +32,14 @@ class GitCatalog(unittest.TestCase):
         self.seed = self.root / "seed"
         self.checkout = self.root / "machine.toml.catalog"
         self.entry = self.checkout / "catalogs/personal.toml"
-        self.content = self.root / "machine.toml.checkouts/tool"
+        self.content = self.root / "machine.toml.checkouts/.aem-repositories/tool"
         self.target = self.root / "installed/tool"
         self.git(self.root, "init", "--bare", "-b", "main", self.remote)
         self.git(self.root, "clone", self.remote, self.seed)
         (self.seed / "catalogs").mkdir()
         (self.seed / "skill").mkdir()
         (self.seed / "skill/SKILL.md").write_text("# Initial\n", encoding="utf-8")
-        self.document = {"version": 1, "skills": {"tool": {
-            "type": "git", "repository": str(self.remote), "subdir": "skill", "mode": "copy"}}}
+        self.document = {'version': 2, 'sources': {'tool': {'type': 'git', 'repository': str(self.remote)}}, 'skills': {'tool': {'subdir': 'skill', 'source': 'tool', 'install': {'mode': 'copy'}}}}
         self.save_remote()
 
     def git(self, path, *args):
@@ -165,6 +164,8 @@ class GitCatalog(unittest.TestCase):
         content_head = self.git(self.content, 'rev-parse', 'HEAD')
         items = json.loads(self.state())['items']
         self.document['skills']['new'] = dict(self.document['skills']['tool'])
+        self.document["sources"]["new"] = dict(self.document["sources"]["tool"])
+        self.document["skills"]["new"]["source"] = "new"
         self.save_remote()
         before = self.state()
         with patch.object(Git, 'fetch', side_effect=AssertionError('Preview fetched')):
@@ -210,6 +211,8 @@ class GitCatalog(unittest.TestCase):
         with patch.object(Git, 'fetch', side_effect=AssertionError('Failure was not throttled')):
             self.assertEqual(self.cli('catalog', 'auto', '--trigger', 'interval')['status'], 'throttled')
         self.document['skills']['fixed'] = dict(self.document['skills']['tool'])
+        self.document["sources"]["fixed"] = dict(self.document["sources"]["tool"])
+        self.document["skills"]["fixed"]["source"] = "fixed"
         self.save_remote()
         self.assertEqual(self.cli('catalog', 'update')['status'], 'updated')
 
@@ -217,7 +220,7 @@ class GitCatalog(unittest.TestCase):
         self.boot()
         self.cli('apply')
         self.enable_catalog_auto()
-        self.document['updates'] = {'defaults': {'trigger': 'agent-start', 'action': 'check'}}
+        self.document['updates'] = {'defaults': {'trigger': ['agent-start'], 'action': 'check'}}
         self.save_remote()
         self.cli('startup', '--trigger', 'agent-start')
         saved = json.loads(self.state())
@@ -297,6 +300,8 @@ class GitCatalog(unittest.TestCase):
         self.boot()
         self.cli("apply")
         self.document["skills"]["new"] = dict(self.document["skills"]["tool"])
+        self.document["sources"]["new"] = dict(self.document["sources"]["tool"])
+        self.document["skills"]["new"]["source"] = "new"
         (self.seed / "skill/SKILL.md").write_text("# New\n")
         self.save_remote()
         content_head = self.git(self.content, "rev-parse", "HEAD")
@@ -315,6 +320,8 @@ class GitCatalog(unittest.TestCase):
         self.boot()
         original = self.git(self.checkout, "rev-parse", "HEAD")
         self.document["skills"]["new"] = dict(self.document["skills"]["tool"])
+        self.document["sources"]["new"] = dict(self.document["sources"]["tool"])
+        self.document["skills"]["new"]["source"] = "new"
         self.save_remote()
         self.cli("update")
         self.cli("sync")
@@ -326,9 +333,9 @@ class GitCatalog(unittest.TestCase):
         self.boot()
         self.cli("apply")
         head, entry, items = self.git(self.checkout, "rev-parse", "HEAD"), self.entry.read_bytes(), json.loads(self.state())["items"]
-        self.save_remote("version = 1\nmisspelled = true\n")
+        self.save_remote("version = 2\nmisspelled = true\n")
         result = self.cli("catalog", "update", code=1)
-        self.assertIn("Catalog requires", result["error"])
+        self.assertIn("Catalog: expected a table", result["error"])
         self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD"), head)
         self.assertEqual(self.entry.read_bytes(), entry)
         self.assertEqual(json.loads(self.state())["items"], items)
@@ -338,7 +345,7 @@ class GitCatalog(unittest.TestCase):
     def test_incoming_relocation_is_rejected_and_deletion_keeps_installed_item(self):
         self.boot()
         self.cli("apply")
-        self.document["skills"]["tool"]["mode"] = "link"
+        self.document['skills']['tool'].setdefault('install', {})['mode'] = "link"
         self.save_remote()
         self.assertIn("detach", self.cli("catalog", "update", code=1)["error"])
         self.document["skills"].clear()
@@ -349,15 +356,32 @@ class GitCatalog(unittest.TestCase):
         self.cli("detach", "tool")
         self.assertEqual((self.target / "SKILL.md").read_text(), "# Initial\n")
 
+    def test_old_incoming_catalog_and_invalid_v2_policy_keep_current_checkout(self):
+        self.boot()
+        self.cli("apply")
+        head = self.git(self.checkout, "rev-parse", "HEAD")
+        items = json.loads(self.state())["items"]
+        entry = self.entry.read_bytes()
+        self.save_remote("version = 1\n")
+        report = self.cli("catalog", "update", code=1)
+        self.assertIn("Manually migrate", report["error"])
+        self.document["updates"] = {"defaults": {"trigger": "manual"}}
+        self.save_remote()
+        report = self.cli("catalog", "update", code=1)
+        self.assertIn("trigger must be an array", report["error"])
+        self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD"), head)
+        self.assertEqual(self.entry.read_bytes(), entry)
+        self.assertEqual(json.loads(self.state())["items"], items)
+
     def test_missing_external_binding_refuses_incoming_catalog(self):
         self.boot()
-        self.document["externals"] = {"documents": {}}
-        self.document["instructions"] = {"personal": {"external": "documents", "entry": "AGENTS.md", "entry_root": "agent"}}
+        self.document['sources'].update({'documents': {'type': 'external'}})
+        self.document["instructions"] = {"personal": {'entry': 'AGENTS.md', 'source': 'documents', 'install': {'entry': {'root': 'agent'}}}}
         self.save_remote()
         self.assertIn("external_paths", self.cli("catalog", "update", code=1)["error"])
 
     def test_initial_invalid_catalog_does_not_persist_or_clone_content(self):
-        for text in ('version = [', 'version = 1\nunknown = 1', 'version = 1\n[skills.bad]\ntype = "git"'):
+        for text in ('version = [', 'version = 2\nunknown = 1', 'version = 2\n[skills.bad]\ntype = "git"'):
             with self.subTest(text=text):
                 self.save_remote(text)
                 self.boot(code=1)
@@ -376,7 +400,7 @@ class GitCatalog(unittest.TestCase):
 
     def test_content_clone_failure_retains_valid_catalog_binding_for_retry(self):
         content_remote = self.root / "missing.git"
-        self.document["skills"]["tool"]["repository"] = str(content_remote)
+        self.document["sources"]["tool"]["repository"] = str(content_remote)
         self.save_remote()
         self.boot(code=1)
         self.assertTrue(self.config.exists())
@@ -440,6 +464,8 @@ class GitCatalog(unittest.TestCase):
     def test_publish_preview_is_offline_and_round_trip_includes_whole_repository(self):
         self.boot()
         self.document["skills"]["new"] = dict(self.document["skills"]["tool"])
+        self.document["sources"]["new"] = dict(self.document["sources"]["tool"])
+        self.document["skills"]["new"]["source"] = "new"
         self.entry.write_text(tomlkit.dumps(self.document))
         (self.checkout / "notes.txt").write_text("Included\n")
         index, state = (self.checkout / ".git/index").read_bytes(), self.state()
@@ -526,13 +552,12 @@ class GitCatalog(unittest.TestCase):
         external.mkdir()
         (external / "AGENTS.md").write_text("# External\n")
         (self.seed / "AGENTS.md").write_text("# Git instructions\n")
-        self.document["skills"]["tool"]["mode"] = "link"
-        self.document["repositories"] = {"personal": {"repository": str(self.remote)}}
-        self.document["externals"] = {"documents": {}}
+        self.document['skills']['tool'].setdefault('install', {})['mode'] = "link"
+        self.document['sources'].update({'personal': {'type': 'git', 'repository': str(self.remote)}})
+        self.document['sources'].update({'documents': {'type': 'external'}})
         self.document["instructions"] = {
-            "personal": {"repo": "personal", "entry": "AGENTS.md", "entry_root": "agent"},
-            "documents": {"external": "documents", "entry": "AGENTS.md", "entry_root": "agent",
-                          "entry_destination": "EXTERNAL.md"}}
+            "personal": {'entry': 'AGENTS.md', 'source': 'personal', 'install': {'entry': {'root': 'agent'}}},
+            "documents": {'entry': 'AGENTS.md', 'source': 'documents', 'install': {'entry': {'root': 'agent', 'destination': 'EXTERNAL.md'}}}}
         self.save_remote()
         self.boot("--external", f"documents={external}")
         self.cli("apply")

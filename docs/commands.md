@@ -154,6 +154,9 @@ Repeated `--external` binds declared external names; duplicate names in one invo
 No selection prepares all declared sources.
 Missing repositories are cloned and validated; existing checkouts are validated without pulling or resetting.
 A failed content download leaves the machine binding saved so bootstrap can be retried.
+Content installation and updates require catalog `version = 2`; see the [syntax reference](configuration.md#catalog) and [manual transition](removed-interfaces.md#catalog-v2-transition).
+Saved-state maintenance stays available with an old catalog.
+
 For a local catalog, declaration and ownership preflight failures do not save a new binding or contact repositories.
 For a missing Git catalog, bootstrap must clone the catalog into a temporary directory before validating its declarations and current ownership.
 It publishes that checkout and saves the binding only after preflight succeeds, then prepares content repositories.

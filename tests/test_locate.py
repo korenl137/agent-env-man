@@ -63,7 +63,8 @@ class Locate(unittest.TestCase):
     def test_installed_link_and_replaced_copy_do_not_silently_fall_back(self):
         self.require_links()
         import tomlkit
-        self.document['skills']['one']['mode'] = 'link'
+
+        self.document['skills']['one'].setdefault('install', {})['mode'] = 'link'
         self.catalog.write_text(tomlkit.dumps(self.document), encoding='utf-8')
         self.cli('apply', '--item', 'one')
         target = self.root / 'installed/one'

@@ -66,7 +66,7 @@ class FullAutomation(SetupFixture):
         self.run_cli('apply')
         self.run_cli('detach', 'personal:bundle', 'personal:entry')
         document = tomlkit.parse(self.catalog.read_text())
-        document['skills']['report']['update'] = {'trigger': 'manual'}
+        document['skills']['report']['update'] = {'trigger': []}
         self.catalog.write_text(tomlkit.dumps(document))
         manager = Manager(Config(self.config), State(self.configuration.state_dir))
         with patch.object(Manager, 'prepare_skills', side_effect=AssertionError('Excluded sources prepared')):
@@ -80,7 +80,7 @@ class FullAutomation(SetupFixture):
     def test_global_explicit_manual_precedence_is_preserved(self):
         self.register()
         doc = tomlkit.parse(self.catalog.read_text())
-        doc['updates'] = {'defaults': {'trigger': 'manual'}, 'policies': {'enabled': {'trigger': 'agent-start'}}}
+        doc['updates'] = {'defaults': {'trigger': []}, 'policies': {'enabled': {'trigger': ['agent-start']}}}
         doc['skills']['report']['update'] = {'policy': 'enabled'}
         self.catalog.write_text(tomlkit.dumps(doc))
         self.assertEqual(Config(self.config).full_update_policies()['report']['trigger'], ['agent-start'])

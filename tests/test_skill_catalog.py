@@ -33,7 +33,8 @@ class SkillCatalog(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.repo = self.repository("research-tools", "skills/report")
-        self.skills = {"report": {"type": "git", "repository": str(self.repo), "subdir": "skills/report"}}
+        self.catalog_sources = {'report': {'type': 'git', 'repository': str(self.repo)}}
+        self.skills = {'report': {'subdir': 'skills/report', 'source': 'report'}}
         self.save_catalog()
 
     def git(self, path, *args):
@@ -56,7 +57,7 @@ class SkillCatalog(unittest.TestCase):
         return repo
 
     def save_catalog(self):
-        self.catalog.write_text(tomlkit.dumps({"version": 1, "skills": self.skills}), encoding="utf-8")
+        self.catalog.write_text(tomlkit.dumps({'version': 2, 'sources': self.catalog_sources, 'skills': self.skills}), encoding="utf-8")
 
     def run_cli(self, *args, code=0, config=None):
         output, errors = io.StringIO(), io.StringIO()
@@ -78,7 +79,7 @@ class SkillCatalog(unittest.TestCase):
         probe.unlink()
 
     def copy_mode(self):
-        self.skills["report"]["mode"] = "copy"
+        self.skills['report'].setdefault('install', {})['mode'] = "copy"
         self.save_catalog()
 
     def update_policy(self, defaults, policies=None):
@@ -107,7 +108,7 @@ class SkillCatalog(unittest.TestCase):
         self.update_policy({"trigger": ["shell-start", "agent-start"], "action": "check"})
         self.bootstrap()
         self.run_cli("apply")
-        checkout = self.checkouts / "report"
+        checkout = self.checkouts / ".aem-repositories/report"
         head = self.git(checkout, "rev-parse", "HEAD")
         before = (self.destination / "report/SKILL.md").read_bytes()
         self.publish_skill_change()
@@ -124,9 +125,9 @@ class SkillCatalog(unittest.TestCase):
             with self.subTest(mode=mode):
                 config = self.root / f"{mode}.toml"
                 destination = self.root / f"{mode}-targets"
-                self.skills["report"]["mode"] = mode
+                self.skills['report'].setdefault('install', {})['mode'] = mode
                 self.save_catalog()
-                self.update_policy({"trigger": "shell-start"})
+                self.update_policy({'trigger': ['shell-start']})
                 self.run_cli("bootstrap", "--catalog", self.catalog, "--root", f"skills={destination}", config=config)
                 self.run_cli("apply", config=config)
                 self.publish_skill_change()
@@ -141,7 +142,7 @@ class SkillCatalog(unittest.TestCase):
         self.skills["report"]["update"] = {"policy": "observe", "timeout": 7}
         self.save_catalog()
         self.update_policy({"trigger": ["shell-start", "interval"], "min_interval": 1200},
-                           {"observe": {"action": "check", "trigger": "agent-start"}})
+                           {"observe": {'action': 'check', 'trigger': ['agent-start']}})
         self.bootstrap()
         state_path = self.config.parent / (self.config.name + ".state/state.json")
         before = state_path.read_bytes()
@@ -157,8 +158,8 @@ class SkillCatalog(unittest.TestCase):
     def test_auto_attempt_intervals_are_per_skill_and_shared_across_events(self):
         self.copy_mode()
         other = self.repository("other", ".")
-        self.skills["other"] = {"type": "git", "repository": str(other), "mode": "copy",
-                                "update": {"min_interval": 60}}
+        self.catalog_sources['other'] = {'type': 'git', 'repository': str(other)}
+        self.skills['other'] = {'update': {'min_interval': 60}, 'source': 'other', 'install': {'mode': 'copy'}}
         self.save_catalog()
         self.update_policy({"trigger": ["shell-start", "interval"], "action": "check", "min_interval": 600})
         self.bootstrap()
@@ -175,9 +176,10 @@ class SkillCatalog(unittest.TestCase):
     def test_auto_failed_skill_does_not_block_others_and_failure_is_throttled(self):
         self.copy_mode()
         other = self.repository("other", ".")
-        self.skills["other"] = {"type": "git", "repository": str(other), "mode": "copy"}
+        self.catalog_sources['other'] = {'type': 'git', 'repository': str(other)}
+        self.skills['other'] = {'source': 'other', 'install': {'mode': 'copy'}}
         self.save_catalog()
-        self.update_policy({"trigger": "shell-start"})
+        self.update_policy({'trigger': ['shell-start']})
         self.bootstrap()
         self.repo.rename(self.root / "unavailable-research-tools")
         with patch("agent_env_man.updates.time.time", return_value=1000):
@@ -190,7 +192,7 @@ class SkillCatalog(unittest.TestCase):
 
     def test_auto_preserves_modified_copies_and_detached_skills(self):
         self.copy_mode()
-        self.update_policy({"trigger": "shell-start", "min_interval": 0})
+        self.update_policy({'trigger': ['shell-start'], 'min_interval': 0})
         self.bootstrap()
         self.run_cli("apply")
         target = self.destination / "report/SKILL.md"
@@ -205,7 +207,7 @@ class SkillCatalog(unittest.TestCase):
 
     def test_auto_keeps_live_link_removal_guard(self):
         self.require_links()
-        self.update_policy({"trigger": "agent-start"})
+        self.update_policy({'trigger': ['agent-start']})
         self.bootstrap()
         self.run_cli("apply")
         (self.repo / "skills/report/SKILL.md").unlink()
@@ -226,18 +228,19 @@ class SkillCatalog(unittest.TestCase):
     def test_catalog_clones_two_independent_repositories_without_manifests(self):
         self.require_links()
         standalone = self.repository("standalone", ".")
-        self.skills["standalone"] = {"type": "git", "repository": str(standalone)}
+        self.catalog_sources['standalone'] = {'type': 'git', 'repository': str(standalone)}
+        self.skills['standalone'] = {'source': 'standalone'}
         self.save_catalog()
         before = self.catalog.read_bytes()
         self.bootstrap()
         self.assertFalse(self.destination.exists())
         self.assertEqual(len(self.run_cli("apply", "--dry-run")), 2)
         self.run_cli("apply")
-        self.assertEqual((self.destination / "report").resolve(), self.checkouts / "report/skills/report")
-        self.assertEqual((self.destination / "standalone").resolve(), self.checkouts / "standalone")
+        self.assertEqual((self.destination / "report").resolve(), self.checkouts / ".aem-repositories/report/skills/report")
+        self.assertEqual((self.destination / "standalone").resolve(), self.checkouts / ".aem-repositories/standalone")
         for name in ("report", "standalone"):
-            self.assertTrue((self.checkouts / name / ".git").is_dir())
-            self.assertFalse((self.checkouts / name / "links.conf").exists())
+            self.assertTrue((self.checkouts / ".aem-repositories" / name / ".git").is_dir())
+            self.assertFalse((self.checkouts / ".aem-repositories" / name / "links.conf").exists())
         self.assertEqual(self.catalog.read_bytes(), before)
         self.assertEqual(self.git(self.repo, "status", "--porcelain"), "")
 
@@ -246,16 +249,15 @@ class SkillCatalog(unittest.TestCase):
         second.mkdir()
         (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
         self.commit(self.repo)
-        self.skills = {"report": {"repo": "tools", "subdir": "skills/report", "mode": "copy"},
-                       "second": {"repo": "tools", "subdir": "skills/second", "mode": "copy"}}
-        self.catalog.write_text(tomlkit.dumps({"version": 1,
-                                               "repositories": {"tools": {"repository": str(self.repo)}},
-                                               "skills": self.skills}), encoding="utf-8")
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'tools', 'install': {'mode': 'copy'}},
+                       "second": {'subdir': 'skills/second', 'source': 'tools', 'install': {'mode': 'copy'}}}
+        self.catalog_sources = {'tools': {'type': 'git', 'repository': str(self.repo)}}
+        self.save_catalog()
         report = self.bootstrap()
         checkout = self.checkouts / ".aem-repositories/tools"
         self.assertEqual([entry["checkout"] for entry in report["skills"]], [str(checkout)] * 2)
         self.assertTrue((checkout / ".git").is_dir())
-        self.assertFalse((self.checkouts / "report").exists())
+        self.assertFalse((self.checkouts / ".aem-repositories/report").exists())
         self.run_cli("apply")
         self.assertTrue((self.destination / "report/SKILL.md").is_file())
         self.assertTrue((self.destination / "second/SKILL.md").is_file())
@@ -266,20 +268,19 @@ class SkillCatalog(unittest.TestCase):
         self.assertEqual((self.destination / "second/SKILL.md").read_text(), "# Updated\n")
 
     def test_shared_repository_rejects_missing_sibling_before_publish(self):
-        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
-                       "missing": {"repo": "tools", "subdir": "skills/missing"}}
-        self.catalog.write_text(tomlkit.dumps({"version": 1,
-                                               "repositories": {"tools": {"repository": str(self.repo)}},
-                                               "skills": self.skills}), encoding="utf-8")
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'tools'},
+                       "missing": {'subdir': 'skills/missing', 'source': 'tools'}}
+        self.catalog_sources = {'tools': {'type': 'git', 'repository': str(self.repo)}}
+        self.save_catalog()
         result = self.bootstrap(code=1)
         self.assertEqual([entry["status"] for entry in result["skills"]], ["failed", "failed"])
         self.assertFalse((self.checkouts / ".aem-repositories/tools").exists())
 
     def test_named_repository_reference_is_validated_before_clone(self):
-        self.skills = {"report": {"repo": "unknown", "subdir": "skills/report"}}
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'unknown'}}
         self.save_catalog()
         with patch.object(Git, "run", side_effect=AssertionError("Unexpected Git command")):
-            self.assertIn("repo must name a declared repository", self.bootstrap(code=1))
+            self.assertIn("source must name a declared source", self.bootstrap(code=1))
         self.assertFalse(self.checkouts.exists())
 
     def test_shared_repository_selective_update_retains_skill_installation_boundary(self):
@@ -287,11 +288,10 @@ class SkillCatalog(unittest.TestCase):
         second.mkdir()
         (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
         self.commit(self.repo)
-        self.skills = {"report": {"repo": "tools", "subdir": "skills/report", "mode": "copy"},
-                       "second": {"repo": "tools", "subdir": "skills/second", "mode": "copy"}}
-        self.catalog.write_text(tomlkit.dumps({"version": 1,
-                                               "repositories": {"tools": {"repository": str(self.repo)}},
-                                               "skills": self.skills}), encoding="utf-8")
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'tools', 'install': {'mode': 'copy'}},
+                       "second": {'subdir': 'skills/second', 'source': 'tools', 'install': {'mode': 'copy'}}}
+        self.catalog_sources = {'tools': {'type': 'git', 'repository': str(self.repo)}}
+        self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
         before = (self.destination / "second/SKILL.md").read_text()
@@ -309,11 +309,10 @@ class SkillCatalog(unittest.TestCase):
         second.mkdir()
         (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
         self.commit(self.repo)
-        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
-                       "second": {"repo": "tools", "subdir": "skills/second"}}
-        self.catalog.write_text(tomlkit.dumps({"version": 1,
-                                               "repositories": {"tools": {"repository": str(self.repo)}},
-                                               "skills": self.skills}), encoding="utf-8")
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'tools'},
+                       "second": {'subdir': 'skills/second', 'source': 'tools'}}
+        self.catalog_sources = {'tools': {'type': 'git', 'repository': str(self.repo)}}
+        self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
         (second / "SKILL.md").unlink()
@@ -326,11 +325,10 @@ class SkillCatalog(unittest.TestCase):
         second.mkdir()
         (second / "SKILL.md").write_text("# Second\n", encoding="utf-8")
         self.commit(self.repo)
-        self.skills = {"report": {"repo": "tools", "subdir": "skills/report"},
-                       "second": {"repo": "tools", "subdir": "skills/second"}}
-        self.catalog.write_text(tomlkit.dumps({"version": 1,
-                                               "repositories": {"tools": {"repository": str(self.repo)}},
-                                               "skills": self.skills}), encoding="utf-8")
+        self.skills = {"report": {'subdir': 'skills/report', 'source': 'tools'},
+                       "second": {'subdir': 'skills/second', 'source': 'tools'}}
+        self.catalog_sources = {'tools': {'type': 'git', 'repository': str(self.repo)}}
+        self.save_catalog()
         self.bootstrap()
         config = Config(self.config)
         source = config.sources["report"]
@@ -392,7 +390,8 @@ class SkillCatalog(unittest.TestCase):
 
     def test_root_skill_copy_excludes_git_metadata(self):
         standalone = self.repository("standalone", ".")
-        self.skills = {"standalone": {"type": "git", "repository": str(standalone), "mode": "copy"}}
+        self.catalog_sources = {'standalone': {'type': 'git', 'repository': str(standalone)}}
+        self.skills = {'standalone': {'source': 'standalone', 'install': {'mode': 'copy'}}}
         self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
@@ -400,17 +399,18 @@ class SkillCatalog(unittest.TestCase):
         self.assertFalse((target / ".git").exists())
         self.assertTrue((target / "SKILL.md").is_file())
         self.run_cli("detach", "standalone")
-        self.assertTrue((self.checkouts / "standalone/.git").is_dir())
+        self.assertTrue((self.checkouts / ".aem-repositories/standalone/.git").is_dir())
 
     def test_root_skill_link_detach_materializes_only_skill_contents(self):
         self.require_links()
         standalone = self.repository("standalone", ".")
-        self.skills = {"standalone": {"type": "git", "repository": str(standalone)}}
+        self.catalog_sources = {'standalone': {'type': 'git', 'repository': str(standalone)}}
+        self.skills = {'standalone': {'source': 'standalone'}}
         self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
         target = self.destination / "standalone"
-        before = fingerprint(self.checkouts / "standalone", exclude_git=True)
+        before = fingerprint(self.checkouts / ".aem-repositories/standalone", exclude_git=True)
         self.run_cli("detach", "standalone")
         shutil.rmtree(self.checkouts)
         self.assertFalse(target.is_symlink())
@@ -424,7 +424,7 @@ class SkillCatalog(unittest.TestCase):
         self.bootstrap()
         self.run_cli("apply")
         self.assertEqual(self.run_cli("status")["sources"][0]["branch"], "stable")
-        self.git(self.checkouts / "report", "checkout", "-b", "other")
+        self.git(self.checkouts / ".aem-repositories/report", "checkout", "-b", "other")
         self.run_cli("update", code=1)
 
     def test_missing_skill_descriptor_fails_before_publishing_checkout(self):
@@ -432,24 +432,24 @@ class SkillCatalog(unittest.TestCase):
         self.commit(self.repo)
         report = self.bootstrap(code=1)
         self.assertEqual(report["skills"][0]["status"], "failed")
-        self.assertFalse((self.checkouts / "report").exists())
+        self.assertFalse((self.checkouts / ".aem-repositories/report").exists())
         self.assertFalse(self.destination.exists())
         self.assertFalse(list(self.checkouts.glob(".aem-clone-*")))
 
     def test_unsupported_source_type_is_rejected_before_network(self):
-        self.skills["report"]["type"] = "syncthing"
+        self.catalog_sources['report']['type'] = "syncthing"
         self.save_catalog()
-        self.assertIn("only type = 'git'", self.bootstrap(code=1))
+        self.assertIn("type must be git or external", self.bootstrap(code=1))
         self.assertFalse(self.config.exists())
         self.assertFalse(self.checkouts.exists())
 
     def test_clone_failure_can_be_retried_from_saved_catalog_binding(self):
-        self.skills["report"]["repository"] = str(self.root / "missing.git")
+        self.catalog_sources['report']['repository'] = str(self.root / "missing.git")
         self.save_catalog()
         self.bootstrap(code=1)
         self.assertTrue(self.config.exists())
-        self.assertFalse((self.checkouts / "report").exists())
-        self.skills["report"]["repository"] = str(self.repo)
+        self.assertFalse((self.checkouts / ".aem-repositories/report").exists())
+        self.catalog_sources['report']['repository'] = str(self.repo)
         self.save_catalog()
         self.assertEqual(self.run_cli("bootstrap")["skills"][0]["status"], "cloned")
 
@@ -486,7 +486,7 @@ class SkillCatalog(unittest.TestCase):
                 entry = dict(self.skills["report"], subdir=subdir)
                 if subdir is None:
                     entry["subdir"] = 123
-                self.catalog.write_text(tomlkit.dumps({"version": 1, "skills": {"report": entry}}), encoding="utf-8")
+                self.catalog.write_text(tomlkit.dumps({'version': 2, 'sources': self.catalog_sources, 'skills': {'report': entry}}), encoding="utf-8")
                 self.bootstrap(code=1)
                 self.assertFalse(self.checkouts.exists())
 
@@ -504,20 +504,21 @@ class SkillCatalog(unittest.TestCase):
         self.bootstrap()
         self.run_cli("apply")
         replacement = self.repository("replacement", "skills/report")
-        self.skills["report"]["repository"] = str(replacement)
+        self.catalog_sources['report']['repository'] = str(replacement)
         self.save_catalog()
         self.run_cli("apply", code=1)
         self.run_cli("bootstrap", code=1)
-        self.assertEqual(self.git(self.checkouts / "report", "remote", "get-url", "origin"), str(self.repo))
+        self.assertEqual(self.git(self.checkouts / ".aem-repositories/report", "remote", "get-url", "origin"), str(self.repo))
 
     def test_root_git_administration_changes_are_not_skill_content_changes(self):
         self.require_links()
         standalone = self.repository("standalone", ".")
-        self.skills = {"standalone": {"type": "git", "repository": str(standalone)}}
+        self.catalog_sources = {'standalone': {'type': 'git', 'repository': str(standalone)}}
+        self.skills = {'standalone': {'source': 'standalone'}}
         self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
-        self.git(self.checkouts / "standalone", "config", "aem.test", "metadata-only")
+        self.git(self.checkouts / ".aem-repositories/standalone", "config", "aem.test", "metadata-only")
         item = self.run_cli("status")["items"][0]
         self.assertNotIn("note", item)
         self.assertEqual(item["status"], "current")
@@ -537,17 +538,18 @@ class SkillCatalog(unittest.TestCase):
         self.bootstrap()
         self.run_cli("apply")
         self.run_cli("detach", "report")
-        (self.checkouts / "report").rename(self.root / "saved-old-checkout")
+        (self.checkouts / ".aem-repositories/report").rename(self.root / "saved-old-checkout")
         replacement = self.repository("replacement", "skills/report")
-        self.skills["report"]["repository"] = str(replacement)
+        self.catalog_sources['report']['repository'] = str(replacement)
         self.save_catalog()
         self.run_cli("bootstrap")
-        self.assertEqual(self.git(self.checkouts / "report", "symbolic-ref", "--short", "HEAD"), "main")
+        self.assertEqual(self.git(self.checkouts / ".aem-repositories/report", "symbolic-ref", "--short", "HEAD"), "main")
 
     def test_root_skill_link_receives_update_without_an_apply_step(self):
         self.require_links()
         standalone = self.repository("standalone", ".")
-        self.skills = {"standalone": {"type": "git", "repository": str(standalone)}}
+        self.catalog_sources = {'standalone': {'type': 'git', 'repository': str(standalone)}}
+        self.skills = {'standalone': {'source': 'standalone'}}
         self.save_catalog()
         self.bootstrap()
         self.run_cli("apply")
@@ -563,7 +565,7 @@ class SkillCatalog(unittest.TestCase):
         with patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.symlinks", "GIT_CONFIG_VALUE_0": "false"}):
             report = self.bootstrap(code=1)
         self.assertIn("Git symlink", report["skills"][0]["error"])
-        self.assertFalse((self.checkouts / "report").exists())
+        self.assertFalse((self.checkouts / ".aem-repositories/report").exists())
 
 
 if __name__ == "__main__":

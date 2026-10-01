@@ -1,6 +1,7 @@
 """Offline Codex hook installation preserves other hooks and never grants trust."""
 
 import base64
+from copy import deepcopy
 from contextlib import ExitStack
 import json
 import os
@@ -220,9 +221,11 @@ class HookInstallation(InstructionFixture):
     def test_other_bundle_shares_one_hook_file_transaction(self):
         self.configure()
         import tomlkit
+
         doc = tomlkit.parse(self.catalog.read_text())
-        doc["instructions"]["other"] = dict(doc["instructions"]["personal"],
-            destination="other", entry_destination="OTHER.md")
+        doc["instructions"]["other"] = deepcopy(doc["instructions"]["personal"])
+        doc['instructions']['other']['install']['bundle']['destination'] = "other"
+        doc['instructions']['other']['install']['entry']['destination'] = "OTHER.md"
         self.catalog.write_text(tomlkit.dumps(doc))
         original = os.replace
         def fail_hook(src, dst):
@@ -296,7 +299,7 @@ class HookInstallation(InstructionFixture):
         import tomlkit
         doc = tomlkit.parse(self.catalog.read_text())
         del doc["instructions"]
-        doc["skills"]["other"] = {"repo": "guidance", "subdir": "."}
+        doc["skills"]["other"] = {'subdir': '.', 'source': 'guidance'}
         self.catalog.write_text(tomlkit.dumps(doc))
         self.run_cli("update", "other", code=1)
         self.assertTrue((self.agent / "AGENTS.md").is_file())
@@ -308,8 +311,7 @@ class HookInstallation(InstructionFixture):
         (self.bundle / "development/rules.md").write_text("Live source change")
         context = self.run_cli("agent-hook", "personal", "--agent", "codex")["hookSpecificOutput"]["additionalContext"]
         metadata = json.loads(context.split("\n")[1])
-        self.assertEqual(metadata, {"root": str(self.bundle), "entry": str(self.bundle / "start.md"),
-                                    "global_entry": str(self.agent / "AGENTS.md")})
+        self.assertEqual(metadata, {'root': str(self.bundle), 'entry': str(self.bundle / 'start.md'), 'global_entry': str(self.agent / 'AGENTS.md')})
         diagnostic = self.run_cli("locate", "personal")
         self.assertEqual(diagnostic["installed_root"], str(self.rules / "personal"))
         self.assertTrue(diagnostic["detached"])
@@ -317,6 +319,4 @@ class HookInstallation(InstructionFixture):
         self.assertEqual(Path(metadata["root"], "development/rules.md").read_text(), "Live source change")
         self.run_cli("detach", "personal:entry")
         context = self.run_cli("agent-hook", "personal", "--agent", "codex")["hookSpecificOutput"]["additionalContext"]
-        self.assertEqual(json.loads(context.split("\n")[1]), {
-            "root": str(self.rules / "personal"), "entry": str(self.rules / "personal/start.md"),
-            "global_entry": str(self.agent / "AGENTS.md")})
+        self.assertEqual(json.loads(context.split("\n")[1]), {'root': str(self.rules / 'personal'), 'entry': str(self.rules / 'personal/start.md'), 'global_entry': str(self.agent / 'AGENTS.md')})

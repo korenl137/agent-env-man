@@ -1,6 +1,6 @@
 # TOML configuration reference
 
-AEM reads two independent UTF-8 TOML documents, both with integer `version = 1`.
+AEM reads two independent UTF-8 TOML documents, with integer `version = 2` for the catalog and `version = 1` for the machine file.
 Filenames are arbitrary: the CLI selects a machine file, and its `catalog` field selects a local catalog or a Git repository and catalog entry.
 The catalog declares reusable content and update policies; the machine file binds them to this device.
 Installation and update commands reject unknown fields in the catalog and machine configuration.
@@ -27,60 +27,70 @@ CLI path arguments have their own resolution rules described in [Commands](comma
 
 ## Catalog
 
-The only top-level fields are `version`, `repositories`, `skills`, `externals`, `instructions`, and `updates`.
+The only top-level fields are `version`, `sources`, `skills`, `instructions`, and `updates`.
 All tables are optional; an instruction-only catalog needs no skills table.
-Skill and instruction names share a namespace.
-A named repository or external is a source declaration, not an installable item by itself.
+Skill and instruction names share a namespace; source names have a separate namespace.
+A source declaration is not an installable item by itself.
 
 ```toml
-version = 1
+version = 2
 
-[repositories.tools]
+[sources.tools]
+type = "git"
 repository = "https://github.com/OWNER/TOOLS.git"
 
+[sources.documents]
+type = "external"
+
 [skills.report]
-repo = "tools"
+source = "tools"
 subdir = "skills/report"
 
-[externals.documents]
+[skills.report.install]
+mode = "link"
 
 [instructions.personal]
-external = "documents"
+source = "documents"
 entry = "AGENTS.md"
-entry_root = "agent"
+
+[instructions.personal.install.entry]
+root = "agent"
 
 [updates.defaults]
-trigger = "manual"
+trigger = []
 ```
 
-### `repositories.NAME`
+### `sources.NAME`
 
-| Field | Type | Requirement/default |
-| --- | --- | --- |
-| `type` | String | `"git"` only; defaults to `"git"`. |
-| `repository` | String | Required Git URL, SSH repository location, or absolute local Git repository path. |
-| `branch` | String | Optional nonempty branch name; bootstrap discovers and records the remote default when absent. |
+Every source requires an explicit `type`, either `"git"` or `"external"`.
+Git sources accept only `type`, required `repository`, and optional `branch`.
+`repository` is a Git URL, SSH repository location, or absolute local repository path.
+When `branch` is absent, bootstrap discovers and records the remote default branch.
+External sources accept only `type`; their device-local paths belong in machine `external_paths.NAME`.
+External sources are supported only for instruction bundles.
+AEM neither fetches external folders nor administers the service that synchronizes them.
 
-Named repositories let multiple skills and instruction bundles share a checkout.
-All consumers are validated before bootstrap publishes that checkout.
-Direct skill declarations with equal URLs still get independent checkouts.
+Items referencing the same source name share its checkout; different names have independent checkouts even with equal URLs.
+Git storage is `CHECKOUT_ROOT/.aem-repositories/NAME`, preserving the former named-repository path.
+All consumers are validated before bootstrap publishes a shared checkout.
+Unknown source names and unknown fields are rejected.
+TOML duplicate source names are invalid, including Git/external name collisions.
 
 ### `skills.NAME`
 
 | Field | Type | Requirement/default |
 | --- | --- | --- |
-| `repo` | String | Name in `repositories`; mutually exclusive with `repository` and `branch`. |
-| `type` | String | `"git"` only; required for a direct repository, optional with `repo`. |
-| `repository` | String | Required when `repo` is absent; same syntax as named repositories. |
-| `branch` | String | Optional for a direct repository; otherwise set it on the named repository. |
-| `subdir` | String | Directory containing `SKILL.md`; defaults to `"."`. |
-| `root` | String | Optional name in machine `roots`; the target is `ROOT/NAME`. |
-| `mode` | String | `"link"` (default) or `"copy"`; machine `modes.NAME` overrides it. |
+| `source` | String | Required name of a Git source in `sources`. |
+| `subdir` | String | Directory containing the fixed entry file `SKILL.md`; defaults to `"."`. |
+| `install` | Table | Optional installation settings below. |
 | `update` | Table | Optional policy selection and overrides; see below. |
 
-With `root` omitted, selected agents supply their skill destinations.
+`skills.NAME.install` accepts only `root` and `mode`.
+`root` is an optional name in machine `roots`; the target directory is `ROOT/NAME`.
+`mode` is `"link"` (default) or `"copy"`; machine `modes.NAME` overrides it.
+With `install.root` omitted, selected agents supply their skill destinations.
 Without selected agents, machine `roots.skills` is required; bootstrap supplies its default.
-An explicit `root` overrides agent destinations; agents sharing a target share one ownership record.
+An explicit root overrides agent destinations; agents sharing a target share one ownership record.
 Skill names identify installation ownership and directory names, independently of the name inside `SKILL.md`.
 Root skills link directly to the repository root; copy and detach exclude only its top-level `.git` entry.
 Git-ignored regular files, including runtime caches, may coexist with prepared sources and are part of the directory payload.
@@ -89,35 +99,23 @@ Tracked changes and nonignored untracked files still block bootstrap, apply, and
 Fast-forwards refuse incoming paths that would overwrite ignored local files, including file/directory collisions; relocate or reconcile the conflicting files explicitly before retrying.
 Installed copies retain full-tree ownership checks, so a cache created or changed in the installed copy counts as a local edit and blocks automatic replacement.
 
-A direct repository declaration remains supported and is not a legacy format:
-
-```toml
-[skills.standalone]
-type = "git"
-repository = "git@github.com:OWNER/SKILL.git"
-```
-
-### `externals.NAME`
-
-Declare an empty table.
-Its device-local path belongs in machine `external_paths.NAME`.
-External sources are supported for instruction bundles, not skills.
-AEM neither fetches these folders nor administers the service that synchronizes them.
-
 ### `instructions.NAME`
 
 | Field | Type | Requirement/default |
 | --- | --- | --- |
-| `repo` | String | Name in `repositories`; select exactly one of `repo` and `external`. |
-| `external` | String | Name in `externals`, with a machine path binding. |
+| `source` | String | Required name of a Git or external source in `sources`; a used external source requires a machine path binding. |
 | `subdir` | String | Bundle directory under the source; defaults to `"."`. |
-| `entry` | String | Required relative path to a regular entry document inside the bundle. |
-| `root` | String | Optional machine root for bundle installation; otherwise uses `<machine-file>.bundles`. |
-| `destination` | String | Relative bundle destination; defaults to the instruction name. |
-| `entry_root` | String | Optional machine root for the global entry and hook file; otherwise uses selected agent roots. |
-| `entry_destination` | String | Relative global entry destination; defaults to the agent's entry filename (`AGENTS.md` for Codex). |
+| `entry` | String | Required relative path to a regular entry document inside the selected bundle directory. |
+| `install` | Table | Optional `bundle` and `entry` tables below. |
 
-An explicit `entry_root` selects one destination; without it at least one machine agent must be selected.
+`install.bundle` accepts only optional `root` and `destination`.
+`root` names a machine root for bundle installation; omission uses `<machine-file>.bundles`.
+`destination` is a relative bundle destination and defaults to the instruction name.
+`install.entry` accepts only optional `root` and `destination`.
+`root` names a machine root for the global entry and hook file; omission uses selected agent roots.
+`destination` is a relative global entry destination and defaults to the agent's entry filename (`AGENTS.md` for Codex).
+
+An explicit `install.entry.root` selects one destination; without it at least one machine agent must be selected.
 Bootstrap supplies `roots.agent`, but an instruction declaration must either refer to it or use an agent binding.
 Codex is the only shipped agent profile.
 An instruction creates `NAME:bundle`, `NAME:entry`, and `NAME:hook` ownership IDs.
@@ -126,7 +124,7 @@ Instruction copy modes and per-bundle automatic policies are not supported.
 Explicitly selected full device automation may prepare, update, and apply instruction bundles, while preserving detached groups.
 Changing a managed source path, target path, or mode requires detach before reconfiguration.
 AEM does not interpret document contents, reading order, or applicability.
-See the [instruction walkthrough](instruction-bundles.md).
+See the [instruction walkthrough](instruction-bundles.md) and [catalog v2 transition](removed-interfaces.md#catalog-v2-transition).
 
 ### Update policies
 
@@ -135,7 +133,7 @@ No other fields belong directly under `updates`.
 
 | Field | Type | Built-in default and constraints |
 | --- | --- | --- |
-| `trigger` | String or string array | `"manual"`; otherwise one or more unique events: `"shell-start"`, `"agent-start"`, `"interval"`. Empty arrays and mixing `manual` with events are invalid. |
+| `trigger` | String array | `[]` disables automatic execution; otherwise unique events: `"shell-start"`, `"agent-start"`, `"interval"`. Strings and `"manual"` are invalid. |
 | `action` | String | `"sync"` or `"check"`; default `"sync"`. |
 | `min_interval` | Integer or float | `600` seconds; finite and nonnegative. Boolean values are invalid. |
 | `timeout` | Integer or float | `30` seconds per Git phase; finite and positive. Boolean values are invalid. |
@@ -143,6 +141,8 @@ No other fields belong directly under `updates`.
 
 Resolution order is built-ins, catalog defaults, selected named policy, then skill-local fields.
 Only supplied fields override earlier values; trigger arrays replace earlier arrays.
+In full mode, omitted policies participate by default, but an explicit or inherited `[]` excludes the skill.
+Effective policy JSON retains the existing `["manual"]` representation for disabled automatic execution; machine policy syntax is unchanged.
 Named policies cannot inherit another policy.
 All declarations, including unused named policies, are validated before network access.
 
@@ -262,7 +262,7 @@ Setup rejects an invalid executable path before writing profiles and requires an
 
 ### Storage and validation boundaries
 
-Direct skill checkouts use `CHECKOUT_ROOT/SKILL`; named repositories use `CHECKOUT_ROOT/.aem-repositories/NAME`.
+Named Git sources use `CHECKOUT_ROOT/.aem-repositories/NAME`; former direct-skill checkouts are preserved during manual transition.
 Ownership, attempt records, and recovery journals live in sibling `<machine-file>.state`; default bundle links live in `<machine-file>.bundles`.
 Do not synchronize machine files, checkouts, or state between devices.
 Share a Git catalog through its repository, letting each device prepare its own checkout and machine binding.
@@ -354,7 +354,7 @@ Its tool stage retains the self-update release permission (`off`, `compatible`, 
 Full mode requires installer-registered runtime paths even when tool updates are off.
 
 In full mode the implicit skill trigger default becomes eligible for the full run, while explicitly declared trigger fields keep the existing precedence.
-A resulting explicit `manual` excludes a skill; other trigger lists and per-skill actions/intervals are replaced by the full-run schedule and prepare/update/apply behavior.
+A resulting explicit or inherited `[]` excludes a skill; other trigger lists and per-skill actions/intervals are replaced by the full-run schedule and prepare/update/apply behavior.
 Instruction groups with detached components are excluded together; remaining bundles participate without introducing instruction-specific policy tables.
 A shared repository can still advance live links of excluded consumers.
 Local or unbound catalogs skip Git delivery and use the existing local declarations.

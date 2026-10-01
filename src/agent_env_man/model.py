@@ -211,35 +211,14 @@ class Config(MachineFile):
                 document = tomlkit.parse(self.catalog_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise Error(f"Cannot read skill catalog {self.catalog_path}: {exc}") from exc
-        version = document.get("version")
-        allowed = {"version", "skills", "repositories", "updates", "instructions", "externals"}
-        if isinstance(version, bool) or not isinstance(version, int) or version != 1 or set(document) - allowed:
-            raise Error("Catalog requires version = 1 and only skills, repositories, updates, instructions, or externals tables")
-        skills = document.get("skills", {})
-        if not isinstance(skills, dict):
-            raise Error("Catalog skills must be a TOML table")
-        repositories = document.get("repositories", {})
-        if not isinstance(repositories, dict):
-            raise Error("Catalog repositories must be a TOML table")
-        for name, data in repositories.items():
-            identifier(name)
-            if not isinstance(data, dict) or set(data) - {"type", "repository", "branch"}:
-                raise Error(f"Invalid repository declaration: {name}")
-            if data.get("type", "git") != "git":
-                raise Error(f"Repository {name}: only type = 'git' is supported")
-            self._validate_repository(data, f"Repository {name}")
+        from .catalog_schema import normalize
+        document = normalize(document)
+        skills = document["skills"]
+        repositories = document["repositories"]
+        externals = document["externals"]
+        instructions = document["instructions"]
+        bindings = self.doc.get("external_paths", {})
         for name, data in skills.items():
-            identifier(name)
-            if not isinstance(data, dict) or set(data) - {"type", "repository", "repo", "subdir", "branch", "root", "mode", "update"}:
-                raise Error(f"Invalid skill declaration: {name}")
-            if data.get("type", "git" if "repo" in data else None) != "git":
-                raise Error(f"Skill {name}: only type = 'git' is supported")
-            if "repo" in data:
-                if ("repository" in data or "branch" in data or not isinstance(data["repo"], str)
-                        or data["repo"] not in repositories):
-                    raise Error(f"Skill {name}: repo must name a declared repository; set its branch there")
-            else:
-                self._validate_repository(data, f"Skill {name}")
             path = data.get("subdir", ".")
             if path != ".":
                 relative(path)
@@ -248,27 +227,8 @@ class Config(MachineFile):
                 raise Error(f"Skill {name}: missing target root {root!r}")
             if data.get("mode", "link") not in ("link", "copy"):
                 raise Error(f"Skill {name}: expected link or copy mode")
-        externals = document.get("externals", {})
-        instructions = document.get("instructions", {})
-        bindings = self.doc.get("external_paths", {})
-        if not all(isinstance(x, dict) for x in (externals, instructions, bindings)):
-            raise Error("externals, instructions and external_paths must be tables")
-        for name, data in externals.items():
-            identifier(name)
-            if not isinstance(data, dict) or data:
-                raise Error(f"External {name}: declare an empty table; paths belong in machine external_paths")
         for name, data in instructions.items():
-            identifier(name)
-            if name in skills:
-                raise Error(f"Instruction name collides with another source: {name}")
-            if not isinstance(data, dict) or set(data) - {"repo", "external", "subdir", "entry", "root", "destination", "entry_root", "entry_destination"}:
-                raise Error(f"Invalid instruction declaration: {name}")
-            if ("repo" in data) == ("external" in data):
-                raise Error(f"Instruction {name}: select exactly one repo or external")
             field = "repo" if "repo" in data else "external"
-            choices = repositories if field == "repo" else externals
-            if not isinstance(data[field], str) or data[field] not in choices:
-                raise Error(f"Instruction {name}: unknown {field}")
             if field == "external" and data[field] not in bindings:
                 raise Error(f"Instruction {name}: missing machine external_paths.{data[field]}")
             if data.get("subdir", ".") != ".":
@@ -298,7 +258,7 @@ class Config(MachineFile):
         from .updates import resolve_policies
 
         self._update_policies = resolve_policies(document.get("updates", {}), skills)
-        # Full mode supplies its own opt-in default; explicit catalog/manual
+        # Full mode supplies its own opt-in default; explicit empty-trigger
         # overrides still resolve through the same precedence rules.
         from .updates import TRIGGERS
         self._full_update_policies = resolve_policies(document.get('updates', {}), skills, default_trigger=list(TRIGGERS))

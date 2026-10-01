@@ -50,10 +50,11 @@ class Interfaces(unittest.TestCase):
         for version in (True, 1.0, "1", 2):
             with self.subTest(version=version), self.assertRaises(Error):
                 Config(self.machine, document={"version": version})
+        for version in (True, 2.0, "2", 1):
             catalog = self.root / "catalog.toml"
             catalog.write_text(tomlkit.dumps({"version": version}), encoding="utf-8")
             config = Config(self.machine, document={"version": 1, "catalog": str(catalog)})
-            with self.assertRaises(Error):
+            with self.subTest(catalog_version=version), self.assertRaises(Error):
                 config.catalog()
 
     def test_old_state_remains_rejected_by_installation_commands(self):
@@ -90,7 +91,7 @@ class Interfaces(unittest.TestCase):
             if "machine" in path.name:
                 continue
             document = tomlkit.parse(path.read_text(encoding="utf-8"))
-            bindings = {name: str(self.root / "externals" / name) for name in document.get("externals", {})}
+            bindings = {name: str(self.root / "externals" / name) for name, value in document.get("sources", {}).items() if value["type"] == "external"}
             machine = {"version": 1, "catalog": str(path), "external_paths": bindings,
                        "roots": {"agent": str(self.root / "agent"), "skills": str(self.root / "skills")}}
             with self.subTest(path=path.name), patch.object(Git, "run", side_effect=AssertionError("Unexpected Git")):

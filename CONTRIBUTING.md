@@ -106,12 +106,17 @@ Ignored regular contents remain part of directory payloads for hashing, copies, 
 The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
 The loader reads a local TOML file supplied directly or prepared through Git catalog delivery; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name and selects one Git repository and optional subdirectory.
-Named repository declarations let related skills share one URL, branch, and checkout; direct per-skill repository declarations remain supported.
+Catalog v2 requires named sources with explicit Git/external types and one source reference per item.
+Validate its surface syntax separately, then normalize to the existing runtime model; do not accept that private model as input.
+Keep skill installation fields under `install`, instruction installation fields under `install.bundle`/`install.entry`, and skill entry files fixed to `SKILL.md`.
+Catalog trigger arrays replace inherited values; `[]` disables automatic execution even in full mode, while omitted policies retain their full-mode participation.
+Preserve machine policy syntax, effective policy JSON, per-skill attempt records and callback contracts when normalizing catalog policies.
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
 The catalog owns repository URLs, requested branches, and declarative skill automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
 Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
 Application paths consume these prepared local checkouts without fetching.
-Share a checkout only when skills explicitly reference the same named repository; equal URLs in direct declarations do not imply shared ownership.
+Share a checkout only when skills explicitly reference the same named repository; equal URLs under different source names do not imply shared ownership.
+Preserve named-source checkout paths; do not migrate or remove old direct-declaration checkouts automatically.
 Validate every skill in a shared checkout before publishing it, and guard all active links from that checkout before advancing it.
 Keep installation ownership and automatic policies per skill, even when delivery is shared.
 Do not introduce a provider framework without a demonstrated need.
@@ -199,7 +204,8 @@ Exercise shared skill/instruction consumers, unrelated files, existing commits, 
 ## Automatic update contracts
 
 Resolve policies by explicit field override: built-in defaults, catalog-wide defaults, one named policy, then skill-local fields.
-Trigger arrays replace earlier arrays; `manual` disables all automatic events for the skill.
+Catalog trigger arrays replace earlier arrays; `[]` disables all automatic events for the skill.
+Keep the existing `["manual"]` sentinel in effective policy JSON and the existing machine policy syntax.
 Validate all policy declarations, including unused named policies, before network access.
 Keep common trigger/action/interval settings separate from source-specific delivery options; reject unsupported capabilities rather than substituting another action.
 
@@ -226,7 +232,7 @@ Apply the saved tool release permission first, then invoke the freshly installed
 Release installation/configuration locks before invoking the fresh CLI, and validate mode/runtime binding and a one-use token under its locks.
 Cancel queued work when automation settings change and prevent queued individual tool updates from surviving a switch to off/full.
 Validate and fast-forward the catalog before loading full content selection; skip transport for local/unbound catalogs.
-Full mode opts in otherwise unconfigured skills but preserves explicitly resolved manual exclusions using the existing precedence.
+Full mode opts in otherwise unconfigured skills but preserves explicit or inherited empty-trigger exclusions using the existing precedence.
 Prepare/update eligible sources before applying selected items, with no adoption, replacement, reattachment, deletion, publication, or hook trust granting.
 Keep shared-checkout validation and live-link side effects intact, including excluded consumers; document this boundary.
 Stop later stages on failure without claiming cross-repository rollback; preserve ordinary per-target journals and recovery.
@@ -264,7 +270,7 @@ Changes to delivery must exercise clone, fast-forward, dirty/divergent histories
 Catalog tests must start with repositories lacking links.conf, exercise root and nested skills, and keep the inventory independent of both checkouts and installation roots.
 Verify that missing inventory files do not prevent status from observing installed contents or detach from preserving them.
 Changes to installation must exercise unmanaged targets, local edits, directory contents, unrelated hook preservation, detach, and failure recovery.
-Policy changes must cover precedence, manual opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
+Policy changes must cover precedence, empty-trigger opt-out, event selection, offline preview/check-only behavior, per-skill throttling including failures, independent outcomes, and preservation of local edits and detached skills.
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 When adding or changing a workflow that connects multiple commands, verify that each command's outputs and selected scope match the next command's inputs and actual operation targets.
 Where source content and installed content can differ, cover link, copy, and detached states and verify which content an edit changes and which content the subsequent command consumes.

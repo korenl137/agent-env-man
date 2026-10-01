@@ -36,10 +36,7 @@ class Publication(unittest.TestCase):
         self.commit(self.seed)
         self.git(self.seed, "push", "origin", "main")
         self.catalog = self.root / "catalog.toml"
-        self.document = {"version": 1, "repositories": {"shared": {"repository": str(self.remote)}},
-                         "skills": {"one": {"repo": "shared", "subdir": "skill", "mode": "copy"},
-                                    "two": {"repo": "shared", "subdir": "skill", "mode": "copy"}},
-                         "instructions": {"personal": {"repo": "shared", "entry": "AGENTS.md", "entry_root": "agent", "entry_destination": "AGENTS.md"}}}
+        self.document = {'version': 2, 'sources': {'shared': {'type': 'git', 'repository': str(self.remote)}}, 'skills': {'one': {'subdir': 'skill', 'source': 'shared', 'install': {'mode': 'copy'}}, 'two': {'subdir': 'skill', 'source': 'shared', 'install': {'mode': 'copy'}}}, 'instructions': {'personal': {'entry': 'AGENTS.md', 'source': 'shared', 'install': {'entry': {'root': 'agent', 'destination': 'AGENTS.md'}}}}}
         self.catalog.write_text(tomlkit.dumps(self.document), encoding="utf-8")
         self.config = self.root / "machine.toml"
         self.cli("bootstrap", self.catalog, "--checkout-root", self.root / "checkouts",
@@ -169,8 +166,8 @@ class Publication(unittest.TestCase):
         external = self.root / "external"
         external.mkdir()
         (external / "AGENTS.md").write_text("# External\n", encoding="utf-8")
-        self.document["externals"] = {"documents": {}}
-        self.document["instructions"]["external"] = {"external": "documents", "entry": "AGENTS.md", "entry_root": "agent", "entry_destination": "EXTERNAL.md"}
+        self.document['sources'].update({'documents': {'type': 'external'}})
+        self.document['instructions']['external'] = {'entry': 'AGENTS.md', 'source': 'documents', 'install': {'entry': {'root': 'agent', 'destination': 'EXTERNAL.md'}}}
         self.catalog.write_text(tomlkit.dumps(self.document), encoding="utf-8")
         self.cli("bootstrap", "--external", f"documents={external}")
         result = self.cli("publish", "one", "external", code=1)

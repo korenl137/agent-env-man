@@ -1,10 +1,10 @@
 # Copy this inventory to a location you own and replace the example repositories.
-version = 1
+version = 2
 
 # These defaults apply to all skills. Hooks/schedulers must call aem auto.
 [updates.defaults]
-trigger = "manual"
-# Opt in with ["shell-start", "agent-start"] or "interval".
+trigger = []
+# Opt in with ["shell-start", "agent-start"] or ["interval"].
 action = "sync"
 min_interval = 600
 timeout = 30
@@ -12,24 +12,28 @@ timeout = 30
 [updates.policies.observe]
 action = "check"
 
-[repositories.research-tools]
+[sources.research-tools]
+type = "git"
 repository = "https://github.com/OWNER/RESEARCH-TOOLS.git"
 
 [skills.report-helper]
-repo = "research-tools"
+source = "research-tools"
 subdir = "skills/report-helper"
 
 [skills.second-helper]
-repo = "research-tools"
+source = "research-tools"
 subdir = "skills/second-helper"
 
-[skills.standalone-skill]
+[sources.standalone]
 type = "git"
 repository = "git@github.com:OWNER/STANDALONE-SKILL.git"
+
+[skills.standalone-skill]
+source = "standalone"
 # subdir defaults to "."; branch defaults to the remote's default branch.
 
 # An optional named policy plus explicit per-skill overrides:
 # [skills.report-helper.update]
 # policy = "observe"
-# trigger = "agent-start"
+# trigger = ["agent-start"]
 # min_interval = 3600

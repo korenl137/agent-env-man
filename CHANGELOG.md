@@ -10,6 +10,11 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Changed
 
+- **Breaking:** Require catalog `version = 2`, named `sources` with explicit Git/external types, one `source` reference per item, and nested skill/instruction installation tables.
+Catalog update triggers accept only event arrays; `[]` disables automatic execution, including inherited exclusions in full mode.
+Machine format/policies, state version 2, policy JSON and callbacks retain their contracts; saved-state maintenance remains available with old catalogs.
+Named checkout identities are retained; direct-declaration or relocated installations require manual detach and explicit reattachment/replacement, with old contents and backups preserved.
+See [transition instructions](docs/removed-interfaces.md#catalog-v2-transition); the next 0.x release requires a minor increase.
 - **Breaking:** Ordinary CLI commands now print human-readable fields and indented lists by default, including redirected stdout.
 Add the global `--json` option before the command to retain the existing JSON report schema; installed startup and instruction callbacks continue to emit JSON automatically.
 - **Breaking:** Replace argparse with Click command groups and consistent option scope.

@@ -23,9 +23,7 @@ class BootstrapArguments(InstructionFixture):
         (self.external / 'development').mkdir(parents=True)
         (self.external / 'AGENTS.md').write_text('Read development/rules.md\n', encoding='utf-8')
         (self.external / 'development/rules.md').write_text('Guidance\n', encoding='utf-8')
-        catalog = {'version': 1, 'skills': self.skills, 'externals': {'personal': {}},
-                   'instructions': {'personal': {'external': 'personal', 'entry': 'AGENTS.md',
-                       'entry_root': 'agent', 'entry_destination': 'AGENTS.md'}}}
+        catalog = {'version': 2, 'sources': {**self.catalog_sources, 'personal': {'type': 'external'}}, 'skills': self.skills, 'instructions': {'personal': {'entry': 'AGENTS.md', 'source': 'personal', 'install': {'entry': {'root': 'agent', 'destination': 'AGENTS.md'}}}}}
         self.catalog.write_text(tomlkit.dumps(catalog), encoding='utf-8')
         for context in (patch.object(Path, 'home', return_value=self.home),
                         patch.dict(os.environ, {'XDG_CONFIG_HOME': str(self.home / 'config'),
@@ -101,7 +99,7 @@ class BootstrapArguments(InstructionFixture):
 
     def test_multiple_bindings_and_relative_path_resolution(self):
         catalog = tomlkit.parse(self.catalog.read_text(encoding='utf-8'))
-        catalog['externals']['reference'] = {}
+        catalog['sources']['reference'] = {'type': 'external'}
         self.catalog.write_text(tomlkit.dumps(catalog), encoding='utf-8')
         other = self.root / 'reference'
         other.mkdir()

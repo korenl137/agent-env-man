@@ -1,13 +1,16 @@
-version = 1
+version = 2
 
 # External paths belong in machine.toml, never in this shared declaration.
-[externals.personal-documents]
+[sources.personal-documents]
+type = "external"
 
 [instructions.personal]
-external = "personal-documents"
+source = "personal-documents"
 subdir = "guidance"
 entry = "start.md"
-entry_root = "agent"
-entry_destination = "AGENTS.md"
+
+[instructions.personal.install.entry]
+root = "agent"
+destination = "AGENTS.md"
 
 # See docs/instruction-bundles.md for complete setup and Git alternatives.

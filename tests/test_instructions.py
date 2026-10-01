@@ -29,15 +29,14 @@ class InstructionFixture(unittest.TestCase):
         (self.bundle / "development/rules.md").write_text("User-supplied guidance\n", encoding="utf-8")
         self.rules = self.root / "installed rules"
         self.agent = self.root / "agent-home"
-        source = {"external": "personal"}
-        catalog = {"version": 1, "skills": self.skills, "externals": {"personal": {}}}
+        source = {'source': 'personal'}
+        catalog = {'version': 2, 'sources': {**self.catalog_sources, 'personal': {'type': 'external'}}, 'skills': self.skills}
         if git:
             self.git(self.external, "init", "-b", "main")
             self.commit(self.external)
-            catalog["repositories"] = {"guidance": {"repository": str(self.external)}}
-            source = {"repo": "guidance"}
-        catalog["instructions"] = {"personal": {**source, "subdir": subdir, "entry": "start.md",
-            "root": "rules", "destination": "personal", "entry_root": "agent", "entry_destination": "AGENTS.md"}}
+            catalog['sources'].update({'guidance': {'type': 'git', 'repository': str(self.external)}})
+            source = {'source': 'guidance'}
+        catalog["instructions"] = {"personal": {**source, 'subdir': subdir, 'entry': 'start.md', 'install': {'bundle': {'root': 'rules', 'destination': 'personal'}, 'entry': {'root': 'agent', 'destination': 'AGENTS.md'}}}}
         self.catalog.write_text(tomlkit.dumps(catalog), encoding="utf-8")
         self.config.write_text(tomlkit.dumps({"version": 1, "external_paths": {"personal": str(self.external)},
             "roots": {"rules": str(self.rules), "agent": str(self.agent)}}), encoding="utf-8")
@@ -107,7 +106,7 @@ class Instructions(InstructionFixture):
         # Saved active ownership must guard the entry even after declaration removal.
         doc = tomlkit.parse(self.catalog.read_text())
         del doc["instructions"]
-        doc["skills"]["other"] = {"repo": "guidance", "subdir": "."}
+        doc["skills"]["other"] = {'subdir': '.', 'source': 'guidance'}
         self.catalog.write_text(tomlkit.dumps(doc), encoding="utf-8")
         self.run_cli("update", "other", code=1)
         self.assertTrue((self.rules / "personal/start.md").exists())
@@ -121,8 +120,8 @@ class Instructions(InstructionFixture):
         self.catalog.write_text(tomlkit.dumps(doc), encoding="utf-8")
         self.run_cli("apply", code=1)
         doc["instructions"]["personal"]["entry"] = "start.md"
-        doc["instructions"]["personal"]["entry_root"] = "rules"
-        doc["instructions"]["personal"]["entry_destination"] = "personal/AGENTS.md"
+        doc['instructions']['personal']['install']['entry']['root'] = "rules"
+        doc['instructions']['personal']['install']['entry']['destination'] = "personal/AGENTS.md"
         self.catalog.write_text(tomlkit.dumps(doc), encoding="utf-8")
         self.run_cli("apply", code=1)
 
@@ -167,7 +166,7 @@ class Instructions(InstructionFixture):
         self.configure()
         self.run_cli("apply")
         doc = tomlkit.parse(self.catalog.read_text())
-        doc["instructions"]["personal"]["destination"] = "relocated"
+        doc['instructions']['personal']['install']['bundle']['destination'] = "relocated"
         self.catalog.write_text(tomlkit.dumps(doc), encoding="utf-8")
         self.run_cli("apply", code=1)
         del doc["instructions"]
@@ -182,7 +181,7 @@ class Instructions(InstructionFixture):
         self.commit(self.external)
         self.run_cli("update", "personal")
         doc = tomlkit.parse(self.catalog.read_text())
-        doc["skills"]["shared"] = {"repo": "guidance"}
+        doc["skills"]["shared"] = {'source': 'guidance'}
         self.catalog.write_text(tomlkit.dumps(doc), encoding="utf-8")
         self.run_cli("bootstrap")
         self.run_cli("apply")
@@ -208,8 +207,8 @@ class Instructions(InstructionFixture):
 
     def use_default_destination(self):
         document = tomlkit.parse(self.catalog.read_text())
-        document["instructions"]["personal"].pop("root")
-        document["instructions"]["personal"].pop("destination")
+        document['instructions']['personal']['install']['bundle'].pop('root')
+        document['instructions']['personal']['install']['bundle'].pop('destination')
         self.catalog.write_text(tomlkit.dumps(document), encoding="utf-8")
         machine = tomlkit.parse(self.config.read_text())
         machine["roots"].pop("rules")

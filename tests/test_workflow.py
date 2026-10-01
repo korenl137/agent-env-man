@@ -51,7 +51,7 @@ class Workflow(unittest.TestCase):
         self.copy_mode()
         self.bootstrap()
         target = self.destination / "report"
-        shutil.copytree(self.checkouts / "report/skills/report", target)
+        shutil.copytree(self.checkouts / ".aem-repositories/report/skills/report", target)
         self.run_cli("apply", code=1)
         self.run_cli("apply", "--item", "report", "--adopt")
         (target / "mine.txt").write_text("Mine", encoding="utf-8")
@@ -88,7 +88,7 @@ class Workflow(unittest.TestCase):
         self.require_links()
         self.bootstrap()
         self.run_cli("apply")
-        payload = self.checkouts / "report/skills/report"
+        payload = self.checkouts / ".aem-repositories/report/skills/report"
         (payload / "empty").mkdir()
         (payload / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         (payload / "run.sh").chmod(0o755)
@@ -154,7 +154,7 @@ class Workflow(unittest.TestCase):
         self.copy_mode()
         self.bootstrap()
         self.run_cli("apply")
-        checkout = self.checkouts / "report"
+        checkout = self.checkouts / ".aem-repositories/report"
         for name in ("unfinished.txt",):
             with self.subTest(name=name):
                 (checkout / name).write_text("preserve", encoding="utf-8")
@@ -200,7 +200,7 @@ class Workflow(unittest.TestCase):
         (self.repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
         self.commit(self.repo)
         self.bootstrap()
-        payload = self.checkouts / "report/skills/report"
+        payload = self.checkouts / ".aem-repositories/report/skills/report"
         cache = Path(py_compile.compile(str(payload / "helper.py"), doraise=True))
         self.run_cli("apply")
         copied_cache = self.destination / "report" / cache.relative_to(payload)
@@ -219,7 +219,7 @@ class Workflow(unittest.TestCase):
         (self.repo / ".gitignore").write_text("cache*/\n*.pyc\n", encoding="utf-8")
         self.commit(self.repo)
         self.bootstrap()
-        checkout = self.checkouts / "report"
+        checkout = self.checkouts / ".aem-repositories/report"
         head = self.git(checkout, "rev-parse", "HEAD")
         # Exercise each collision independently so one blocked path cannot mask
         # another. HEAD and the index must stay unchanged on every failure.
@@ -256,14 +256,14 @@ class Workflow(unittest.TestCase):
         self.bootstrap()
         outside = self.root / "outside.txt"
         outside.write_text("outside", encoding="utf-8")
-        (self.checkouts / "report/skills/report/cache-link").symlink_to(outside)
+        (self.checkouts / ".aem-repositories/report/skills/report/cache-link").symlink_to(outside)
         self.run_cli("apply", code=1)
         self.assertFalse((self.destination / "report").exists())
         self.assertEqual(outside.read_text(), "outside")
 
     def test_status_refresh_keeps_checkout_and_installation(self):
         target = self.installed_copy()
-        checkout = self.checkouts / "report"
+        checkout = self.checkouts / ".aem-repositories/report"
         before, head = fingerprint(target), self.git(checkout, "rev-parse", "HEAD")
         self.publish_skill_change()
         report = self.run_cli("status", "--refresh")
