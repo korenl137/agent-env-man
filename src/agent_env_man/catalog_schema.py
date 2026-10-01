@@ -9,7 +9,7 @@ from .model import Config, Error, identifier
 from .updates import TRIGGERS, policy_fields
 
 
-TOP_LEVEL = {"version", "sources", "skills", "instructions", "updates"}
+TOP_LEVEL = {"version", "sources", "skills", "instructions", "settings", "updates"}
 SKILL_FIELDS = {"source", "subdir", "install", "update"}
 INSTRUCTION_FIELDS = {"source", "subdir", "entry", "install"}
 
@@ -81,7 +81,21 @@ def validate(document):
                 table(install, {"bundle", "entry"}, f"instructions.{name}.install")
                 for part in ("bundle", "entry"):
                     table(install.get(part, {}), {"root", "destination"}, f"instructions.{name}.install.{part}")
-    collision = document.get("skills", {}).keys() & document.get("instructions", {}).keys()
+    settings = document.get("settings", {})
+    if not isinstance(settings, dict):
+        raise Error("Catalog settings must be a table")
+    for name, data in settings.items():
+        identifier(name)
+        table(data, {"source", "path", "format"}, f"settings.{name}")
+        if not isinstance(data.get("source"), str) or data["source"] not in sources:
+            raise Error(f"settings.{name}: source must name a declared source")
+        from .model import relative
+        relative(data.get("path"))
+        from .settings_formats import FORMATS
+        if not isinstance(data.get("format"), str) or data["format"] not in FORMATS:
+            raise Error(f"settings.{name}: unsupported format; choose from {', '.join(FORMATS)}")
+    names = [set(document.get(kind, {})) for kind in ("skills", "instructions", "settings")]
+    collision = (names[0] & names[1]) | (names[0] & names[2]) | (names[1] & names[2])
     if collision:
         raise Error(f"Instruction name collides with another source: {sorted(collision)[0]}")
     updates = table(document.get("updates", {}), {"defaults", "policies"}, "updates")
@@ -119,6 +133,10 @@ def normalize(document):
                 entry.update(install.get("bundle", {}))
                 entry.update({"entry_" + key: value for key, value in install.get("entry", {}).items()})
             result[kind][name] = entry
+    result["settings"] = {}
+    for name, data in document.get("settings", {}).items():
+        field = "repo" if sources[data["source"]]["type"] == "git" else "external"
+        result["settings"][name] = {field: data["source"], "path": data["path"], "format": data["format"]}
     updates = document.get("updates", {})
     result["updates"] = {"defaults": _policy_model(updates.get("defaults", {})),
                          "policies": {name: _policy_model(value) for name, value in updates.get("policies", {}).items()}}

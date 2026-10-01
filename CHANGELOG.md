@@ -10,6 +10,9 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Added
 
+- Staged application TOML settings with Git/external sources, explicit field collection, persistent deletion/release intent, source export, Git publication, conflict resolution, and grouped recovery.
+- Settings-aware locate/status and bootstrap `--setting-target` bindings; settings stages and actual files remain outside automatic/full runs.
+
 - `locate --cd` and `catalog locate --cd` enter the selected directory through the Bash, Zsh, or PowerShell setup integration; standalone use prints the directory path.
 
 ### Changed

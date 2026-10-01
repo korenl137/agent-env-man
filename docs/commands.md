@@ -167,7 +167,7 @@ The default branch is discovered and written to the machine binding; repeating r
 Catalog, checkout-root, and external CLI paths resolve relative to the working directory and are saved as absolute paths.
 Root paths must be absolute or begin with `~/`.
 Repeated `--external` binds declared external names; duplicate names in one invocation are invalid, and omitted saved bindings remain.
-`--item` selects catalog skill or instruction names for preparation, not ownership IDs or repository names.
+`--item` selects catalog skill, instruction, or setting names for preparation, not ownership IDs or repository names.
 No selection prepares all declared sources.
 Missing repositories are cloned and validated; existing checkouts are validated without pulling or resetting.
 A failed content download leaves the machine binding saved so bootstrap can be retried.
@@ -248,7 +248,7 @@ Bootstrap validates an existing catalog checkout without pulling it.
 aem update [NAME ...] [--timeout TIMEOUT]
 ```
 
-Select skill or instruction source names, or omit names for all sources.
+Select skill, instruction, or setting source names, or omit names for all sources.
 Shared checkouts advance once and guard every active link, including orphaned declarations.
 Links change immediately; copies are refreshed by apply.
 External sources only receive an existence check (`external-no-fetch`).
@@ -262,7 +262,7 @@ aem publish NAME [NAME ...] [-m MESSAGE | --message MESSAGE]
 ```
 
 Edit the prepared checkout directly, or edit through an installed link pointing to it.
-Select catalog skill or instruction bundle names, not ownership IDs or repository aliases:
+Select catalog skill, instruction bundle, or setting names, not ownership IDs or repository aliases:
 
 ```bash
 aem publish report personal --dry-run
@@ -385,7 +385,7 @@ The option cannot be combined with `--json`.
 Lookup failures leave the shell directory unchanged; help still prints normally.
 Existing shell registrations need setup run again to install this function.
 
-The agent defaults to `codex`; NAME is a catalog skill or instruction bundle name.
+The agent defaults to `codex`; NAME is a catalog skill, instruction bundle, or setting name; setting locations do not depend on an agent.
 By default, returns `root`, `entry`, `installed_root`, and `detached` from the selected agent's saved installation when one exists.
 For skills, `entry` is SKILL.md, and `location` distinguishes a linked source from a copy.
 An installed copy or detached item resolves to its preserved local contents, not the publish source.
@@ -488,3 +488,28 @@ For Codex, handled lookup errors return a structured stop response with exit `0`
 Trust remains an agent-side decision; AEM never grants it.
 
 Old source registration, `codex-hook`, and throttled `sync` syntax are removed; see [Removed interfaces](removed-interfaces.md).
+
+## Staged settings commands
+
+`bootstrap --setting-target NAME=PATH` prepares a setting stage and binds the actual application file.
+`update NAME` receives shared settings changes; `apply --item NAME` applies the stage; explicit sync updates then applies.
+Settings require explicit operations and are excluded from automatic policies and full automation.
+
+| Command | Behavior |
+| --- | --- |
+| `locate NAME [--source \| --target]` | Stage by default, shared source or actual target explicitly; `--cd` returns its directory. |
+| `export NAME... [--dry-run]` | Merge stages into Git/external sources without network access. |
+| `settings prepare NAME [--dry-run]` | Initialize from a prepared source, preserving existing stage edits. |
+| `settings collect NAME [--path JSON_ARRAY]... [--dry-run]` | Collect managed actual edits; explicitly select new fields. |
+| `settings release NAME --path JSON_ARRAY [--dry-run]` | Prepare field ownership release without deleting the actual value. |
+| `settings resolve NAME --path JSON_ARRAY --take local\|shared\|edited [--dry-run]` | Resolve shared conflicts by field or overlapping structural group. |
+
+Git `publish NAME...` includes export for selected settings and retains whole-checkout commit/push behavior; external publication remains unsupported.
+`publish --dry-run` reports planned export changes offline.
+Settings export reports `setting`, `status`, `changed` (source bytes would change), and `paths` (semantic operation changes as string arrays).
+Setting publish reports add `export` and `unpublished_settings`; ordinary publication reports may include an empty `unpublished_settings` list.
+Collection reports changed `paths`; release reports its `path`; resolve reports `remaining` conflicts.
+
+Global JSON, exit-code, locking, explicit replacement, and preview contracts remain applicable.
+Operational conflicts exit 1; malformed CLI paths and mutually exclusive locate options exit 2 before file access.
+See [Staged settings](settings-management.md) for complete behavior, locate/status fields, intent metadata, and recovery.

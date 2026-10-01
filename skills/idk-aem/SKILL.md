@@ -16,6 +16,7 @@ Use JSON reports when choosing subsequent commands; queued self-updates have not
 - `bootstrap` binds or prepares a catalog and its content sources; `apply` installs declared content from prepared local paths.
 - `catalog` commands inspect, locate, update, or publish the catalog repository. Content `update` does not refresh the catalog.
 - `update` advances selected content sources; linked installations change immediately. `sync` updates and applies; copy installations need application to receive changes.
+- `settings prepare/collect/release/resolve` operate on editable settings stages; `export` reflects a stage in a Git/external source without publishing. Settings are excluded from automatic/full runs.
 - `status` inspects installations and pending recovery. `self status` and `self update` concern AEM itself, independently of catalog content.
 - `locate` identifies installed or source paths; `publish` publishes the selected source repository. Consult command help for selectors: preparation uses catalog names, while installation may use component ownership IDs.
 
@@ -31,6 +32,13 @@ Use `aem catalog locate --cd` to enter the directory containing the catalog entr
 These commands change the calling shell's directory only through the Bash, Zsh, or PowerShell integration registered by `setup --shell`; existing registrations need setup run again and the profile reloaded to gain this function.
 Without that integration, `--cd` prints only the absolute directory path; use it as a working directory for subsequent tool calls or with `cd -- "$(aem locate NAME --cd)"` in Bash/Zsh.
 Do not combine `--cd` with `--json`, and do not assume a directory change in one tool subprocess persists in later calls.
+
+For settings, default `locate NAME` identifies the editable stage, `--source` identifies the shared file, and `--target` identifies the actual application file.
+Apply uses the stage; update receives shared changes; collection of actual edits is explicit.
+New managed fields require `settings collect NAME --path '["section","key"]'` or stage editing.
+Deletion and `settings release` have different effects; release leaves actual values in place.
+Use `settings resolve` for shared conflicts and preserve stage edits on detach.
+Git settings publication includes export; external sources support export and leave synchronization to their existing service.
 
 Publication acts on the whole selected repository, including files outside the selected skill or instruction directory.
 A supplied commit message stages all nonignored changes; without a message, publication requires a clean worktree and pushes existing commits.

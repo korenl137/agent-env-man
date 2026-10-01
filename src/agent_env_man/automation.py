@@ -102,6 +102,9 @@ def full_content(manager, timeout):
     policies = manager.config.full_update_policies()
     sources, items, excluded = [], [], []
     for name, source in manager.config.sources.items():
+        if name in manager.config._settings:
+            excluded.append({'source': name, 'reason': 'settings-manual'})
+            continue
         if name in policies and policies[name]['trigger'] == ['manual']:
             excluded.append({'source': name, 'reason': 'manual'})
             continue

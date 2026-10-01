@@ -112,7 +112,7 @@ Allow Git-ignored runtime files in checkouts while continuing to reject tracked 
 All content and catalog fast-forwards must refuse overwriting ignored local files at the Git mutation boundary; never delete caches or weaken local-file preservation to make an update succeed.
 Ignored regular contents remain part of directory payloads for hashing, copies, and detach; retain full-tree local-modification checks for installed copies and reject nested links and special files during payload validation.
 
-The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
+The primary input is a user-owned skill, instruction, and settings catalog, independent of the repositories it lists.
 The loader reads a local TOML file supplied directly or prepared through Git catalog delivery; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name and selects one Git repository and optional subdirectory.
 Catalog v2 requires named sources with explicit Git/external types and one source reference per item.
@@ -131,7 +131,8 @@ Keep installation ownership and automatic policies per skill, even when delivery
 Do not introduce a provider framework without a demonstrated need.
 Content rendering and arbitrary shell evaluation are not part of path substitution.
 The catalog is the only content declaration format.
-Do not restore source-local links.conf parsing, machine sources tables, partial application-config merging, or removed command aliases.
+Do not restore source-local links.conf parsing, machine sources tables, legacy codex-merge declarations, or removed command aliases.
+Staged application settings follow the independent contracts in [Settings management](docs/settings-management.md); they do not revive legacy installation semantics.
 Installation requires state version 2; maintenance may read the shared ownership/journal envelope of versions 1 and 2 without conversion.
 Keep detach, recover, saved-state lookup, offline status fallback, and removal-only setup independent of installation declarations.
 These paths may ignore unknown machine fields and opaque modes, but must validate the specific saved paths, blocks, groups, and observations they consume.
@@ -200,7 +201,7 @@ Verify registration, saved-binding reuse, update/bootstrap/apply and locate/edit
 
 ## Publication contracts
 
-Explicit publish selects catalog skill or instruction bundle names and groups them by the existing checkout identity, reporting all catalog consumers of each selected checkout.
+Explicit publish selects catalog skill, instruction bundle, or setting names and groups them by the existing checkout identity, reporting all catalog consumers of each selected checkout.
 Do not infer per-skill file ownership for publication: commit and push operate on the whole repository, including changes outside catalog subdirectories.
 A supplied message authorizes staging all nonignored changes; without it, require a clean worktree and publish existing commits only.
 Keep preview offline and preserve the index, HEAD, installation records, and automatic-policy attempt clocks.
@@ -352,3 +353,20 @@ For a regular uv tool installation, reinstall the updated checkout before testin
 Test setup with temporary homes and fake installer subprocesses, never actual user profiles or live remote repositories.
 Exercise repeat/add/remove, edited blocks, invalid hook files, redirected paths, grouped hook writes, partial failure/retry, offline previews, and fail-open startup.
 Shell quoting and PowerShell serialization tests do not establish native shell or Windows readiness.
+
+## Staged settings architecture
+
+Keep settings transport, editable stages, and actual application files distinct.
+Only explicit operations may collect, export, receive, or apply settings; existing full/skill automation must exclude them.
+A shared checkout update by another consumer may change the source but must not activate or rewrite its settings stage.
+
+Keep format parsing, value identity, field enumeration, and preserving edits behind the format adapter.
+Do not use TOML parser nodes as persisted ownership values or expose them in CLI reports.
+Shared intent metadata is an AEM contract, independent of the supported application format.
+The first implementation supports only TOML, atomic arrays/empty tables, and one owner per target file.
+
+Editable stages never replace trusted shared/apply comparison bases.
+Deletion, ownership release, and local detach have distinct semantics; preserve intent records for newly connected and offline devices.
+Preflight grouped settings/metadata writes before mutation and commit comparison records with their journal.
+Recovery must validate the complete group before rollback and remain compatible with existing single-target journals.
+Reuse existing whole-checkout publication and Git safety rules; field merging never reconciles Git history.

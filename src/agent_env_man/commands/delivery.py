@@ -70,6 +70,15 @@ def bootstrap_skills(config, state, args):
             raise Error(f"Duplicate --external binding: {key}")
         external_names.add(key)
         document.setdefault("external_paths", {})[key] = str(Path(location).expanduser().resolve())
+    for value in getattr(args, "setting_target", ()):
+        key, separator, location = value.partition("=")
+        if not separator or not location:
+            raise Error("--setting-target expects NAME=ABSOLUTE_PATH")
+        identifier(key)
+        target = Path(location).expanduser()
+        if not target.is_absolute():
+            raise Error("Setting target must be absolute")
+        document.setdefault("settings", {})[key] = {"target": str(target)}
     candidate = Config(config.path, document=document)
     # A remote inventory must be downloaded before its declarations can be
     # checked. Content repositories remain untouched until all preflight passes.
@@ -79,6 +88,9 @@ def bootstrap_skills(config, state, args):
         if set(args.item) - candidate.sources.keys():
             raise Error("Unknown catalog source selection")
         catalog_delivery.validate(candidate, state)
+        for value in getattr(args, "setting_target", ()):
+            if value.partition("=")[0] not in candidate._settings:
+                raise Error("--setting-target must name a catalog setting")
         manager = Manager(candidate, state)
     atomic_write(config.path, tomlkit.dumps(candidate.doc).encode("utf-8"))
     report, failed = manager.prepare_skills(args.item, timeout=args.timeout)
@@ -97,6 +109,7 @@ def bootstrap_skills(config, state, args):
 @click.option("--checkout-root", type=click.Path(path_type=Path), help="Storage for managed checkouts.")
 @click.option("--root", multiple=True, metavar="NAME=PATH", help="Bind a destination root; repeat for multiple roots.")
 @click.option("--external", multiple=True, metavar="NAME=PATH", help="Bind an external source; repeat for multiple sources.")
+@click.option("--setting-target", multiple=True, metavar="NAME=PATH", help="Bind a setting target file.")
 @item_option
 @timeout_option
 @catalog_policy_options
@@ -124,6 +137,6 @@ def update(runtime, source, timeout):
 @timeout_option
 @pass_runtime
 def publish(runtime, source, message, dry_run, timeout):
-    """Publish whole checkouts selected by skill or instruction name."""
+    """Export selected settings and publish whole checkouts by catalog item name."""
     return runtime.run(lambda session: session.manager.publish(source, message=message, dry_run=dry_run, timeout=timeout))
 

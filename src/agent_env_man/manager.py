@@ -88,6 +88,13 @@ class Manager:
                     item = self.config.declarations(skill_source)[0]
                     if item.kind == "skill":
                         git.skill_descriptor(prepared, item.relative)
+                    elif item.kind == "setting":
+                        from .settings import Bundle, metadata_path
+                        git.tracked_payload(prepared, item.relative)
+                        Bundle.load(local_path / item.relative, metadata_path(local_path / item.relative),
+                                    format=self.config._settings[skill_name]["format"])
+                        if metadata_path(local_path / item.relative).exists():
+                            git.tracked_payload(prepared, item.relative + ".aem.toml")
                     else:
                         git.instruction_descriptor(prepared, item.relative, item.entry)
                     payload = local_path / item.relative
@@ -129,6 +136,16 @@ class Manager:
             for skill_name, _ in selected:
                 self.state.data["sources"].setdefault(skill_name, {})["last_attempt"] = now()
             self.state.save()
+        from .settings import Settings
+        ready_names = {entry.get("skill", entry.get("source")) for entry in report
+                       if entry.get("status") in ("cloned", "already-prepared", "external-ready")}
+        for name, source in sources.items():
+            if name in self.config._settings and name in ready_names and (not names or name in names):
+                try:
+                    report.append(Settings(self).prepare(self.config.declarations(source)[0]))
+                except (Error, OSError, ValueError) as exc:
+                    failed = True
+                    report.append({"setting": name, "status": "failed", "error": str(exc)})
         return report, failed
 
     def items(self):
@@ -140,7 +157,7 @@ class Manager:
 
     @staticmethod
     def matches(item, requested):
-        logical = item.source_name if item.kind == "skill" else f"{item.source_name}:{item.id.split('@')[0]}"
+        logical = item.source_name if item.kind in ("skill", "setting") else f"{item.source_name}:{item.id.split('@')[0]}"
         return item.key in requested or logical in requested
 
     def selected(self, requested=(), *, reattach=False, agent=None):
@@ -149,7 +166,7 @@ class Manager:
         # likewise needs a usable entry. Flags still require explicit selection.
         requested = set(requested)
         expanded = {i.key for i in all_items if self.matches(i, requested)}
-        logical = {i.source_name if i.kind == "skill" else f"{i.source_name}:{i.id.split('@')[0]}" for i in all_items}
+        logical = {i.source_name if i.kind in ("skill", "setting") else f"{i.source_name}:{i.id.split('@')[0]}" for i in all_items}
         requested = expanded | (requested - logical - {i.key for i in all_items})
         for item in all_items:
             if item.key in requested and item.kind in ("instruction-entry", "instruction-hook"):
@@ -165,13 +182,20 @@ class Manager:
         self.check_destinations([i for i in all_items if i.key not in detached])
         if agent is not None:
             profile(agent)
-            items = [i for i in items if agent in (i.agents or (i.agent,))]
+            items = [i for i in items if (i.kind == "setting" or agent in (i.agents or (i.agent,)))]
         self.check_destinations(items)
         return items
 
     def check_destinations(self, items):
         # Include inactive/orphaned ownership, not only the current catalog.
         owners = {k: Path(r["target"]) for k, r in self.state.data["items"].items() if not r.get("detached")}
+        stage_roots = {Path(r["stage_root"]).parent for r in self.state.data["items"].values()
+                       if r.get("kind") == "setting"}
+        if getattr(self.config, "_settings", {}):
+            stage_roots.add(self.config.path.parent / (self.config.path.name + ".stages"))
+        if any(overlaps(target, root) for target in list(owners.values()) + [i.target for i in items]
+               for root in stage_roots):
+            raise Error("Managed targets must be separate from settings stages")
         for item in items:
             old = self.state.data["items"].get(item.key)
             if old and not old.get("detached") and (old["target"] != str(item.target) or old["mode"] != item.mode
@@ -190,6 +214,9 @@ class Manager:
             owners[item.key] = item.target
 
     def payload(self, item):
+        if item.kind == "setting":
+            from .settings import Settings
+            Settings(self).source(item)
         root = self.config.sources[item.source_name].path
         # Intermediate source symlinks would bypass directory-tree validation.
         cursor = item.source
@@ -206,7 +233,7 @@ class Manager:
             raise Error(f"{item.key}: instruction entry must be a regular file")
         return fingerprint(item.source, exclude_git=item.kind in ("skill", "instruction", "instruction-hook") and item.relative == ".")
 
-    def locate(self, name, agent="codex", *, source=False):
+    def locate(self, name, agent="codex", *, source=False, target=False):
         """Locate saved content by default, or current catalog source content explicitly.
 
         Saved locations take precedence even when broken: never silently redirect
@@ -215,6 +242,19 @@ class Manager:
         """
         self.state.ready()
         identifier(name)
+        from .settings import Settings
+        if f"{name}:settings" in self.state.data["items"]:
+            if source:
+                self.config = Config(self.config.path)
+            return Settings(self).locate(name, source=source, target=target)
+        if not any(r.get("source_name") == name for r in self.state.data["items"].values()):
+            current = Config(self.config.path)
+            current.catalog()
+            if name in current._settings:
+                self.config = current
+                return Settings(self).locate(name, source=source, target=target)
+        if target:
+            raise Error("--target is supported only for settings")
         profile(agent)
         if not source:
             record = self.state.data["items"].get(f"{name}:bundle{suffix(agent)}")
@@ -244,10 +284,10 @@ class Manager:
         config = Config(self.config.path)
         sources = config.sources
         if name not in sources:
-            raise Error(f"{name}: unknown catalog skill or instruction bundle")
+            raise Error(f"{name}: unknown catalog skill, instruction bundle, or setting")
         selected = sources[name]
         items = [i for i in config.declarations(selected) if i.kind in ("skill", "instruction")
-                 and agent in (i.agents or (i.agent,))]
+                 and (i.kind == "setting" or agent in (i.agents or (i.agent,)))]
         if not items:
             raise Error(f"{name}: no declaration for agent {agent}")
         item = items[0]
@@ -496,6 +536,10 @@ class Manager:
         pending = self.state.data.get("pending")
         if pending is None:
             return
+        if pending.get("operation") == "settings-group":
+            from .settings import recover_group
+            recover_group(self.state)
+            return
         if not all(k in pending for k in ("target", "backup", "stage", "before", "after")):
             raise Error("Incomplete recovery journal; cannot safely recover")
         target, backup, stage = (saved_path(pending[k]) for k in ("target", "backup", "stage"))
@@ -547,6 +591,12 @@ class Manager:
         if (adopt or replace) and not requested:
             raise Error("--adopt and --replace require explicit --item selections")
         items = self.selected(requested, reattach=reattach, agent=agent)
+        from .settings import Settings, transaction
+        settings = Settings(self)
+        setting_items = [i for i in items if i.kind == "setting"]
+        items = [i for i in items if i.kind != "setting"]
+        setting_plans = [(i, *settings.apply_plan(i, replace=replace and self.matches(i, requested), reattach=reattach))
+                         for i in setting_items]
         revisions = {}
         for name in {i.source_name for i in items}:
             source = self.config.sources[name]
@@ -579,6 +629,9 @@ class Manager:
         if not dry_run:
             for plan in grouped:
                 self.install(plan)
+        for item, writes, record in setting_plans:
+            transaction(self.state, writes, {item.key: record}, dry_run=dry_run)
+            report.append({"item": item.key, "action": "apply", "target": str(item.target)})
         return report
 
     def group_hooks(self, plans):
@@ -613,7 +666,7 @@ class Manager:
         requested = set(keys)
         records = self.state.data["items"]
         def logical(key, record):
-            return record.get("source_name") if record.get("kind") == "skill" else key.split('@')[0]
+            return record.get("source_name") if record.get("kind") in ("skill", "setting") else key.split('@')[0]
         expanded = [k for k, r in records.items() if k in requested or logical(k, r) in requested]
         unknown = requested - records.keys() - {logical(k, r) for k, r in records.items()}
         if unknown:
@@ -639,6 +692,12 @@ class Manager:
             if old.get("detached"):
                 continue
             target = saved_path(old.get("target"))
+            if old.get("kind") == "setting":
+                from .settings import Settings, regular
+                Settings(self).working(old, conflicts=True)
+                regular(target, missing=True)
+                untouched.append((key, dict(old, detached=True)))
+                continue
             if not exists(target):
                 raise Error(f"{key}: target is missing; cannot preserve usable contents")
             record = dict(old, detached=True)
@@ -674,7 +733,7 @@ class Manager:
         self.state.ready()
         sources = self.config.sources
         if not names or set(names) - sources.keys():
-            raise Error("publish requires known catalog skill or instruction bundle names")
+            raise Error("publish requires known catalog skill, instruction bundle, or setting names")
         if message is not None and not message.strip():
             raise Error("--message must not be empty")
         groups = {}
@@ -696,8 +755,29 @@ class Manager:
                 source = self.delivery_source(source)
                 git = Git(timeout)
                 report.update(git.publication(source))
+                from .settings import Settings, changed, Bundle
+                settings = Settings(self)
+                setting_names = [n for n in selected if n in self.config._settings]
+                report["unpublished_settings"] = [n for n, _ in members if n not in selected and n in self.config._settings
+                    and (r := settings.record(n, required=False))
+                    and changed(Bundle.from_snapshot(r["shared"]), settings.working(r, conflicts=True))]
+                if setting_names:
+                    if not dry_run:
+                        git.fetch(source)
+                        if git.relation(source) not in ("ahead", "equal-at-last-fetch"):
+                            raise Error("Reconcile Git history before settings export/publication")
+                    report["export"] = settings.export(setting_names, dry_run=True)
+                    if message is None and (any(e["changed"] for e in report["export"]) or report["changes"]):
+                        raise Error("Settings changes require --message for publication")
+                    if not dry_run:
+                        report["export"] = settings.export(setting_names)
                 if not dry_run:
                     git.publish(source, report, message=message)
+                    for setting_name in setting_names:
+                        key = f"{setting_name}:settings"
+                        self.state.data["items"][key]["published"] = self.state.data["items"][key]["shared"]
+                    if setting_names:
+                        self.state.save()
             except (Error, OSError) as exc:
                 failed = True
                 report.update(status="failed", error=str(exc))
@@ -725,7 +805,8 @@ class Manager:
             source_state = self.state.data["sources"].setdefault(name, {})
             try:
                 if source.git:
-                    Git(timeout).update(self.delivery_source(source), self.state.data["items"], source_state)
+                    Git(timeout).update(self.delivery_source(source), self.state.data["items"], source_state,
+                        validate_candidate=lambda git, src, rev: self.validate_settings_revision(git, src, rev, members))
                     status = "updated"
                 else:
                     if not source.path.is_dir():
@@ -738,6 +819,12 @@ class Manager:
                             {key: source_state[key] for key in ("last_fetch", "observed_revision", "last_update", "revision", "error")
                              if key in source_state})
                 results.extend({"source": skill_name, "status": status} for skill_name, _ in selected)
+                from .settings import Settings
+                for selected_name, _ in selected:
+                    if selected_name in self.config._settings:
+                        received = Settings(self).receive(selected_name)
+                        results.append(received)
+                        failed |= received["status"] == "conflict"
             except (Error, OSError) as exc:
                 failed = True
                 for skill_name, _ in selected:
@@ -747,6 +834,24 @@ class Manager:
                 self.state.data["sources"].setdefault(skill_name, {})["last_attempt"] = now()
             self.state.save()
         return results, failed
+
+    def validate_settings_revision(self, git, source, revision, members):
+        """Reject invalid incoming settings before advancing a shared checkout."""
+        from .settings import Bundle
+        for name, _ in members:
+            if name not in self.config._settings:
+                continue
+            path = self.config._settings[name]["path"]
+            snapshot = {}
+            for key, entry in (("config", path), ("management", path + ".aem.toml")):
+                tree = git.run(source.path, "ls-tree", "-z", revision, "--", entry).stdout
+                if not tree and key == "management":
+                    snapshot[key] = ""
+                    continue
+                if not tree or tree.split(" ", 1)[0] not in ("100644", "100755"):
+                    raise Error(f"{name}: settings must be tracked regular files")
+                snapshot[key] = git.run(source.path, "show", f"{revision}:{entry}", strict_utf8=True).stdout
+            Bundle.from_snapshot(snapshot, format=self.config._settings[name]["format"])
 
     def item_status(self, item, old):
         if old and old.get("detached"):
@@ -821,6 +926,14 @@ class Manager:
                         continue
                     item_entry = {"item": item.key, "target": str(item.target), "mode": item.mode}
                     old = self.state.data["items"].get(item.key)
+                    if item.kind == "setting":
+                        from .settings import Settings
+                        try:
+                            item_entry.update(Settings(self).status(old) if old else {"status": "not-prepared"})
+                        except (Error, OSError, ValueError) as exc:
+                            item_entry.update(status="unavailable", error=str(exc))
+                        report["items"].append(item_entry)
+                        continue
                     if old:
                         item_entry["installation"] = self.installed_status(old)
                     try:
@@ -873,6 +986,9 @@ class Manager:
                 return "unmanaged"
             if actual["kind"] == "missing":
                 return "missing"
+            if record.get("kind") == "setting":
+                from .settings import Settings
+                return Settings(self).status(record)["status"]
             if record["mode"] == "link":
                 if actual != {"kind": "link", "to": record["source"]}:
                     return "modified-locally"

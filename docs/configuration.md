@@ -27,7 +27,7 @@ CLI path arguments have their own resolution rules described in [Commands](comma
 
 ## Catalog
 
-The only top-level fields are `version`, `sources`, `skills`, `instructions`, and `updates`.
+The only top-level fields are `version`, `sources`, `skills`, `instructions`, `settings`, and `updates`.
 All tables are optional; an instruction-only catalog needs no skills table.
 Skill and instruction names share a namespace; source names have a separate namespace.
 A source declaration is not an installable item by itself.
@@ -67,7 +67,7 @@ Git sources accept only `type`, required `repository`, and optional `branch`.
 `repository` is a Git URL, SSH repository location, or absolute local repository path.
 When `branch` is absent, bootstrap discovers and records the remote default branch.
 External sources accept only `type`; their device-local paths belong in machine `external_paths.NAME`.
-External sources are supported only for instruction bundles.
+External sources support instruction bundles and staged settings; skills still require Git sources.
 AEM neither fetches external folders nor administers the service that synchronizes them.
 
 Items referencing the same source name share its checkout; different names have independent checkouts even with equal URLs.
@@ -368,3 +368,15 @@ Instruction groups with detached components are excluded together; remaining bun
 A shared repository can still advance live links of excluded consumers.
 Local or unbound catalogs skip Git delivery and use the existing local declarations.
 Mode, schedule, or runtime changes cancel queued work; the fresh continuation also verifies the saved request binding before advancing content.
+
+## Application settings declarations and bindings
+
+Catalog `[settings.NAME]` requires `source` (a declared Git/external source), `path` (a literal source-relative settings file), and `format` (currently only `"toml"`).
+No other item fields are accepted; names cannot collide with skills or instructions.
+Machine `[settings.NAME]` requires only `target`, an absolute application-file path or `~/...`.
+Bootstrap `--setting-target NAME=PATH` persists these bindings and preserves omitted values.
+
+Catalog version remains 2, machine version 1, and state envelope version 2.
+Existing states require no conversion; new settings records and grouped journals are interpreted by the current AEM.
+Older AEM versions cannot operate on these new declarations or recovery operations.
+See [Staged settings](settings-management.md) for the canonical metadata grammar, storage, ownership, and merge semantics.

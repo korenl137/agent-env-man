@@ -1,7 +1,7 @@
 # Agent Environment Manager (AEM)
 
 Install and update AI agent skills and personal instruction bundles from a user-owned TOML catalog, supplied as a local file or delivered through Git.
-Skills stay in their own Git repositories; instructions can come from Git or an existing local folder.
+Skills stay in their own Git repositories; instructions and staged application settings can come from Git or an existing local folder.
 Upstream repositories need no AEM manifest.
 
 ```text
@@ -21,6 +21,7 @@ Prepared sources remain usable offline.
 - [TOML specification](docs/configuration.md): every field, default, constraint, and path rule.
 - [Command reference](docs/commands.md): complete command and option list.
 - [Instruction walkthrough](docs/instruction-bundles.md): external and Git bundles on Linux/WSL and Windows.
+- [Staged settings](docs/settings-management.md): edit and share selected application TOML fields.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
 - [Changelog](CHANGELOG.md): release history and upcoming changes.
 - [Contributing](CONTRIBUTING.md): development and validation contracts.
@@ -214,7 +215,7 @@ aem status --refresh             # Fetch observations without advancing checkout
 aem locate personal              # Resolve installed instruction paths.
 ```
 
-`bootstrap --item NAME` and `update NAME` select skill or instruction source names.
+`bootstrap --item NAME` and `update NAME` select skill, instruction, or setting source names.
 `apply --item report` selects a skill; `apply --item personal:entry` includes the entry's bundle and hook.
 `sync --item` filters only installation, while its update phase still visits all sources.
 See [Commands](docs/commands.md) for all arguments, previews, callbacks, and exit codes.
@@ -231,13 +232,33 @@ aem publish report -m "Clarify guidance"    # Commit checkout changes and push.
 aem publish report                         # Push changes already committed.
 ```
 
-Pass multiple names to publish several sources; shared checkouts are grouped and processed once, with all connected skills and instructions listed.
+Pass multiple names to publish several sources; shared checkouts are grouped and processed once, with all connected skills, instructions, and settings listed.
 Selection covers the whole repository, including files outside declared skills.
 The optional dry run is offline; publication fetches first and leaves behind/diverged histories for explicit reconciliation.
 A failed push retains the local commit for retry.
 For copy installations, edit the checkout and apply after committing; installed-copy edits are not collected automatically.
 External-folder synchronization stays with its existing service.
 See [publish](docs/commands.md#publish) for commit scope, Git settings, and failure behavior.
+
+## Application settings
+
+Manage selected application TOML fields through an editable local stage.
+Declare `[settings.NAME]` with `source`, `path`, and `format = "toml"` in the catalog, then bind its actual file:
+
+```bash
+aem bootstrap /absolute/catalog.toml --setting-target editor=/absolute/app/config.toml
+aem locate editor                         # Edit the stage at the reported entry.
+aem apply --item editor --dry-run
+aem apply --item editor
+aem settings collect editor               # Collect edits to existing managed fields.
+aem export editor                         # Reflect the stage in Git/external source.
+aem publish editor -m "Update preferences" # Export, commit, and push a Git source.
+```
+
+Update receives shared changes without applying them; publication never collects actual settings automatically.
+Unmanaged fields remain local, deleted fields propagate through metadata, and explicit release preserves actual values.
+Settings participate only in explicit commands, not full or skill automation.
+See [Staged settings](docs/settings-management.md) for declarations, conflicts, deletion/release, and recovery.
 
 ## Device automation modes
 

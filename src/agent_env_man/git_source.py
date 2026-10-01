@@ -216,7 +216,7 @@ class Git:
         if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
             raise Error(f"{source.name}: skill contains a Git symlink or submodule")
 
-    def update(self, source: Source, records: dict, source_state: dict):
+    def update(self, source: Source, records: dict, source_state: dict, *, validate_candidate=None):
         self.clean(source)
         candidate = self.fetch(source)
         source_state.update(last_fetch=now(), observed_revision=candidate)
@@ -224,6 +224,8 @@ class Git:
         if relation in ("ahead", "diverged", "unknown"):
             raise Error(f"{source.name}: {relation}; reconcile Git history manually")
         self.guard_links(source, candidate, records)
+        if validate_candidate is not None:
+            validate_candidate(self, source, candidate)
         self.clean(source)
         self.fast_forward(source, candidate)
         source_state.update(last_update=now(), revision=candidate, error=None)

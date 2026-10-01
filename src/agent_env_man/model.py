@@ -101,7 +101,7 @@ class Config(MachineFile):
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update", "automation"}
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update", "automation", "settings"}
         if unknown:
             raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
         if not isinstance(self.doc.get("roots", {}), dict):
@@ -143,6 +143,7 @@ class Config(MachineFile):
         self._catalog = None
         self._repositories = {}
         self._instructions = {}
+        self._settings = {}
         self._update_policies = {}
         self.checkout_root = absolute(self.doc["checkout_root"]) if "checkout_root" in self.doc else self.path.parent / (self.path.name + ".checkouts")
         if overlaps(self.checkout_root, self.path) or overlaps(self.checkout_root, self.state_dir):
@@ -217,6 +218,26 @@ class Config(MachineFile):
         repositories = document["repositories"]
         externals = document["externals"]
         instructions = document["instructions"]
+        settings = document["settings"]
+        machine_settings = self.doc.get("settings", {})
+        if not isinstance(machine_settings, dict):
+            raise Error("Machine settings must be a table")
+        for name, binding in machine_settings.items():
+            identifier(name)
+            if not isinstance(binding, dict) or set(binding) != {"target"}:
+                raise Error(f"settings.{name} accepts only target")
+            from .storage import saved_path
+            if not isinstance(binding["target"], str):
+                raise Error("Setting target must be a string")
+            target = Path(binding["target"]).expanduser()
+            if not target.is_absolute():
+                raise Error("Setting target must be absolute")
+            saved_path(str(target))
+        for name, data in settings.items():
+            if name not in machine_settings:
+                raise Error(f"Setting {name}: missing machine settings.{name}.target")
+            if "external" in data and data["external"] not in self.doc.get("external_paths", {}):
+                raise Error(f"Setting {name}: missing external path binding")
         bindings = self.doc.get("external_paths", {})
         for name, data in skills.items():
             path = data.get("subdir", ".")
@@ -253,6 +274,7 @@ class Config(MachineFile):
         self._external_paths = external_paths
         self._external_names = set(externals)
         self._instructions = instructions
+        self._settings = settings
         if self.modes.keys() - skills.keys():
             raise Error("Machine mode override does not name a skill in the catalog")
         from .updates import resolve_policies
@@ -289,7 +311,7 @@ class Config(MachineFile):
     def sources(self) -> dict[str, Source]:
         """Derive checkout paths; the inventory never needs device-local bindings."""
         result = {}
-        declarations = {**self.catalog(), **self._instructions}
+        declarations = {**self.catalog(), **self._instructions, **self._settings}
         for name, data in declarations.items():
             if "external" in data:
                 result[name] = Source(name, self._external_paths[data["external"]], None, None)
@@ -325,6 +347,9 @@ class Config(MachineFile):
     def declarations(self, source: Source) -> list[Item]:
         from .agents import profile, suffix
         self.catalog()
+        if source.name in self._settings:
+            from .settings import declaration
+            return [declaration(self, source, self._settings[source.name])]
         if source.name in self._instructions:
             data = self._instructions[source.name]
             subdir = data.get("subdir", ".")

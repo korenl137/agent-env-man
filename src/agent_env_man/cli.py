@@ -7,6 +7,7 @@ import click
 from .cli_runtime import Runtime
 from .commands import delivery, installation, device
 from .commands.catalog import catalog
+from .commands.settings import settings, export_command
 from .model import default_config
 
 
@@ -27,7 +28,7 @@ for command in (delivery.bootstrap, delivery.update, delivery.publish,
                 installation.status, installation.detach, installation.locate,
                 installation.recover, device.setup, device.self_group,
                 device.automation_command, device.startup, device.agent_hook,
-                device.full_run, device.self_skill_refresh, catalog):
+                device.full_run, device.self_skill_refresh, catalog, settings, export_command):
     cli.add_command(command)
 
 

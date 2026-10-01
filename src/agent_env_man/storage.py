@@ -124,7 +124,7 @@ class State:
             raise Error("Invalid ownership state envelope; do not delete ownership records")
         if not maintenance:
             for record in self.data["items"].values():
-                if record.get("mode") not in ("link", "copy", "agent-hook", "setup-shell", "setup-config"):
+                if record.get("mode") not in ("link", "copy", "agent-hook", "setup-shell", "setup-config", "settings"):
                     raise Error("Unsupported installation mode in saved state; use maintenance commands to release it")
 
     def save(self):

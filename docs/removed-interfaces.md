@@ -8,7 +8,7 @@ Saved ownership remains available for maintenance without restoring legacy insta
 | --- | --- |
 | Source-local `links.conf` (four or six fields) and machine `[sources]` | Catalog `skills`, `instructions`, and named `sources`. |
 | `bootstrap NAME --path`, `--git`, `--branch`, `--manifest`, `--attach` | `bootstrap CATALOG`; put Git declarations in the catalog and external bindings in machine configuration or `--external`. |
-| `codex-merge` JSON declarations and leaf-key ownership | Manage application `config.toml` directly; AEM no longer installs partial application settings. |
+| `codex-merge` JSON declarations and leaf-key ownership | Use the independent [staged settings](settings-management.md) catalog workflow for selected TOML fields; legacy declarations and ownership are not converted or accepted. |
 | `codex-hook NAME` | `agent-hook NAME --agent codex`; new instruction hooks use this command. |
 | `sync --min-interval` and the configuration-wide attempt clock | Per-skill catalog policies and `auto --trigger EVENT`. Explicit sync is unthrottled. |
 | Generated instruction guides and their in-place upgrade | Direct links to original entry documents, plus location hooks. |
