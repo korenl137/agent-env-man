@@ -10,6 +10,7 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Changed
 
+- Expand CLI help with selection scope, settings stage locations and field choices, shell navigation requirements, and publication defaults without changing command behavior; define contributor guidance for concise, sufficient installed help.
 - Move detailed automation, AEM self-update, and maintenance/recovery guidance into dedicated docs guides; retain core workflows and preservation reminders in the README, and clarify contributor guidance without changing its structure or contracts.
 - Official skill contribution guidance prioritizes installed CLI help and authoritative local documentation; streamline `idk-aem` around important operation boundaries, publication scope, and preservation.
 

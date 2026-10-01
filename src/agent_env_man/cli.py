@@ -17,7 +17,10 @@ from .model import default_config
 @click.option("--json", "json_output", is_flag=True, help="Emit JSON instead of readable text.")
 @click.pass_context
 def cli(ctx, config, json_output):
-    """Install skills and personal instruction bundles from an independent catalog."""
+    """Install skills and personal instruction bundles from an independent catalog.
+
+    Global --config and --json options precede COMMAND.
+    """
     # Parsing and help must remain side-effect free. Configuration/state reads
     # and locks belong to the selected command's Runtime.run boundary.
     ctx.obj = Runtime(config, json_output)

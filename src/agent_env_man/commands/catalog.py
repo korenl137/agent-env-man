@@ -33,7 +33,12 @@ def status(runtime, timeout):
 @click.option("--cd", is_flag=True, help="Change directory with the installed shell integration; otherwise print the entry directory.")
 @pass_runtime
 def locate(runtime, timeout, cd):
-    """Locate the bound catalog entry offline."""
+    """Locate the bound catalog entry offline.
+
+    --cd uses the shell integration installed by setup --shell; reload the
+    profile after setup. Without it, print the entry directory. --cd cannot
+    be combined with global --json.
+    """
     if cd and runtime.json_output:
         raise click.UsageError("--cd cannot be combined with --json")
     return run(runtime, "locate", timeout=timeout,
@@ -54,7 +59,13 @@ def update(runtime, timeout):
 @timeout_option
 @pass_runtime
 def publish(runtime, message, dry_run, timeout):
-    """Publish the whole catalog repository."""
+    """Publish the whole catalog repository.
+
+    With --message, commit all nonignored checkout changes. Without it, require
+    a clean worktree and push existing commits. --dry-run is offline and does
+    not verify remote state. First publication requires a successfully verified
+    empty remote; remote errors stop publication.
+    """
     return run(runtime, "publish", message=message, dry_run=dry_run, timeout=timeout)
 
 

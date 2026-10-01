@@ -115,7 +115,12 @@ def bootstrap_skills(config, state, args):
 @catalog_policy_options
 @pass_runtime
 def bootstrap(runtime, **options):
-    """Prepare catalog content and save machine bindings; never install targets."""
+    """Prepare catalog content and save machine bindings; never install targets.
+
+    Omit CATALOG to reuse the saved binding. --item selects catalog skill,
+    instruction, or setting names, not installation component IDs. Omit --item
+    to prepare all declared sources. Existing checkouts are not updated.
+    """
     options["catalog_trigger"] = list(options["catalog_trigger"]) or None
     args = SimpleNamespace(**options)
     return runtime.run(lambda session: bootstrap_skills(session.config, session.state, args), missing_ok=True)
@@ -137,6 +142,16 @@ def update(runtime, source, timeout):
 @timeout_option
 @pass_runtime
 def publish(runtime, source, message, dry_run, timeout):
-    """Export selected settings and publish whole checkouts by catalog item name."""
+    """Export selected settings and publish whole checkouts by catalog item name.
+
+    NAME selects a catalog skill, instruction, or setting, not a repository or
+    installation component ID. Settings export their stage before publication;
+    actual application edits are not collected.
+
+    With --message, commit all nonignored changes in each selected repository.
+    Without it, require a clean worktree and push existing commits. --dry-run
+    is offline and does not verify remote state. First publication requires a
+    successfully verified empty remote; remote errors stop publication.
+    """
     return runtime.run(lambda session: session.manager.publish(source, message=message, dry_run=dry_run, timeout=timeout))
 

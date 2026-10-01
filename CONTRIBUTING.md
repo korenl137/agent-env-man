@@ -315,14 +315,28 @@ Update examples and platform limitations with interface changes.
 Agent profiles are the internal extension boundary for paths, hook syntax, callback output, and notices.
 Do not add a dynamic plugin loader or additional source providers without a demonstrated use case.
 
+## CLI help scope
+
+CLI help is the installed, version-matched entry point for choosing and invoking commands.
+Explain the target being read or changed, selection identifiers and scope, omitted-option behavior, and non-obvious prerequisites or option incompatibilities when these affect correct use.
+For workflows spanning multiple commands, make clear which phase a selector filters and which content each command consumes, such as a source, editable stage, or actual application file.
+Describe consequential defaults and preview limits concisely enough to choose the operation without reading a full guide.
+
+Keep help focused on invocation decisions; retain full schemas, output contracts, detailed recovery procedures, and extended examples in the authoritative documentation.
+Do not reproduce a manual in command help or compensate for missing help by copying syntax and procedures into the official skill.
+When removing operational detail from the skill in favor of CLI discovery, verify that the relevant help actually supplies the information needed for the task.
+A repository-local document is not necessarily available in an installed package; only advertise local documentation entry points that the installation provides.
+Help must remain available without valid machine configuration, loading catalogs, acquiring locks, or running operations.
+For help changes, inspect rendered command output and verify this boundary; avoid tests that lock down exact prose.
+
 ## Official skill guidance
 
 The packaged [idk-aem skill](skills/idk-aem/SKILL.md) should help agents choose and carry out AEM operations, with emphasis on important behavior, sequencing, and non-obvious consequences.
 Prefer discovery through the installed CLI's command help and authoritative local tool documentation over copying command inventories, option syntax, configuration schemas, or detailed procedures into the skill.
 Give agents concrete local entry points and explain when to consult them; use installed-version help for available syntax and local documentation matching that version for behavior.
 Use documentation paths only when they resolve in the installed environment; do not rely on repository-relative paths to unbundled files or web links that require fetching documentation.
-Assume a working installation provides local help and documentation.
-Treat missing or incomplete local materials as an installation or documentation issue; do not add fallback instructions to the skill.
+Use the local help and documentation provided by the installation.
+Treat missing or incomplete advertised materials as an installation or documentation issue; do not add fallback instructions to the skill.
 Keep essential guidance inline when it prevents a material mistake, rather than making ordinary use depend on loading an entire manual.
 Do not move duplicated manuals into skill references merely to shorten the entrypoint.
 

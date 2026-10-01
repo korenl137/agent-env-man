@@ -18,7 +18,12 @@ def field_path(ctx, param, value):
 
 @click.group()
 def settings():
-    """Prepare, collect, release, and resolve staged settings fields."""
+    """Prepare, collect, release, and resolve staged settings fields.
+
+    NAME is a catalog setting name. These commands edit a local stage; apply
+    writes it to the application, export writes it to the shared source, and
+    update receives shared changes. Collection of application edits is explicit.
+    """
 
 
 @settings.command()
@@ -35,11 +40,15 @@ def prepare(runtime, name, dry_run):
 
 @settings.command()
 @click.argument("name")
-@click.option("--path", multiple=True, callback=field_path, help="Add a field using a JSON string-array path.")
+@click.option("--path", multiple=True, callback=field_path, help='Add or reclaim a field; repeat JSON string-array paths, e.g. ["section","key"].')
 @preview_option
 @pass_runtime
 def collect(runtime, name, path, dry_run):
-    """Collect changes to managed fields from the actual settings file."""
+    """Collect changes to managed fields from the actual settings file.
+
+    Without --path, collect only already managed fields. Use --path to add or
+    reclaim fields. Collection updates the stage, not the shared source.
+    """
     return runtime.run(lambda s: (Settings(s.manager).collect(name, path, dry_run=dry_run), False), preview=dry_run)
 
 
@@ -55,8 +64,9 @@ def release(runtime, name, path, dry_run):
 
 @settings.command()
 @click.argument("name")
-@click.option("--path", required=True, callback=field_path)
-@click.option("--take", required=True, type=click.Choice(("local", "shared", "edited")))
+@click.option("--path", required=True, callback=field_path, help="Conflict field path as a JSON string array.")
+@click.option("--take", required=True, type=click.Choice(("local", "shared", "edited")),
+              help="Choose the local stage, incoming shared value, or manually edited stage.")
 @preview_option
 @pass_runtime
 def resolve(runtime, name, path, take, dry_run):

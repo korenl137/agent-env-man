@@ -18,7 +18,12 @@ from ..updates import run_updates, TRIGGERS
 @preview_option
 @pass_runtime
 def apply(runtime, agent, item, timeout, adopt, replace, reattach, dry_run):
-    """Install prepared local content into selected destinations."""
+    """Install prepared local content into selected destinations.
+
+    Omit --item to install all declared non-detached items. Skill and setting
+    IDs are catalog names; instruction IDs are NAME:bundle, NAME:entry, and
+    NAME:hook. Selecting an entry or hook also selects its instruction group.
+    """
     if adopt and replace:
         raise click.UsageError("--adopt and --replace are mutually exclusive")
     return runtime.run(lambda session: (session.manager.apply(
@@ -31,7 +36,11 @@ def apply(runtime, agent, item, timeout, adopt, replace, reattach, dry_run):
 @timeout_option
 @pass_runtime
 def sync(runtime, agent, item, timeout):
-    """Update sources, then install only if every update succeeds."""
+    """Update sources, then install only if every update succeeds.
+
+    All content sources are updated. --item and --agent filter only the install
+    phase; --item uses the same IDs as apply.
+    """
     def operation(session):
         session.state.ready()
         updates, failed = session.manager.update(timeout=timeout)
@@ -91,7 +100,17 @@ def detach(runtime, item, agent, dry_run):
 @click.option("--cd", is_flag=True, help="Change directory with the installed shell integration; otherwise print the root.")
 @pass_runtime
 def locate(runtime, name, agent, source, target, cd):
-    """Locate installed content or its prepared source offline."""
+    """Locate installed content or its prepared source offline.
+
+    NAME is a catalog skill, instruction, or setting name. Skills and
+    instructions default to their saved installation, or the prepared source
+    when uninstalled. Settings default to the editable stage; --source selects
+    shared content and --target selects the actual application file.
+
+    --cd requires setup --shell and a reloaded profile to change the calling
+    shell's directory; rerun setup for older shell registrations. Otherwise it
+    prints the directory. --cd cannot be combined with global --json.
+    """
     if source and target:
         raise click.UsageError("--source and --target are mutually exclusive")
     if cd and runtime.json_output:
