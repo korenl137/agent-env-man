@@ -99,6 +99,27 @@ class ClaudeIntegration(SetupFixture):
         self.assertEqual(self.callback('startup', '--trigger', 'agent-start', '--agent', 'claude')[0].strip(), '')
         self.assertTrue(self.state()['startup']['failed'])
 
+    def test_disabled_agent_startup_does_not_read_missing_or_invalid_catalog(self):
+        self.setup_cli('--agent', 'codex', '--agent', 'claude', '--automation', 'off')
+        self.run_cli('bootstrap', self.catalog)
+        for missing in (False, True):
+            if missing:
+                self.catalog.unlink()
+            else:
+                self.catalog.write_text('broken [')
+            for agent in ('codex', 'claude'):
+                with self.subTest(agent=agent, missing=missing):
+                    output, errors = self.callback('startup', '--trigger', 'agent-start', '--agent', agent)
+                    self.assertEqual(errors, '')
+                    if agent == 'codex':
+                        self.assertEqual(json.loads(output), {})
+                    else:
+                        self.assertEqual(output.strip(), '')
+                    result = self.state()['startup']
+                    self.assertEqual(result['status'], 'disabled')
+                    self.assertFalse(result['failed'])
+                    self.assertEqual(result['outcomes'], [])
+
     def test_edited_claude_hook_and_duplicate_marker_block_setup(self):
         self.setup_cli('--agent', 'claude')
         path = self.claude / 'settings.json'

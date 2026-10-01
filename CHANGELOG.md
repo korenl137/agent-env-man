@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Disabled agent startup callbacks remain independent of missing or invalid content catalogs.
+
 ## [1.0.0-rc] &mdash; 2026-10-01
 
 First release candidate of 1.0.0; Git tag `v1.0.0-rc` corresponds to Python package version `1.0.0rc0`.

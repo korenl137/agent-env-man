@@ -535,6 +535,7 @@ aem startup --trigger EVENT [--agent AGENT]
 Callback registered by setup; runs the selected device automation mode and remains fail-open.
 In the default `policies` mode it independently queues due AEM self-updates, runs the machine catalog policy, then runs the same skill policy engine as `auto`.
 In `full` mode it queues the entire sequence for execution after the callback exits; in `off` mode it performs no automatic work.
+An empty update result skips skill reload detection without reading the content catalog, so a missing or invalid catalog does not produce callback errors when automation is off.
 A successful catalog update reloads declarations before resolving skill policies for that event.
 A failed catalog attempt skips skill work for that event, preserving fail-open startup.
 The saved startup report includes the catalog result as `catalog_update`.

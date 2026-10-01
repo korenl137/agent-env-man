@@ -150,8 +150,11 @@ def startup(runtime, trigger, agent, aem_hook_id):
         session.state.data["startup"] = {"trigger": trigger, "time": now(), **result}
         session.state.save()
         outcomes = result.get("outcomes", [])
+        # Empty results must not load catalogs skipped by disabled or queued automation.
+        skills_changed = bool(agent and outcomes) and startup_skills_changed(
+            outcomes, session.state.data["items"], agent, session.config.sources)
         report = (profile(agent).startup_result(startup_briefing(outcomes),
-                  skills_changed=startup_skills_changed(outcomes, session.state.data["items"], agent, session.config.sources))
+                  skills_changed=skills_changed)
                   if agent else {})
         return report, False
     return runtime.run(operation, missing_ok=True, callback="startup", agent=agent)
