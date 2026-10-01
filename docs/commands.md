@@ -589,8 +589,11 @@ See [Staged settings](settings-management.md) for complete behavior, locate/stat
 
 Claude agent-hook emits plain stdout path context. Lookup failure uses stderr
 and exit 2; SessionStart continues. Startup may request reloadSkills after a
-successful synchronous skill installation/advancement affecting that consumer.
-No-op/check/throttled/failed runs do not request reload. In full asynchronous
+successful synchronous skill installation or checkout advancement affecting that
+consumer, including active links indirectly changed through shared checkouts.
+Unapplied copies and detached skills do not request reload. An advanced live-link
+source still requests reload if subsequent application fails. No-op/check/throttled
+runs and failures without a relevant change do not request reload. In full asynchronous
 mode, wait for worker completion and start a fresh session to discover changes.
 The hidden --aem-hook-id identifies supported command-field ownership.
 See [profile contracts](agent-profiles.md).
