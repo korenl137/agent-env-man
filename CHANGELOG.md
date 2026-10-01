@@ -8,6 +8,8 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.4.2] &mdash; 2026-10-01
+
 ### Fixed
 
 - Instruction callbacks wait for installation-lock contention within the same five-second budget as configuration-lock contention, instead of stopping immediately when another AEM command holds the installation lock.
@@ -112,7 +114,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.2.0...v0.3.0
