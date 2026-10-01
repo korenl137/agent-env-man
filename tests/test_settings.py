@@ -356,6 +356,14 @@ class GitSettings(unittest.TestCase):
         self.git(self.work, 'commit', '-m', 'Upstream change')
         self.git(self.work, 'push', 'origin', 'main')
 
+    def test_publish_exports_to_verified_empty_remote(self):
+        self.git(self.remote, 'update-ref', '-d', 'refs/heads/main')
+        self.edit(self.stage, color='green')
+        report = self.call('publish', 'editor', '-m', 'Initial settings publication')[0]
+        self.assertTrue(report['initial_publish'])
+        self.assertEqual(report['status'], 'published')
+        self.assertEqual(tomlkit.parse(self.git(self.remote, 'show', 'main:editor.toml'))['color'], 'green')
+
     def test_publish_exports_commits_and_pushes(self):
         self.edit(self.stage, color='green')
         report = self.call('publish', 'editor', '-m', 'Update setting')

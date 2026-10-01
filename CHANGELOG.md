@@ -10,6 +10,7 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Fixed
 
+- Allow first publication of the registered local branch to a verified empty Git remote, including catalog and settings publication; keep authentication/network failures and missing branches in populated remotes fatal.
 - Keep catalog skill replacement and detach backups outside agent discovery roots to prevent duplicate skills, with verified copies and recovery across filesystems while preserving older recovery journals.
 
 ## [0.5.0] &mdash; 2026-10-01

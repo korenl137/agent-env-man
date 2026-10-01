@@ -43,6 +43,9 @@ Git settings publication includes export; external sources support export and le
 Publication acts on the whole selected repository, including files outside the selected skill or instruction directory.
 A supplied commit message stages all nonignored changes; without a message, publication requires a clean worktree and pushes existing commits.
 Inspect the relevant changes and publication preview before publishing when the task calls for publication.
+AEM supports first publication when it successfully confirms that the registered remote has no refs, including tags; a clean checkout can push existing commits, or `--message` can commit changes first.
+A missing registered branch in a populated remote and authentication/network/fetch errors stop publication; do not bypass these by assuming an empty remote.
+Publication previews stay offline and do not confirm remote emptiness.
 Do not infer authorization to publish from a request to locate or edit content.
 
 ## Conflicts and recovery

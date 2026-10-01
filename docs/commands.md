@@ -33,7 +33,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `bootstrap` | Bind a catalog and prepare sources. | Clone missing Git repositories. |
 | `catalog` | Inspect, update, or publish the catalog itself. | Update/publish only; publication dry run is offline. |
 | `update` | Fetch and fast-forward prepared sources. | Yes for Git. |
-| `publish` | Commit local changes and push selected checkouts. | Fetch and push; none in dry run. |
+| `publish` | Commit local changes and push selected checkouts. | Inspect remote refs, fetch when populated, and push; none in dry run. |
 | `apply` | Install from local prepared sources. | None. |
 | `sync` | Update all sources, then apply if every update succeeds. | Yes for Git. |
 | `auto` | Run due per-skill policies for an event. | Due skills only; none in dry run. |
@@ -286,11 +286,19 @@ No interactive confirmation or editor is required; use the optional dry run for 
 Publication uses the configured Git identity and signing settings, the registered origin URL, and the inventory branch (or the default branch recorded at bootstrap).
 As with other AEM Git operations, repository Git hooks are disabled and authentication cannot prompt.
 Only the selected branch is pushed, without force, additional branches, or tags; a different origin push URL is rejected.
+Before staging or committing, AEM successfully queries all advertised remote refs, including tags.
+If no refs exist, the remote is treated as empty and AEM pushes the local registered branch for the first time, without requiring a pre-existing remote branch.
+With `-m`, this includes committing checkout changes; without `-m`, the checkout must be clean with an existing local commit.
+If the remote contains refs, the registered branch must exist and AEM fetches it before checking history.
+Authentication, network, ref-listing, and fetch errors stop publication; they never trigger an initial-push fallback.
+Dry runs remain offline and cannot confirm whether a remote is empty.
 Behind/diverged histories, wrong branches, and unfinished Git operations must be reconciled explicitly with Git before retrying.
 Ignored untracked files are left alone by publication; the existing update/apply cleanliness rules still apply afterward.
 
 With `--json`, results are grouped by checkout, with independent success/failure outcomes; any failure exits 1.
 Publication is not atomic across repositories or between commit and push.
+When an empty remote is confirmed, results include `initial_publish: true`; `remote_relation` remains `unknown` because there is no remote comparison base, and `commits` lists existing local history.
+`last_fetch` records successful remote inspection even when an empty remote does not require fetching; `observed_revision` is populated after a successful first push.
 A failed commit may leave staged changes, and a failed push retains the local commit; inspect the reported error and retry after resolving it.
 Publication does not install content or update automatic-policy attempt clocks.
 For copy installations, edit the checkout and run apply after committing; changes made only in an installed copy or detached copy are not collected into the source.

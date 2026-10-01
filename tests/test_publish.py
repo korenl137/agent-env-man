@@ -14,6 +14,7 @@ import tomlkit
 
 from agent_env_man.cli import main
 from agent_env_man.git_source import Git
+from agent_env_man.model import Error
 
 
 class Publication(unittest.TestCase):
@@ -101,6 +102,56 @@ class Publication(unittest.TestCase):
         for _ in range(2):
             self.assertEqual(self.cli("publish", "personal")[0]["revision"], head)
         self.assertEqual(self.git(self.remote, "rev-parse", "main"), head)
+
+    def test_empty_remote_first_push_commits_and_existing_history(self):
+        for message in (None, "Initial publication"):
+            with self.subTest(message=message):
+                self.git(self.remote, "update-ref", "-d", "refs/heads/main")
+                if message:
+                    self.edit()
+                    (self.checkout / "new.txt").write_text("New", encoding="utf-8")
+                args = ("-m", message) if message else ()
+                result = self.cli("publish", "one", *args)[0]
+                self.assertTrue(result["initial_publish"])
+                self.assertEqual(result["status"], "published")
+                self.assertEqual(self.git(self.remote, "rev-parse", "main"),
+                                 self.git(self.checkout, "rev-parse", "HEAD"))
+                self.assertEqual(self.git(self.remote, "for-each-ref", "--format=%(refname)"), "refs/heads/main")
+                self.assertEqual(self.cli("publish", "one")[0]["status"], "published")
+
+    def test_missing_branch_in_populated_remote_does_not_commit_or_push(self):
+        for ref in ("refs/heads/other", "refs/tags/only-tag"):
+            with self.subTest(ref=ref):
+                head = self.git(self.remote, "rev-parse", "main")
+                self.git(self.remote, "update-ref", ref, head)
+                self.git(self.remote, "update-ref", "-d", "refs/heads/main")
+                self.edit()
+                index = (self.checkout / ".git/index").read_bytes()
+                result = self.cli("publish", "one", "-m", "Must not commit", code=1)[0]
+                self.assertIn("remote is not empty", result["error"])
+                self.assertEqual((self.checkout / ".git/index").read_bytes(), index)
+                self.assertEqual(self.git(self.remote, "for-each-ref", "--format=%(refname)"), ref)
+                self.git(self.remote, "update-ref", "refs/heads/main", head)
+                self.git(self.remote, "update-ref", "-d", ref)
+
+    def test_remote_listing_and_fetch_errors_never_fall_back_to_push(self):
+        self.edit()
+        head = self.git(self.checkout, "rev-parse", "HEAD")
+        index = (self.checkout / ".git/index").read_bytes()
+        run = Git.run
+        for command in ("ls-remote", "fetch"):
+            with self.subTest(command=command):
+                def fail(git, path, *args, **kwargs):
+                    if command in args:
+                        raise Error("Authentication or network failure")
+                    if "push" in args:
+                        self.fail("Push attempted after remote inspection failure")
+                    return run(git, path, *args, **kwargs)
+                with patch.object(Git, "run", new=fail):
+                    result = self.cli("publish", "one", "-m", "Must not commit", code=1)[0]
+                self.assertIn("Authentication or network failure", result["error"])
+                self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD"), head)
+                self.assertEqual((self.checkout / ".git/index").read_bytes(), index)
 
     def test_dirty_without_message_fails_without_staging(self):
         self.edit()

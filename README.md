@@ -238,6 +238,10 @@ The optional dry run is offline; publication fetches first and leaves behind/div
 A failed push retains the local commit for retry.
 For copy installations, edit the checkout and apply after committing; installed-copy edits are not collected automatically.
 External-folder synchronization stays with its existing service.
+AEM also supports the first push to a registered empty remote after successfully confirming that it advertises no refs, including tags.
+A populated remote with a missing registered branch, or an authentication/network/fetch failure, stops publication before committing.
+Dry runs remain offline.
+
 See [publish](docs/commands.md#publish) for commit scope, Git settings, and failure behavior.
 
 ## Application settings

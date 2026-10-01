@@ -205,7 +205,10 @@ Explicit publish selects catalog skill, instruction bundle, or setting names and
 Do not infer per-skill file ownership for publication: commit and push operate on the whole repository, including changes outside catalog subdirectories.
 A supplied message authorizes staging all nonignored changes; without it, require a clean worktree and publish existing commits only.
 Keep preview offline and preserve the index, HEAD, installation records, and automatic-policy attempt clocks.
-Fetch before staging and refuse behind/diverged histories without rewriting or merging them.
+Verify all advertised remote refs before staging or settings export.
+Only a successful empty listing permits initial publication without a remote branch; a populated remote must contain the registered branch and be fetched before staging.
+Never reinterpret authentication, transport, listing, or fetch failures as an empty remote.
+Refuse behind/diverged histories without rewriting or merging them.
 Push only the registered branch to the registered origin, without force or implicit additional refs.
 Preserve staged changes/commits after failures, report independent repository outcomes, and never claim cross-repository atomicity.
 External synchronization, fork/PR workflows, and collecting installed-copy edits are outside this command's scope.

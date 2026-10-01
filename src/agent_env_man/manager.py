@@ -817,8 +817,8 @@ class Manager:
                     and changed(Bundle.from_snapshot(r["shared"]), settings.working(r, conflicts=True))]
                 if setting_names:
                     if not dry_run:
-                        git.fetch(source)
-                        if git.relation(source) not in ("ahead", "equal-at-last-fetch"):
+                        observed = git.publication_preflight(source)
+                        if observed is not None and git.relation(source) not in ("ahead", "equal-at-last-fetch"):
                             raise Error("Reconcile Git history before settings export/publication")
                     report["export"] = settings.export(setting_names, dry_run=True)
                     if message is None and (any(e["changed"] for e in report["export"]) or report["changes"]):

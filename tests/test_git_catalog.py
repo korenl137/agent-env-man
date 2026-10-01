@@ -481,6 +481,15 @@ class GitCatalog(unittest.TestCase):
         self.assertTrue((self.root / "installed/new/SKILL.md").exists())
         self.assertEqual(self.cli("catalog", "publish")["status"], "published")
 
+    def test_publish_to_verified_empty_remote(self):
+        self.boot()
+        self.git(self.remote, "update-ref", "-d", "refs/heads/main")
+        result = self.cli("catalog", "publish")
+        self.assertTrue(result["initial_publish"])
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(self.git(self.remote, "rev-parse", "main"),
+                         self.git(self.checkout, "rev-parse", "HEAD"))
+
     def test_publish_failure_retains_commit_and_retry_pushes_it(self):
         self.boot()
         self.entry.write_text(self.entry.read_text() + "\n# Published later\n")

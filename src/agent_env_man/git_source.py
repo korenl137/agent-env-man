@@ -114,20 +114,45 @@ class Git:
                 "diff": self.run(source.path, "diff", "--no-ext-diff", "--no-textconv", "HEAD", "--").stdout,
                 "commits": commits}
 
+    def publication_preflight(self, source: Source) -> str | None:
+        """Return the fetched branch revision, or None for a verified empty remote.
+
+        Inspect all advertised refs, including tags, before allowing first
+        publication. Authentication/transport failures and a missing branch in
+        a populated remote are errors, never evidence of an empty repository.
+        This check also runs before settings export can change the checkout.
+        """
+        self.publication(source)
+        self.run(source.path, "check-ref-format", "refs/heads/" + source.branch)
+        listing = self.run(source.path, "ls-remote", "--refs", "origin").stdout
+        if not listing:
+            return None
+        refs = {line.split("\t", 1)[1] for line in listing.splitlines() if "\t" in line}
+        if "refs/heads/" + source.branch not in refs:
+            raise Error(f"{source.name}: registered remote branch {source.branch} is missing; remote is not empty")
+        return self.fetch(source)
+
     def publish(self, source: Source, report: dict, *, message=None):
         """Commit all nonignored changes when requested, then push the selected branch.
 
-        Fetch precedes staging so known remote conflicts leave local changes alone.
+        Remote verification precedes staging; populated remotes are fetched.
         Failure after staging/commit preserves that work for inspection and retry;
         publication is not a transaction and never rewrites local or remote history.
         """
         if report["changes"] and message is None:
             raise Error(f"{source.name}: uncommitted changes; supply --message to commit the whole checkout")
-        observed = self.fetch(source)
-        report.update(last_fetch=now(), observed_revision=observed)
+        observed = self.publication_preflight(source)
+        report.update(last_fetch=now())
         report.update(self.publication(source))
-        if report["remote_relation"] not in ("ahead", "equal-at-last-fetch"):
-            raise Error(f"{source.name}: {report['remote_relation']}; reconcile Git history manually")
+        if observed is None:
+            # Cached tracking refs may survive deletion of the remote's refs.
+            # They are not a comparison base for verified first publication.
+            report.update(initial_publish=True, remote_relation="unknown",
+                          commits=self.run(source.path, "log", "--format=%H %s", "HEAD").stdout.splitlines())
+        else:
+            report["observed_revision"] = observed
+            if report["remote_relation"] not in ("ahead", "equal-at-last-fetch"):
+                raise Error(f"{source.name}: {report['remote_relation']}; reconcile Git history manually")
         if report["changes"]:
             if message is None:
                 raise Error(f"{source.name}: checkout changed; supply --message or commit explicitly")
