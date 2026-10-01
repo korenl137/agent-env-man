@@ -8,13 +8,19 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.4.0] &mdash; 2026-10-01
+
+This release requires catalog v2 and changes CLI parsing and default report formatting.
+Follow the [catalog transition instructions](docs/removed-interfaces.md#catalog-v2-transition) before upgrading existing installations.
+During 0.x, `compatible` self-updates stay within the current minor series; upgrading from 0.3.x to 0.4.0 requires an explicit upgrade or `breaking` permission.
+
 ### Changed
 
 - **Breaking:** Require catalog `version = 2`, named `sources` with explicit Git/external types, one `source` reference per item, and nested skill/instruction installation tables.
 Catalog update triggers accept only event arrays; `[]` disables automatic execution, including inherited exclusions in full mode.
 Machine format/policies, state version 2, policy JSON and callbacks retain their contracts; saved-state maintenance remains available with old catalogs.
 Named checkout identities are retained; direct-declaration or relocated installations require manual detach and explicit reattachment/replacement, with old contents and backups preserved.
-See [transition instructions](docs/removed-interfaces.md#catalog-v2-transition); the next 0.x release requires a minor increase.
+See [transition instructions](docs/removed-interfaces.md#catalog-v2-transition).
 - **Breaking:** Ordinary CLI commands now print human-readable fields and indented lists by default, including redirected stdout.
 Add the global `--json` option before the command to retain the existing JSON report schema; installed startup and instruction callbacks continue to emit JSON automatically.
 - **Breaking:** Replace argparse with Click command groups and consistent option scope.
@@ -85,7 +91,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mirinae3145/agent-env-man/tree/v0.1.0
