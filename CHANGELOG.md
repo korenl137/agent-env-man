@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0-beta] &mdash; 2026-10-01
+
+First beta of 1.0.0; Git tag `v1.0.0-beta` corresponds to Python package version `1.0.0b0`.
+
 ### Added
 
 - Recognize Python `a`/`b`/`rc` and SemVer-style `-alpha`/`-beta`/`-rc` prerelease tags in AEM self-update and prepared release publication.
@@ -21,12 +25,15 @@ Local release preparation remains explicit in Git; publication is independent of
 
 ### Changed
 
-- Remove pre-1.0 versioning exceptions and update guidance from documentation; retain historical release identifiers.
 - Distinguish base local use, contribution environments, isolated builds, and explicit shell/agent setup in installation and validation guidance.
 
 ### Fixed
 
 - Recreate documentation output directories on repeated builds despite setuptools directory caching, and preserve existing documentation during build dry-runs.
+
+### Removed
+
+- Remove pre-1.0 versioning exceptions and update guidance from documentation; retain historical release identifiers.
 
 ## [0.5.3] &mdash; 2026-10-01
 
@@ -168,7 +175,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-beta...HEAD
+[1.0.0-beta]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.3...v1.0.0-beta
 [0.5.3]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.0...v0.5.1
