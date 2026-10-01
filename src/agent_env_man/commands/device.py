@@ -151,7 +151,7 @@ def startup(runtime, trigger, agent, aem_hook_id):
         session.state.save()
         outcomes = result.get("outcomes", [])
         report = (profile(agent).startup_result(startup_briefing(outcomes),
-                  skills_changed=startup_skills_changed(outcomes, session.state.data["items"], agent))
+                  skills_changed=startup_skills_changed(outcomes, session.state.data["items"], agent, session.config.sources))
                   if agent else {})
         return report, False
     return runtime.run(operation, missing_ok=True, callback="startup", agent=agent)

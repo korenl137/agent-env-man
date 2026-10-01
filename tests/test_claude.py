@@ -1,6 +1,6 @@
 """Claude integration through the existing agent-profile boundary with temporary homes."""
 import base64
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, nullcontext
 import io
 import json
 import os
@@ -15,7 +15,7 @@ from agent_env_man import agents, hooks, automation, self_update
 from agent_env_man.manager import Manager
 from agent_env_man.storage import State
 from agent_env_man.cli import main
-from agent_env_man.model import Config
+from agent_env_man.model import Config, Error
 from test_setup import SetupFixture
 
 
@@ -233,6 +233,55 @@ class ClaudeIntegration(SetupFixture):
         self.assertIn('report:', output)
         self.assertNotIn('reloadSkills', output)
 
+
+    def shared_checkout_reload(self, *, mode="link", detached=False, fail_apply=False):
+        self.require_links()
+        self.setup_cli('--agent', 'claude', '--agent', 'codex')
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['skills']['summary'] = dict(doc['skills']['report'])
+        doc['skills']['summary']['install'] = {'mode': mode}
+        doc['skills']['summary']['update'] = {'trigger': []}
+        doc['updates'] = {'defaults': {'trigger': ['agent-start'], 'min_interval': 0},
+                          'policies': {'summary': {'trigger': []}}}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        self.run_cli('bootstrap', self.catalog)
+        self.run_cli('apply')
+        self.run_cli('detach', 'report', '--agent', 'claude')
+        self.run_cli('detach', 'summary', '--agent', 'codex')
+        if detached:
+            self.run_cli('detach', 'summary', '--agent', 'claude')
+        target = self.claude / 'skills/summary/helper.py'
+        before = target.read_text()
+        (self.repo / 'skills/report/helper.py').write_text('Shared checkout advancement')
+        self.commit(self.repo)
+        guard = patch.object(Manager, 'apply', side_effect=Error('Test apply failure')) if fail_apply else nullcontext()
+        with guard:
+            output, _ = self.callback('startup', '--trigger', 'agent-start', '--agent', 'claude')
+        expected = mode == 'link' and not detached
+        self.assertEqual('reloadSkills' in output, expected)
+        self.assertEqual(target.read_text(), 'Shared checkout advancement' if expected else before)
+        outcomes = self.state()['startup']['outcomes']
+        self.assertEqual(next(o for o in outcomes if o['skill'] == 'summary')['status'],
+                         'not-triggered')
+        report = next(o for o in outcomes if o['skill'] == 'report')
+        self.assertEqual(report['status'], 'failed' if fail_apply else 'synced')
+        applied = report.get('apply', [])
+        self.assertFalse(any('summary' in item['item'] for item in applied))
+        # A successful no-op must not repeatedly request reload.
+        self.assertNotIn('reloadSkills', self.callback(
+            'startup', '--trigger', 'agent-start', '--agent', 'claude')[0])
+
+    def test_shared_checkout_reloads_excluded_claude_link(self):
+        self.shared_checkout_reload()
+
+    def test_shared_checkout_does_not_reload_unapplied_copy(self):
+        self.shared_checkout_reload(mode='copy')
+
+    def test_shared_checkout_does_not_reload_detached_skill(self):
+        self.shared_checkout_reload(detached=True)
+
+    def test_shared_checkout_reloads_live_link_after_apply_failure(self):
+        self.shared_checkout_reload(fail_apply=True)
 
     def test_shipped_profiles_have_parallel_contracts(self):
         fields = ('name', 'entry_name', 'hook_name', 'notice')
