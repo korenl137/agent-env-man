@@ -54,7 +54,10 @@ class ClaudeIntegration(SetupFixture):
         self.assertEqual(doc['hooks']['SessionStart'][:-1], initial['hooks']['SessionStart'])
         handler = doc['hooks']['SessionStart'][-1]['hooks'][0]
         self.assertEqual(set(handler), {'type', 'command', 'timeout'})
-        self.assertIn('--aem-hook-id', handler['command'])
+        command = handler['command']
+        if os.name == 'nt':
+            command = base64.b64decode(command.split()[-1]).decode('utf-16le')
+        self.assertIn('--aem-hook-id', command)
         with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(self.home / 'new')}):
             self.setup_cli()
         self.assertFalse((self.home / 'new').exists())
@@ -71,7 +74,7 @@ class ClaudeIntegration(SetupFixture):
         path = self.claude / 'settings.json'
         self.assertEqual(len(json.loads(path.read_text())['hooks']['SessionStart']), 2)
         context, errors = self.callback('agent-hook', 'personal', '--agent', 'claude')
-        self.assertIn(str(self.bundle), context)
+        self.assertEqual(json.loads(context.splitlines()[1])['root'], str(self.bundle))
         self.assertNotIn('Read development/rules.md', context)
         self.assertEqual(errors, '')
         self.run_cli('detach', 'personal:bundle', 'personal:entry', 'report', '--agent', 'claude')
@@ -107,6 +110,34 @@ class ClaudeIntegration(SetupFixture):
         self.setup_cli('--remove-agent', 'claude', code=1)
         self.assertEqual(before, path.read_bytes())
         self.assertFalse((self.home / '.bashrc').exists())
+
+    def test_unrelated_malformed_encoded_hooks_survive_setup_and_removal(self):
+        self.claude.mkdir()
+        path = self.claude / 'settings.json'
+        prefix = 'powershell.exe -NoProfile -NonInteractive -EncodedCommand '
+        commands = [None, prefix + '!invalid-base64!', prefix + base64.b64encode(b'x').decode()]
+        groups = [{'hooks': [{'type': 'command', 'command': value}]} for value in commands]
+        initial = {'hooks': {'SessionStart': groups}, 'permissions': {'allow': ['Read']}}
+        path.write_text(json.dumps(initial))
+        self.setup_cli('--agent', 'claude')
+        self.assertEqual(json.loads(path.read_text())['hooks']['SessionStart'][:-1], groups)
+        self.setup_cli('--remove-agent', 'claude')
+        self.assertEqual(json.loads(path.read_text()), initial)
+
+    def test_invalid_saved_hook_identity_blocks_removal_without_losing_settings(self):
+        self.setup_cli('--agent', 'claude')
+        path = self.claude / 'settings.json'
+        before = path.read_bytes()
+        machine = self.config.read_bytes()
+        state_path = Config(self.config).state_dir / 'state.json'
+        state = self.state()
+        for handlers in ([], [None], [{'type': 'command', 'command': 'echo unrelated'}]):
+            with self.subTest(handlers=handlers):
+                state['items']['setup:agent-claude']['hook_group'] = {'hooks': handlers}
+                state_path.write_text(json.dumps(state))
+                self.setup_cli('--remove-agent', 'claude', code=1)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(self.config.read_bytes(), machine)
 
     def test_windows_encoded_identity_and_retired_profile_removal(self):
         # Encode on Linux without claiming a native Windows integration run.
@@ -324,7 +355,7 @@ class ClaudeIntegration(SetupFixture):
             self.assertTrue(target.is_symlink())
             self.assertTrue((home / 'future/skills/report/SKILL.md').is_file())
             context, error = self.callback('agent-hook', 'personal', '--agent', 'future')
-            self.assertIn(str(self.bundle), context)
+            self.assertEqual(json.loads(context.splitlines()[1])['root'], str(self.bundle))
             self.assertEqual(error, '')
             self.run_cli('detach', 'personal:entry', '--agent', 'future')
             self.assertFalse(target.is_symlink())

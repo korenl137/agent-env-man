@@ -10,6 +10,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import tomlkit
+
 from agent_env_man import process_lock, self_update
 from test_instructions import InstructionFixture
 
@@ -69,6 +71,33 @@ class NativeHook(InstructionFixture):
         self.assertEqual(metadata["root"], str(self.bundle))
         self.assertEqual(metadata["entry"], str(self.bundle / "start.md"))
         self.assertNotIn("Read development/rules.md", context)
+
+    def test_claude_hook_executes_and_preserves_failure_exit_code(self):
+        self.configure()
+        original = self.config
+        self.config = self.root / "claude 'quoted' $name.toml"
+        original.rename(self.config)
+        claude = self.root / "claude home"
+        document = tomlkit.parse(self.config.read_text())
+        document['agents'] = {'claude': {'root': str(claude), 'skills': str(claude / 'skills')}}
+        self.config.write_text(tomlkit.dumps(document))
+        catalog = tomlkit.parse(self.catalog.read_text())
+        del catalog['instructions']['personal']['install']['entry']
+        self.catalog.write_text(tomlkit.dumps(catalog))
+        self.run_cli('apply', '--agent', 'claude', '--item', 'personal:entry')
+        group = json.loads((claude / 'settings.json').read_text())['hooks']['SessionStart'][0]
+        command = group['hooks'][0]['command']
+        result = subprocess.run(command, cwd=self.external, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        metadata = json.loads(result.stdout.splitlines()[1])
+        self.assertEqual(metadata['entry'], str(self.bundle / 'start.md'))
+        self.assertEqual(metadata['global_entry'], str(claude / 'CLAUDE.md'))
+        (claude / 'CLAUDE.md').unlink()
+        result = subprocess.run(command, cwd=self.external, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('lookup failed', result.stderr)
 
     def test_powershell_navigation_preserves_literal_paths_and_failed_location(self):
         from agent_env_man.setup import shell_block

@@ -42,6 +42,20 @@ class SetupFixture(InstructionFixture):
 
 
 class MachineSetup(SetupFixture):
+    def test_invalid_agent_bindings_fail_before_profile_or_machine_writes(self):
+        invalid = [[], {'unknown': {}}, {'claude': 'not-a-table'},
+                   {'claude': {'root': 'relative'}}, {'claude': {'skills': 42}},
+                   {'claude': {'unexpected': True}}]
+        for bindings in invalid:
+            with self.subTest(bindings=bindings):
+                self.config.write_text(tomlkit.dumps({'version': 1, 'agents': bindings}))
+                before = self.config.read_bytes()
+                self.setup_cli('--shell', 'bash', code=1)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertFalse((self.home / '.bashrc').exists())
+                self.assertFalse((self.home / '.claude').exists())
+                self.assertFalse((self.home / '.codex').exists())
+
     def test_initial_preview_is_completely_read_only(self):
         self.setup_cli('--shell', 'bash', '--agent', 'codex', '--dry-run')
         self.assertFalse(self.config.exists())
@@ -339,7 +353,11 @@ class Installer(SetupFixture):
         def run(command, **kwargs):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, stdout=str(self.executable.parent) + '\n')
-        with patch.object(module.shutil, 'which', side_effect=lambda n: '/fake/' + n), patch.object(module.subprocess, 'run', side_effect=run), redirect_stdout(io.StringIO()):
+        with (patch.object(module.shutil, 'which', side_effect=lambda n: '/fake/' + n),
+              patch.object(module.subprocess, 'run', side_effect=run),
+              patch.object(module.sys.stdin, 'isatty', return_value=False),
+              patch('builtins.input', side_effect=AssertionError('Unattended installation must not prompt')),
+              redirect_stdout(io.StringIO())):
             self.assertEqual(module.main(['--shell', 'bash', '--config', str(self.config), '--dry-run']), 0)
             self.assertFalse(any('install' in call for call in calls))
             calls.clear()
