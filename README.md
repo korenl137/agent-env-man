@@ -39,7 +39,8 @@ Users do not need to coordinate separate file-format releases or manually change
 See the [compatibility policy](CONTRIBUTING.md#versioning-and-compatibility) and [existing-installation precautions](docs/removed-interfaces.md).
 
 CLI commands show readable fields and indented lists by default.
-For scripts, add `--json` to retain structured output, for example `aem status --json`.
+For scripts, add the global `--json` option before the command, for example `aem --json status`.
+Put global options (`--config`, `--json`) before the command and command-specific options after their command.
 Installed startup and instruction callbacks continue to emit their required JSON automatically.
 
 ## Install and connect this machine

@@ -55,7 +55,8 @@ Release entries correspond to the package version in `pyproject.toml` and its `v
 
 Use Python 3.11 or later and Git.
 Create a virtual environment and install the project with `python -m pip install -e .`.
-TOML Kit is the only runtime dependency; tests use the standard library.
+Runtime dependencies are Click and TOML Kit.
+Tests use the standard-library unittest runner and Click's CliRunner for command-boundary checks.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -76,6 +77,14 @@ Do not depend on a POSIX shell from the core.
 Windows-only code must not import POSIX locking or signal primitives at runtime.
 
 ## Architectural contracts
+
+Click owns CLI parsing, help, and command groups.
+Command callbacks adapt inputs to core operations; shared execution owns configuration loading, locks, report output, and callback failure behavior.
+Keep core installation, delivery, ownership, and policy operations independent of Click contexts so workers and non-CLI callers can reuse them.
+Help and usage validation must complete before reading machine configuration or acquiring locks.
+Global options belong before the command; repeated policy options must preserve the distinction between omission and an explicit replacement list.
+Machine callbacks always emit their agent/worker JSON contracts regardless of ordinary output mode.
+The standalone installer and external update worker remain standard-library-only because they run outside the installed package environment.
 
 The manager owns reusable installation and delivery behavior.
 Personal instructions, research guidance, skills, and settings remain user-supplied content outside this repository.

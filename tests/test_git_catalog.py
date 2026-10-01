@@ -108,14 +108,14 @@ class GitCatalog(unittest.TestCase):
         with patch.object(Git, 'run', side_effect=AssertionError('Invalid policy contacted Git')):
             for options in invalid:
                 with self.subTest(options=options):
-                    self.boot(*options, code=1)
+                    self.boot(*options, code=2 if options[0] in ("--catalog-timeout", "--catalog-interval") else 1)
                     self.assertFalse(self.config.exists())
                     self.assertFalse(self.checkout.exists())
         self.boot()
         before = self.config.read_bytes()
         for options in invalid:
             with self.subTest(options=options):
-                self.cli('setup', *options, code=1)
+                self.cli("setup", *options, code=2 if options[0] in ("--catalog-timeout", "--catalog-interval") else 1)
                 self.assertEqual(self.config.read_bytes(), before)
 
     def test_catalog_policy_cli_local_binding_rejected_and_can_disable_while_rebinding(self):
@@ -181,7 +181,7 @@ class GitCatalog(unittest.TestCase):
         self.enable_catalog_auto()
         original = self.git(self.checkout, 'rev-parse', 'HEAD')
         self.save_remote('broken TOML [')
-        with patch('agent_env_man.cli.run_updates', side_effect=AssertionError('Skills ran after catalog failure')):
+        with patch('agent_env_man.automation.run_updates', side_effect=AssertionError('Skills ran after catalog failure')):
             self.assertEqual(self.cli('startup', '--trigger', 'agent-start'), {})
         saved = json.loads(self.state())
         self.assertTrue(saved['startup']['failed'])

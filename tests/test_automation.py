@@ -126,7 +126,7 @@ class FullAutomation(SetupFixture):
         self.assertEqual(before, self.config.read_bytes())
         for options in (('--automation-timeout', '0'), ('--automation-interval', '-1'),
                         ('--automation-trigger', 'manual', '--automation-trigger', 'interval')):
-            self.run_cli('setup', *options, code=1)
+            self.run_cli('setup', *options, code=1 if options[0] == '--automation-trigger' else 2)
             self.assertEqual(before, self.config.read_bytes())
 
     def test_prepare_or_update_failure_blocks_apply_and_conflicts_are_preserved(self):

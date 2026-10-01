@@ -30,9 +30,8 @@ class Interfaces(unittest.TestCase):
                             ("--path", "--git", "--branch", "--manifest")),
                           ("bootstrap", "--attach")):
             with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()), \
-                    redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as result:
-                main(["--config", str(self.machine), *arguments])
-            self.assertEqual(result.exception.code, 2)
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["--config", str(self.machine), *arguments]), 2)
         self.assertFalse(Path(str(self.machine) + ".state").exists())
         self.assertEqual(self.machine.read_text(), "version = 1\n")
 

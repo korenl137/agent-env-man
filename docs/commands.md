@@ -4,13 +4,16 @@
 aem [--config PATH] [--json] COMMAND [ARGS]
 ```
 
-`--config` is a global option and must precede the command.
+`--config` and `--json` are global options and must precede the command.
+Command-specific options follow their command, for example `aem --json catalog publish --dry-run`.
+Options require their full spelling; abbreviated long options are rejected.
 Every command accepts `-h` or `--help`.
 Ordinary commands print human-readable fields and indented lists by default, including when stdout is redirected.
-Use `--json` for the existing JSON report schema, for example `aem status --json` or `aem --json catalog status`.
-The flag is accepted before the command, after it, or after a nested subcommand.
+Use `--json` for the existing JSON report schema, for example `aem --json status` or `aem --json catalog status`.
 Scripts that parse stdout must add `--json`; startup and agent-hook callbacks retain JSON automatically.
 Ordinary operation errors use stderr and exit `1`, argument parsing errors exit `2`.
+Invalid numeric CLI durations (non-finite values, nonpositive timeouts, or negative intervals) are argument errors and exit `2` before configuration reads or filesystem effects.
+Help exits `0`; invoking a command group without a required subcommand shows usage/help and exits `2`.
 Successful operations exit `0`; status also exits `0` when its report contains conflicts or unavailable sources.
 Callbacks have the exceptions described below.
 Documented commands, behavior, exit codes, and JSON fields are covered by the package's [compatibility policy](../CONTRIBUTING.md#versioning-and-compatibility).

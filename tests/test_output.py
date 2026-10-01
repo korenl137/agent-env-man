@@ -7,7 +7,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from agent_env_man.cli import main, parser
+from click.testing import CliRunner
+
+from agent_env_man.cli import main, cli
 from agent_env_man.output import format_report
 
 
@@ -32,12 +34,19 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(format_report({}), "none")
         self.assertEqual(format_report({"names": ["one", "two"]}), "names:\n  - one\n  - two")
 
-    def test_json_flag_at_each_parser_level(self):
-        for args in (["--json", "status"], ["status", "--json"],
-                     ["--json", "catalog", "status"], ["catalog", "--json", "status"],
-                     ["catalog", "status", "--json"], ["self", "status", "--json"]):
-            with self.subTest(args=args):
-                self.assertTrue(parser().parse_args(args).json)
+    def test_json_is_a_global_option(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = str(Path(directory) / "machine.toml")
+            result = CliRunner().invoke(cli, ["--config", config, "--json", "self", "status"])
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(json.loads(result.stdout)["mode"], "off")
+            for args in (["status", "--json"], ["catalog", "--json", "status"],
+                         ["catalog", "status", "--json"]):
+                with self.subTest(args=args):
+                    result = CliRunner().invoke(cli, ["--config", config, *args])
+                    self.assertEqual(result.exit_code, 2)
+                    self.assertIn("No such option", result.output)
+                    self.assertIn("--json", result.output)
 
     def test_default_text_and_explicit_json_share_report(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -46,7 +55,7 @@ class OutputTests(unittest.TestCase):
             for flags in ([], ["--json"]):
                 output = io.StringIO()
                 with redirect_stdout(output):
-                    code = main(["--config", config, "self", "status", *flags])
+                    code = main(["--config", config, *flags, "self", "status"])
                 self.assertEqual(code, 0)
                 reports.append(output.getvalue())
             self.assertEqual(reports[0], format_report(json.loads(reports[1])) + "\n")

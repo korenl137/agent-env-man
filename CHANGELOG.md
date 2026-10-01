@@ -11,7 +11,11 @@ During 0.x development, minor releases may break compatibility; patch releases p
 ### Changed
 
 - **Breaking:** Ordinary CLI commands now print human-readable fields and indented lists by default, including redirected stdout.
-Add `--json` to scripts to retain the existing JSON report schema; installed startup and instruction callbacks continue to emit JSON automatically.
+Add the global `--json` option before the command to retain the existing JSON report schema; installed startup and instruction callbacks continue to emit JSON automatically.
+- **Breaking:** Replace argparse with Click command groups and consistent option scope.
+Place global `--config` and `--json` before the command, for example `aem --json status`.
+Abbreviated long options are rejected, and invalid numeric CLI durations now exit `2` as usage errors before configuration reads or filesystem effects.
+- Centralize CLI configuration/locking, report output, and operational error handling while keeping command callbacks and reusable core operations separate.
 
 ## [0.3.0] &mdash; 2026-09-30
 

@@ -1,0 +1,103 @@
+"""Installation, inspection, and ownership maintenance commands."""
+
+import click
+
+from .. import automation, self_update
+from ..cli_runtime import AGENT, pass_runtime, agent_option, item_option, timeout_option, preview_option
+from ..model import Error
+from ..updates import run_updates, TRIGGERS
+
+
+@click.command()
+@agent_option
+@item_option
+@timeout_option
+@click.option("--adopt", is_flag=True, help="Record matching existing targets.")
+@click.option("--replace", is_flag=True, help="Back up and replace conflicts for explicit --item selections.")
+@click.option("--reattach", is_flag=True, help="Allow explicitly selected detached items.")
+@preview_option
+@pass_runtime
+def apply(runtime, agent, item, timeout, adopt, replace, reattach, dry_run):
+    """Install prepared local content into selected destinations."""
+    if adopt and replace:
+        raise click.UsageError("--adopt and --replace are mutually exclusive")
+    return runtime.run(lambda session: (session.manager.apply(
+        item, adopt=adopt, replace=replace, reattach=reattach, dry_run=dry_run, timeout=timeout, agent=agent), False))
+
+
+@click.command()
+@agent_option
+@item_option
+@timeout_option
+@pass_runtime
+def sync(runtime, agent, item, timeout):
+    """Update sources, then install only if every update succeeds."""
+    def operation(session):
+        session.state.ready()
+        updates, failed = session.manager.update(timeout=timeout)
+        report = {"updates": updates, "apply": "skipped"}
+        if not failed:
+            report["apply"] = session.manager.apply(item, timeout=timeout, agent=agent)
+        return report, failed
+    return runtime.run(operation)
+
+
+@click.command()
+@click.option("--trigger", required=True, type=click.Choice(TRIGGERS), help="External event to process.")
+@item_option
+@preview_option
+@pass_runtime
+def auto(runtime, trigger, item, dry_run):
+    """Run due skill policies for an external event."""
+    return runtime.run(lambda session: run_updates(session.manager, trigger, item, dry_run=dry_run))
+
+
+@click.command()
+@agent_option
+@click.option("--refresh", is_flag=True, help="Fetch remote content status; otherwise stay offline.")
+@timeout_option
+@pass_runtime
+def status(runtime, agent, refresh, timeout):
+    """Inspect content, ownership, and device automation."""
+    def operation(session):
+        report = (session.manager.saved_status(agent=agent, error=session.configuration_error)
+                  if session.configuration_error else session.manager.status(refresh=refresh, timeout=timeout, agent=agent))
+        for key, inspect in (("automation", automation.status), ("self_update", self_update.status)):
+            try:
+                report[key] = inspect(session.config)
+            except (Error, ValueError) as exc:
+                report[key] = {"error": str(exc)}
+        if "catalog_automation" in session.state.data:
+            report["catalog_automation"] = session.state.data["catalog_automation"]
+        return report, False
+    return runtime.run(operation, status_fallback=not refresh)
+
+
+@click.command()
+@click.argument("item", nargs=-1, required=True, metavar="NAME...")
+@agent_option
+@preview_option
+@pass_runtime
+def detach(runtime, item, agent, dry_run):
+    """Preserve installed contents and release ownership."""
+    return runtime.run(lambda session: (session.manager.detach(item, dry_run=dry_run, agent=agent), False), maintenance=True)
+
+
+@click.command()
+@click.argument("name")
+@click.option("--agent", default="codex", show_default=True, type=AGENT)
+@click.option("--source", is_flag=True, help="Locate the current catalog source for editing and publication.")
+@pass_runtime
+def locate(runtime, name, agent, source):
+    """Locate installed content or its prepared source offline."""
+    return runtime.run(lambda session: (session.manager.locate(name, agent, source=source), False), maintenance=True)
+
+
+@click.command()
+@pass_runtime
+def recover(runtime):
+    """Restore the previous target after an interrupted replacement."""
+    def operation(session):
+        session.manager.recover()
+        return {"status": "recovered"}, False
+    return runtime.run(operation, maintenance=True)

@@ -9,7 +9,7 @@ description = "Deliver user-owned agent configuration and safely manage selected
 license = "MIT"
 license-files = ["LICENSE.txt"]
 requires-python = ">=3.11"
-dependencies = ["tomlkit>=0.13,<1"]
+dependencies = ["click>=8.2,<9", "tomlkit>=0.13,<1"]
 
 [project.scripts]
 aem = "agent_env_man.cli:main"
