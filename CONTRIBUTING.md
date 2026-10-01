@@ -13,9 +13,10 @@ Release entries correspond to the package version in `pyproject.toml` and its `v
 ## Development and validation
 
 Use Python 3.11 or later and Git.
-Create a virtual environment and install the project with `python -m pip install -e .`.
+Create a virtual environment and install the project with `python -m pip install -e ".[dev]"`.
 Runtime dependencies are Click and TOML Kit.
 Tests use the standard-library `unittest` runner and Click's `CliRunner` to check command behavior.
+The development extra adds coverage.py for optional coverage measurement.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -36,6 +37,34 @@ Preserve Linux/WSL and native Windows path handling.
 Use Python filesystem and subprocess APIs, explicit UTF-8 encoding, subprocess argument lists, and `/` in shared relative paths.
 Do not depend on a POSIX shell from the core.
 Windows-only code must not import POSIX locking or signal primitives at runtime.
+
+### Coverage measurement
+
+Run coverage separately from ordinary tests, from the repository root in the activated development environment.
+The configuration measures statements and branches in `src/` and `scripts/`, including the build hook and standalone installer.
+Python subprocesses are also measured; combine their data before generating reports.
+
+```bash
+python -m coverage erase
+python -m coverage run -m unittest discover -s tests -v
+python -m coverage combine
+python -m coverage report
+python -m coverage html
+python -m coverage json
+```
+
+Check the test command's exit status before treating a report as a successful baseline.
+Reports from a failed run may help diagnosis but do not establish successful validation.
+The terminal report shows missing lines and branch destinations; `htmlcov/index.html` provides file-level detail and `coverage.json` contains machine-readable results.
+Coverage data and reports are ignored local artifacts.
+There is no minimum coverage threshold or automatic CI or hook enforcement.
+Keep coverage.py's default exclusions; do not exclude whole files to improve the percentage.
+
+Review unmeasured failure, recovery, and platform paths for meaningful behavior tests before choosing a minimum threshold.
+Record the source revision, environment, test outcomes and skips, statement and branch coverage, and combined percentage with validation results rather than embedding changing baselines in this guidance.
+Linux/WSL measurement does not establish coverage of Windows-only behavior.
+The same commands work with the native Windows environment's Python, but report its results separately.
+Workers copied into temporary request directories are outside the configured source roots; subprocess measurement does not map those copies back to their originals.
 
 ## Architectural contracts
 
