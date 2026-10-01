@@ -3,8 +3,9 @@
 ## Versioning and compatibility
 
 The package version is the single release-level compatibility signal and follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-Users primarily work with the package and the catalog syntax; the catalog has no independent SemVer or release cycle.
-This policy applies to subsequent releases and does not retroactively promise compatibility with interfaces already removed before its adoption.
+Users primarily interact with the package and catalog syntax.
+The catalog has no independent SemVer or release cycle.
+This policy applies to releases after its adoption; it does not retroactively cover interfaces removed earlier.
 The existing migration and maintenance boundaries remain documented in [Removed interfaces](docs/removed-interfaces.md).
 
 The public contract covers:
@@ -17,25 +18,29 @@ The public contract covers:
 - Documented network and filesystem effects, ownership, conflict handling, transaction boundaries, and recovery behavior.
 - The documented Python and operating-system support requirements, within their stated validation limits.
 
-Internal Python functions/classes and storage layouts are not public programming APIs.
+Internal Python functions, classes, and storage layouts are not public programming APIs.
 Human-readable diagnostic wording, JSON whitespace, and object key order are not stable interfaces.
 These exclusions do not permit changing a documented result or weakening ownership and recovery guarantees without a compatibility review.
-CLI and configuration details remain canonical in [Commands](docs/commands.md) and [Configuration](docs/configuration.md).
+[Commands](docs/commands.md) and [Configuration](docs/configuration.md) are the authoritative references for CLI and configuration details.
 
 JSON consumers must ignore unknown object fields; adding an output field is compatible when existing fields and behavior retain their contracts.
 Treat a new enum value as incompatible unless the relevant interface explicitly allows unknown values and defines how consumers handle them.
-This output extensibility rule does not change strict rejection of unknown input configuration fields.
+Output extensibility does not relax the requirement to reject unknown input configuration fields.
 New optional inputs are compatible only when omitting them preserves existing behavior.
 Backward compatibility means a newer package continues to support previously valid use; it does not require an older package to accept newly introduced inputs.
 
 From 1.0.0 onward, use PATCH for backward-compatible bug fixes, MINOR for backward-compatible functionality or public deprecation, and MAJOR for incompatible public-contract changes.
 During 0.x development, PATCH may include backward-compatible fixes and functionality additions; a new command, option, or independently usable capability does not by itself require MINOR.
 Bounded additions to existing workflows, such as optional directory navigation from a lookup command, may ship in PATCH releases even when they include shell integration or new output behavior selected through an explicit option.
-Maintainers may choose MINOR for compatible additions according to their scope and significance, considering the breadth of new workflows, configuration or integration changes, and the overall size of the release; this is a release judgment rather than an automatic rule triggered by any new functionality.
+Maintainers may choose MINOR for compatible additions based on their scope and significance.
+Consider the breadth of new workflows, configuration and integration changes, and the overall size of the release; new functionality does not automatically require MINOR during 0.x.
 Use MINOR for public deprecation or incompatible changes during 0.x.
-PATCH eligibility never relaxes compatibility: previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership/recovery guarantees without user migration.
-An ancillary integration must report its own recoverable failure separately rather than prevent the existing workflow from completing; unsafe shared state and unresolved recovery remain fatal.
-Additive manager-owned side effects may qualify for PATCH when they preserve user content and existing choices; required reconfiguration of existing use, new fatal prerequisites for previously valid calls, and incompatible enum values do not.
+PATCH eligibility never relaxes compatibility requirements.
+Previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership and recovery guarantees without user migration.
+An ancillary integration must report recoverable failures separately so the existing workflow can complete.
+Unsafe shared state and unresolved recovery remain fatal.
+Additional manager-owned side effects may qualify for PATCH when they preserve user content and existing choices.
+Required reconfiguration, new fatal prerequisites for previously valid calls, and incompatible enum values do not qualify.
 From 1.0.0 onward, compatible functionality remains MINOR, including ancillary additions.
 Classify a release by its most significant change, based on the previous released contract rather than intermediate development states.
 Documentation corrections and internal maintenance that preserve the contract may ship in a PATCH release.
@@ -46,11 +51,13 @@ Document replacements and any required user migration when deprecating or breaki
 
 Catalog, machine, and state format versions are integer interpretation markers, not independently released product versions.
 Do not increment them for ordinary compatible additions; change a marker when readers need to distinguish incompatible representations or interpretations.
-A marker remaining unchanged does not make an incompatible change compatible.
-A marker changing does not itself require a package MAJOR increment if AEM safely preserves the previous contract through supported reading or conversion.
-AEM owns machine/state compatibility handling: users must not have to edit version markers or discard ownership records to upgrade.
+An unchanged marker does not make an incompatible change compatible.
+Changing a marker does not itself require a package MAJOR increment if supported reading or conversion safely preserves the previous contract.
+AEM is responsible for machine and state compatibility.
+Users must not have to edit version markers or discard ownership records to upgrade.
 Removing support or requiring manual reconfiguration is an incompatible change even when the affected data is generated rather than hand-written.
-No automatic migration is implied by this policy; any future conversion must preserve contents, ownership, and recoverability and be documented and tested.
+This policy does not imply automatic migration.
+Any future conversion must preserve contents, ownership, and recoverability, and must be documented and tested.
 Review compatibility against existing catalogs, saved machine/state data, and installed integrations, using fixtures for the affected released contracts when implementation changes.
 
 ## Changelog and releases
@@ -63,7 +70,7 @@ Release entries correspond to the package version in `pyproject.toml` and its `v
 Use Python 3.11 or later and Git.
 Create a virtual environment and install the project with `python -m pip install -e .`.
 Runtime dependencies are Click and TOML Kit.
-Tests use the standard-library unittest runner and Click's CliRunner for command-boundary checks.
+Tests use the standard-library `unittest` runner and Click's `CliRunner` to check command behavior.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -73,13 +80,15 @@ git diff --check
 
 Run these commands from the activated environment.
 On native Windows the same test command works with `.\.venv\Scripts\python.exe`.
-Tests create temporary sources, targets, config, state, and local Git remotes; do not use actual user homes, credentials, or network remotes in tests.
-Successful symlink tests skip if the host cannot create links; the simulated capability-failure test must still run.
+Tests use temporary sources, targets, configuration, state, and local Git remotes.
+Do not use actual user homes, credentials, or network remotes in tests.
+Tests that require successful symlink creation skip when the host cannot create links.
+The test that simulates unavailable symlink support must still run.
 The initial validation was performed on Linux with Python 3.12.
 Native Windows tests have run on Python 3.12, but link-dependent tests require a host with symlink creation enabled before claiming full Windows readiness.
 
 Preserve Linux/WSL and native Windows path handling.
-Use Python filesystem/subprocess APIs, explicit UTF-8, argument lists, and `/` in shared relative paths.
+Use Python filesystem and subprocess APIs, explicit UTF-8 encoding, subprocess argument lists, and `/` in shared relative paths.
 Do not depend on a POSIX shell from the core.
 Windows-only code must not import POSIX locking or signal primitives at runtime.
 
@@ -90,7 +99,7 @@ Command callbacks adapt inputs to core operations; shared execution owns configu
 Keep core installation, delivery, ownership, and policy operations independent of Click contexts so workers and non-CLI callers can reuse them.
 Help and usage validation must complete before reading machine configuration or acquiring locks.
 Global options belong before the command; repeated policy options must preserve the distinction between omission and an explicit replacement list.
-Machine callbacks always emit their agent/worker JSON contracts regardless of ordinary output mode.
+Machine callbacks must emit the JSON required by their agent or worker contracts regardless of ordinary output mode.
 The standalone installer and external update worker remain standard-library-only because they run outside the installed package environment.
 
 The manager owns reusable installation and delivery behavior.
@@ -101,21 +110,23 @@ It must not prescribe how to author managed content or restrict user-requested e
 
 Delivery prepares local source paths; installation consumes those paths without network access.
 Git must remain an end-to-end supported delivery path, not an external setup prerequisite that bypasses the core.
-External folders do not imply ownership of the service that synchronizes them.
+AEM does not own the service that synchronizes an external folder.
 Keep source roots disjoint, and never nest externally synchronized sources inside managed Git checkouts.
 
 Targets directly link to local source content.
 Do not add snapshot activation semantics silently: changing this contract requires an explicit design decision and updated user documentation.
-`update` therefore can change live instruction contents without `apply`.
+An `update` can therefore change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest catalog no longer declares those items.
 Allow Git-ignored runtime files in checkouts while continuing to reject tracked changes and nonignored untracked files.
-All content and catalog fast-forwards must refuse overwriting ignored local files at the Git mutation boundary; never delete caches or weaken local-file preservation to make an update succeed.
-Ignored regular contents remain part of directory payloads for hashing, copies, and detach; retain full-tree local-modification checks for installed copies and reject nested links and special files during payload validation.
+All content and catalog fast-forwards must refuse to overwrite ignored local files when mutating the Git checkout.
+Never delete caches or weaken local-file preservation to make an update succeed.
+Ignored regular files and directories remain part of directory payloads for hashing, copying, and detach.
+Check the entire installed-copy tree for local modifications, and reject nested links and special files during payload validation.
 
 The primary input is a user-owned skill, instruction, and settings catalog, independent of the repositories it lists.
 The loader reads a local TOML file supplied directly or prepared through Git catalog delivery; policy composition must remain independent of this transport and any future auxiliary-file layout.
 Each skill has a stable name and selects one Git repository and optional subdirectory.
-Catalog v2 requires named sources with explicit Git/external types and one source reference per item.
+Catalog v2 requires named sources with explicit Git or external types and one source reference per item.
 Validate its surface syntax separately, then normalize to the existing runtime model; do not accept that private model as input.
 Keep skill installation fields under `install`, instruction installation fields under `install.bundle`/`install.entry`, and skill entry files fixed to `SKILL.md`.
 Catalog trigger arrays replace inherited values; `[]` disables automatic execution even in full mode, while omitted policies retain their full-mode participation.
@@ -123,7 +134,7 @@ Preserve machine policy syntax, effective policy JSON, per-skill attempt records
 Do not require upstream skill repositories to add manager manifests or aggregate their content in this repository.
 The catalog owns repository URLs, requested branches, and declarative skill automatic update policies; machine configuration owns its catalog binding, checkout storage, target roots, and explicit mode overrides.
 Bootstrap clones missing repositories directly from the catalog, discovers and records their default branches when unspecified, and validates SKILL.md before publishing a checkout.
-Application paths consume these prepared local checkouts without fetching.
+Installation consumes these prepared local checkouts without fetching.
 Share a checkout only when skills explicitly reference the same named repository; equal URLs under different source names do not imply shared ownership.
 Preserve named-source checkout paths; do not migrate or remove old direct-declaration checkouts automatically.
 Validate every skill in a shared checkout before publishing it, and guard all active links from that checkout before advancing it.
@@ -138,32 +149,35 @@ Keep detach, recover, saved-state lookup, offline status fallback, and removal-o
 These paths may ignore unknown machine fields and opaque modes, but must validate the specific saved paths, blocks, groups, and observations they consume.
 Preserve unknown fields, unselected records, and the original state version when saving maintenance results.
 Reject unknown state envelopes instead of guessing how to undo them.
-Keep the breaking-change instructions in docs/removed-interfaces.md aligned with this boundary.
+Keep the breaking-change instructions in [Removed interfaces](docs/removed-interfaces.md) aligned with this boundary.
 
 Instruction bundles select a named Git repository or a logical external source without source-local manifests.
 Keep external path bindings in machine configuration and shared source/root/entry selections in the catalog.
-Bootstrap accepts a positional catalog and repeated optional --external NAME=PATH bindings, persists them in the selected/default machine file, and reuses omitted bindings.
+Bootstrap accepts a positional catalog and optional repeated `--external NAME=PATH` bindings.
+Persist them in the selected or default machine file, and reuse saved bindings when omitted.
 Default agent and skills roots only when absent; validate declarations and existing ownership before saving bindings or contacting content repositories.
-Support explicit --config, --catalog, and root/storage overrides.
+Support explicit `--config`, `--catalog`, and root and storage overrides.
 Do not parse document policy, applicability, or reading order.
-A Codex instruction bundle owns a directory link, a direct original-entry link, and one SessionStart group in the entry root's hooks.json.
-Bootstrap only prepares and validates sources; apply installs links and merges the hook without granting Codex trust or modifying config.toml.
-Preserve unrelated JSON events, groups and metadata; malformed or redirected hook files must fail preflight.
+A Codex instruction bundle owns a directory link, a link directly to the original entry, and one `SessionStart` group in the entry root's `hooks.json`.
+Bootstrap only prepares and validates sources.
+Apply installs links and merges the hook without granting Codex trust or modifying `config.toml`.
+Preserve unrelated JSON events, groups, and metadata; malformed or redirected hook files must fail preflight.
 Own the complete AEM group identified by its saved marker, not the whole hooks file, and aggregate selected groups into one replacement per target file to avoid competing transactions.
 Entry selection includes bundle and hook installation, but never extends replacement permission to an implicitly selected bundle.
-Report the required /hooks trust review after apply; preview must show the planned group without registering it.
+Report the required `/hooks` trust review after apply; preview must show the planned group without registering it.
 Detach materializes both links and releases hook ownership while retaining its configuration, so saved locator records still support preserved documents.
 Default bundle installation to `<machine-file>.bundles/<bundle-name>` without requiring a configured rules root; preserve explicit location overrides and relocation guards.
 Resolve roots from saved installation records and actual filesystem links, not from prompt text or the current catalog.
 Saved location lookup must remain offline, avoid updating ownership records, work for detached copies without a catalog, and reject missing or redirected entries and replaced active links.
-User-facing locate also supports saved skills and current catalog source lookup for uninstalled content or explicit --source requests.
+User-facing `locate` also supports saved skills and current catalog source lookup for uninstalled content or explicit `--source` requests.
 Keep callbacks on saved instruction lookup only; never fall back from a broken saved installation to a different source.
 Source lookup validates paths and Git identity without requiring a clean checkout, fetching, or installing content.
 Keep copy/detached locations distinct from source editing paths so publication never implies collecting installed-copy edits.
 Use an absolute interpreter for hook execution, quote POSIX arguments, and explicitly encode a PowerShell command on Windows without evaluating user paths.
-The callback emits only path metadata as additionalContext, never document contents, and requests a structured stop on lookup failure.
+The callback emits only path metadata as `additionalContext`, never document contents, and requests a structured stop on lookup failure.
 Instruction callbacks wait at most 5 seconds total for the installation and configuration locks within their 10-second hook limit, then read configuration and state under the acquired lock; other commands retain immediate contention failure.
-Limit callback metadata to the effective root, entry, and global_entry reading locations; keep installed_root and detached in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
+Limit callback metadata to the effective `root`, `entry`, and `global_entry` reading locations.
+Keep `installed_root` and `detached` in locator diagnostics so a preserved copy cannot be mistaken for the live entry's source tree.
 Preserve original documents and use the existing per-target conflict/recovery machinery.
 Guard the saved entry path of active Git bundles even when their catalog declarations disappear or a shared skill initiates update.
 Instruction-specific automatic policies are not supported; skill policies may still advance shared checkouts.
@@ -171,13 +185,14 @@ Explicit full device automation may prepare/update/apply instruction bundles, ex
 
 ## Catalog delivery contracts
 
-Keep local catalog strings backward compatible and Git bindings machine-owned.
+Preserve compatibility for local catalog path strings, and keep Git bindings in machine configuration.
 Bootstrap accepts the catalog repository, relative entry path, and optional branch without requiring a hand-written machine file; persist the resolved branch for subsequent operations.
 Catalog delivery precedes content delivery and must not depend on declarations inside the catalog itself.
 Use a separate checkout even when catalog and content share a remote, so content updates cannot implicitly change the inventory or automatic policies.
 Do not merge checkout identities by URL.
 
-A missing remote catalog is the explicit exception to declaration validation before network access: clone it to temporary storage, then validate its tracked regular UTF-8 entry, declarations, machine bindings, and existing ownership before publishing the checkout or saving the binding.
+Preparing a missing Git catalog checkout is the explicit exception to declaration validation before network access.
+Clone it to temporary storage, then validate its tracked regular UTF-8 entry, declarations, machine bindings, and existing ownership before publishing the checkout or saving the binding.
 Content repositories must remain untouched until preflight succeeds.
 Validate candidate revisions against final machine paths without temporarily changing the active binding or checkout.
 Catalog updates fast-forward only after the candidate passes the same declaration and ownership checks.
@@ -185,14 +200,16 @@ Preserve the old catalog on validation failure, local edits on delivery failure,
 Do not reset mismatching checkouts on rebind.
 
 Explicit catalog update/publication and separately opted-in catalog automation may contact an existing catalog's remote.
-Keep catalog automation policy machine-owned, outside the file it updates; default to manual and require a Git binding when enabled.
+Keep catalog automation policy in machine configuration, outside the file it updates.
+Default to manual, and require a Git binding when automation is enabled.
 Expose trigger/interval/timeout selection through bootstrap and setup, preserving omitted fields and replacing explicitly supplied trigger lists.
 Validate supplied policies before network access or saving configuration.
 Policy-only setup must use the machine configuration journal without requiring an executable, registering integrations, or rewriting profiles.
 Use the same candidate validation and fast-forward safeguards as explicit catalog update, without bootstrapping or applying declarations.
 Persist a separate attempt clock before remote access, throttle failed attempts across events, and reset the effective clock on a changed repository/branch/entry binding.
 Explicit catalog operations ignore this clock, and automatic previews remain offline without recording attempts.
-In policies mode, startup must run due catalog work before resolving skill policies, reload successfully updated declarations, and skip skill work on a failed catalog attempt while remaining fail-open.
+In `policies` mode, startup must run due catalog work before resolving skill policies and reload successfully updated declarations.
+A failed catalog attempt must skip skill work for that event while allowing startup to continue.
 Ordinary content update, sync, skill automatic policies, and refreshed content status must not fetch or advance the catalog.
 Keep catalog inspection/location offline and usable for repairing malformed catalog contents, and retain catalog-independent maintenance paths.
 Catalog publication selects the whole repository and follows the existing publication contracts; it never installs declarations or changes content attempt clocks.
@@ -201,7 +218,8 @@ Verify registration, saved-binding reuse, update/bootstrap/apply and locate/edit
 
 ## Publication contracts
 
-Explicit publish selects catalog skill, instruction bundle, or setting names and groups them by the existing checkout identity, reporting all catalog consumers of each selected checkout.
+Explicit `publish` selects catalog skill, instruction bundle, or setting names and groups them by existing checkout identity.
+Report all catalog consumers of each selected checkout.
 Do not infer per-skill file ownership for publication: commit and push operate on the whole repository, including changes outside catalog subdirectories.
 A supplied message authorizes staging all nonignored changes; without it, require a clean worktree and publish existing commits only.
 Keep preview offline and preserve the index, HEAD, installation records, and automatic-policy attempt clocks.
@@ -210,7 +228,7 @@ Only a successful empty listing permits initial publication without a remote bra
 Never reinterpret authentication, transport, listing, or fetch failures as an empty remote.
 Refuse behind/diverged histories without rewriting or merging them.
 Push only the registered branch to the registered origin, without force or implicit additional refs.
-Preserve staged changes/commits after failures, report independent repository outcomes, and never claim cross-repository atomicity.
+Preserve staged changes and commits after failures, report each repository's outcome independently, and never claim atomicity across repositories.
 External synchronization, fork/PR workflows, and collecting installed-copy edits are outside this command's scope.
 Exercise shared skill/instruction consumers, unrelated files, existing commits, offline preview, rejected histories, remote failure, and retry using local Git fixtures.
 
@@ -222,14 +240,15 @@ Keep the existing `["manual"]` sentinel in effective policy JSON and the existin
 Validate all policy declarations, including unused named policies, before network access.
 Keep common trigger/action/interval settings separate from source-specific delivery options; reject unsupported capabilities rather than substituting another action.
 
-External callers supply shell-start, agent-start, or interval events to `auto`.
+External callers supply `shell-start`, `agent-start`, or `interval` events to `auto`.
 Policy configuration does not install hooks, modify shell profiles, register OS tasks, or imply an in-process scheduler.
-Do not make ordinary apply/status/bootstrap perform implicit automatic updates.
+Ordinary `apply`, `status`, and `bootstrap` must not perform implicit automatic updates.
 Explicit commands retain their existing contracts and ignore automatic policy throttles.
 
 Under the existing configuration lock, persist each skill's attempt before network access and throttle failures as well as successes across all its events.
 Preview must not fetch or record attempts.
-Automatic sync applies each successfully updated skill independently; this intentionally differs from explicit sync's all-updates-before-apply gate.
+Automatic sync applies each successfully updated skill independently.
+Explicit sync instead requires all updates to succeed before applying.
 Preserve existing per-target transactions, stop if recovery is pending, and never adopt, replace conflicts, or reattach detached skills automatically.
 Automatic policies cover catalog skills; explicit sync is unthrottled.
 
@@ -237,13 +256,13 @@ Automatic policies cover catalog skills; explicit sync is unthrottled.
 
 Default to `policies` so existing installations retain independent automatic behavior.
 Expose `off`/`policies`/`full` and full trigger/interval/timeout options in installer/setup, preserving omitted fields and supporting configuration-only journaled edits.
-`off` gates automatic events, never explicit maintenance/update commands.
+`off` disables automatic events; explicit maintenance and update commands remain available.
 Full mode owns one persisted attempt clock across events and failures; do not consult or modify individual automatic clocks during its stages.
 Reject individual skill/catalog event entrypoints in full mode to avoid duplicating the unified schedule.
-Queue full work on the existing external standard-library worker after requester OS termination, including when tool updates are off.
+Queue full runs through the existing external standard-library worker after the requesting process exits, including when tool updates are off.
 Apply the saved tool release permission first, then invoke the freshly installed CLI before catalog/content work; never import the replacing package into the external worker.
 Release installation/configuration locks before invoking the fresh CLI, and validate mode/runtime binding and a one-use token under its locks.
-Cancel queued work when automation settings change and prevent queued individual tool updates from surviving a switch to off/full.
+Cancel queued work when automation settings change, and cancel queued individual tool updates when switching to `off` or `full`.
 Validate and fast-forward the catalog before loading full content selection; skip transport for local/unbound catalogs.
 Full mode opts in otherwise unconfigured skills but preserves explicit or inherited empty-trigger exclusions using the existing precedence.
 Prepare/update eligible sources before applying selected items, with no adoption, replacement, reattachment, deletion, publication, or hook trust granting.
@@ -253,14 +272,16 @@ Test actual fresh-CLI continuation, stage ordering, new declarations, exclusions
 
 ## Ownership and safety
 
-Only declared catalog skills/instruction bundles and the package-owned official integration skill may be installed; a content repository update cannot expand the local catalog.
+Only declared catalog skills and instruction bundles, and the package-owned official integration skill, may be installed.
+A content repository update cannot expand the local catalog.
 Catalog skill names identify ownership independently of repository URLs and paths.
 Instruction ownership uses the bundle name and bundle/entry/hook component.
 Do not infer ownership from an existing file or delete targets when declarations disappear.
 Reject overlapping target trees and require detach before changing an existing item's path or mode.
 A directory item owns its entire subtree, so extra local files are meaningful modifications.
 Repository-root skills are valid and use direct links, not an extra content layer.
-Exclude only their top-level .git administration entry from content fingerprints, copies, and materializing detach; never duplicate a repository database or worktree pointer into an unmanaged skill.
+Exclude only their top-level `.git` administration entry from content fingerprints, copies, and detach materialization.
+Never duplicate a repository database or worktree pointer into an unmanaged skill.
 Git identity checks still validate the managed checkout's origin and expected branch before applying or updating.
 
 Link and copy have different contracts.
@@ -287,7 +308,7 @@ Policy changes must cover precedence, empty-trigger opt-out, event selection, of
 Test meaningful user-visible behavior and preservation boundaries rather than mirroring private implementation functions.
 When adding or changing a workflow that connects multiple commands, verify that each command's outputs and selected scope match the next command's inputs and actual operation targets.
 Where source content and installed content can differ, cover link, copy, and detached states and verify which content an edit changes and which content the subsequent command consumes.
-Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
+Keep [Configuration](docs/configuration.md) and [Commands](docs/commands.md) authoritative for TOML fields and CLI contracts.
 Keep the README focused on user workflows and link to those references.
 Installation and update paths must reject unknown fields and invalid types instead of silently accepting misspelled or removed settings.
 Update examples and platform limitations with interface changes.
@@ -300,7 +321,8 @@ The packaged [idk-aem skill](skills/idk-aem/SKILL.md) should help agents choose 
 Prefer discovery through the installed CLI's command help and authoritative local tool documentation over copying command inventories, option syntax, configuration schemas, or detailed procedures into the skill.
 Give agents concrete local entry points and explain when to consult them; use installed-version help for available syntax and local documentation matching that version for behavior.
 Use documentation paths only when they resolve in the installed environment; do not rely on repository-relative paths to unbundled files or web links that require fetching documentation.
-Assume a working installation provides its local help and documentation; missing or incomplete local materials are a separate installation/documentation issue, not a reason to add fallback instructions to the skill.
+Assume a working installation provides local help and documentation.
+Treat missing or incomplete local materials as an installation or documentation issue; do not add fallback instructions to the skill.
 Keep essential guidance inline when it prevents a material mistake, rather than making ordinary use depend on loading an entire manual.
 Do not move duplicated manuals into skill references merely to shorten the entrypoint.
 
@@ -320,7 +342,8 @@ Validate package identity and tag/version agreement before installation, and pin
 Do not advance or publish the development checkout as a self-update side effect.
 The standalone worker must remain standard-library-only, run on a Python outside the replaced tool environment, and wait for its requesting AEM process to exit.
 Copy worker code into a distinct request directory before launching; never depend on package files surviving replacement.
-Registered commands and workers share an installation lock before their configuration lock, including across machine files sharing one uv tools directory.
+Registered commands and workers must acquire the shared installation lock before their configuration lock.
+This order also applies across machine files that share one uv tools directory.
 Recheck saved policy, recovery state, request identity, and actual installed version before replacement.
 Persist attempts before launch, throttle failures across startup events, keep previews offline and read-only, and distinguish queued work from completed updates.
 Keep self commands independent of content declarations; ordinary content operations and instruction location callbacks must not schedule self-updates.
@@ -330,7 +353,8 @@ Package-manager rollback and real Windows replacement require separate evidence 
 Keep the installer standard-library-only; configuration and ownership logic belong in the package.
 Setup owns machine selection, startup registration, and official skill links, while bootstrap prepares catalog content and apply installs it.
 Agent integration includes the startup hook and an ancillary link to the packaged official skill at the selected skills root.
-Complete and persist core setup integrations before attempting optional skill installation/removal, and report their outcomes separately in `official_skills` without changing the core `integrations` results or successful exit status.
+Complete and persist core setup integrations before attempting optional skill installation or removal.
+Report skill outcomes separately in `official_skills`, preserving the core `integrations` results and successful exit status.
 Preflight ancillary skills independently per agent, preserve conflicting targets, and permit explicit setup retries after resolving their cause.
 Do not suppress unresolved recovery journals or shared-state errors; the worker's strict refresh and pre-replacement edit guard remain independent of best-effort setup.
 Keep official skill ownership under setup, independently of catalog declarations and content policies.
@@ -343,7 +367,8 @@ Older saved source hashes may differ after another configuration or an external 
 Catalog update policies must never register hooks implicitly.
 
 Selections accumulate, and repeated setup must preserve unrelated content and avoid duplicate groups or blocks.
-Preflight all core profile edits before changing any of them, commit each target through the existing recovery journal, and save machine selection after core target transactions and before ancillary skill attempts.
+Preflight all core profile edits before changing any of them, and commit each target through the existing recovery journal.
+Save machine selection after core target transactions and before ancillary skill attempts.
 A retry must recognize completed ownership records after a partial failure.
 Setup removal must not delete user content or silently detach installed skills and instructions.
 Official integration removal deletes only unchanged owned links, preserving their package sources and transaction backups.
@@ -358,9 +383,9 @@ Do not grant agent hook trust or rewrite user execution policies.
 
 Resolve product-specific defaults, hook serialization, and callback output through internal agent profiles.
 Codex remains the only shipped profile; use a fake profile to validate injection and multiple destinations without claiming support for another product.
-Generate instruction callbacks through agent-hook NAME --agent AGENT and the internal profile.
+Generate instruction callbacks through `agent-hook NAME --agent AGENT` and the internal profile.
 Store per-target ownership and shared consumers independently from per-skill Git delivery and automatic attempt clocks.
-A shared target has one owner, and cannot be materialized for just one of its consumers.
+A shared target has one owner and cannot be materialized for just one of its consumers.
 Explicit catalog roots retain their meaning; omitted destinations use selected agent defaults.
 
 During development, switch `STARTUP_BRIEFING_OUTPUT` in `src/agent_env_man/agents.py` between `"systemMessage"` (UI warning) and `"additionalContext"` (model context) to try both startup briefing behaviors.
@@ -373,13 +398,14 @@ Shell quoting and PowerShell serialization tests do not establish native shell o
 ## Staged settings architecture
 
 Keep settings transport, editable stages, and actual application files distinct.
-Only explicit operations may collect, export, receive, or apply settings; existing full/skill automation must exclude them.
+Only explicit operations may collect, export, receive, or apply settings.
+Full device automation and automatic skill updates must exclude settings.
 A shared checkout update by another consumer may change the source but must not activate or rewrite its settings stage.
 
 Keep format parsing, value identity, field enumeration, and preserving edits behind the format adapter.
 Do not use TOML parser nodes as persisted ownership values or expose them in CLI reports.
 Shared intent metadata is an AEM contract, independent of the supported application format.
-The first implementation supports only TOML, atomic arrays/empty tables, and one owner per target file.
+The first implementation supports only TOML, treats arrays and empty tables as atomic values, and permits one owner per target file.
 
 Editable stages never replace trusted shared/apply comparison bases.
 Deletion, ownership release, and local detach have distinct semantics; preserve intent records for newly connected and offline devices.

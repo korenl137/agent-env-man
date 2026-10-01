@@ -22,6 +22,8 @@ Prepared sources remain usable offline.
 - [Command reference](docs/commands.md): complete command and option list.
 - [Instruction walkthrough](docs/instruction-bundles.md): external and Git bundles on Linux/WSL and Windows.
 - [Staged settings](docs/settings-management.md): edit and share selected application TOML fields.
+- [Automation and AEM updates](docs/automation.md): device modes, independent policies, and tool updates.
+- [Maintenance and recovery](docs/maintenance.md): conflicts, detach, backups, repair, and uninstalling.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
 - [Changelog](CHANGELOG.md): release history and upcoming changes.
 - [Contributing](CONTRIBUTING.md): development and validation contracts.
@@ -266,179 +268,49 @@ See [Staged settings](docs/settings-management.md) for declarations, conflicts, 
 
 ## Device automation modes
 
+A new installation defaults to `policies`, with AEM updates off and catalog/skill automation requiring opt-in.
+Choose `full` to queue AEM, catalog, and eligible skill/instruction updates in sequence, including preparation and installation of new declarations.
+Choose `off` to disable automatic work while retaining explicit commands.
+Application settings remain explicit in every mode.
+
 ```bash
 python scripts/setup.py --shell bash --agent codex --automation full --self-update compatible
-aem setup --automation full --automation-trigger shell-start --automation-trigger agent-start \
-  --automation-interval 3600 --automation-timeout 30
 aem automation --trigger agent-start --dry-run
-aem setup --automation policies
 aem setup --automation off
 ```
 
-`policies` is the backward-compatible default: tool, catalog, and skill policies run as before.
-`off` disables startup and event-driven automatic work; explicit update, sync, catalog update, and self update commands remain available.
-`full` queues one sequential run after the requesting process exits:
-
-1. Update AEM within its saved release range, or skip this stage when tool updates are off.
-1. Invoke the installed AEM afresh and validate/fast-forward the Git catalog; local or unbound catalogs skip delivery.
-1. Prepare and update eligible skill/instruction sources, then apply after all selected delivery succeeds.
-
-Full mode uses one shared trigger list and attempt interval, including failed attempts.
-Its defaults are shell/agent startup, 3600 seconds between attempts, and 30 seconds per content/catalog Git phase.
-It replaces individual automatic triggers, intervals, and check/sync actions for this run.
-Skills without an explicit trigger policy participate; explicit `manual` exclusions resolve through catalog defaults, named policy, and skill fields.
-Detached skills and detached instruction groups remain excluded.
-Shared checkout updates can still change linked consumers excluded from installation, including manual skills; this is the existing shared-source contract.
-It never adopts conflicts, replaces user edits, reattaches detached content, removes undeclared targets, or grants agent hook trust.
-New valid catalog declarations can be prepared and installed in full mode.
-A failed stage stops later stages; successful earlier work remains and normal per-target recovery rules apply.
-
-The installer must register an external Python, uv, and the installation directories before full mode can be enabled, even when tool updates are off.
-No OS scheduler or daemon is installed: use startup integrations or `aem automation --trigger interval` from an external scheduler.
-`aem auto` and `aem catalog auto` require `policies` mode; use the unified automation command in full mode to avoid duplicate event paths.
-Policy-only setup edits require no profile changes; omitted fields retain saved values and supplied trigger lists replace the saved list.
-Inspect the eventual sequence and stage results under `automation` in `aem status`.
-Queued work is not yet completed; changed mode/runtime settings cancel pending work.
-Registered commands may report lock contention while the worker or continuation holds the installation/configuration locks.
-Native Windows replacement and real uv reinstallation retain their existing validation limits.
+Automatic work preserves conflicts and detached content.
+Shared checkout updates can still change linked consumers excluded from installation.
+Queued work is not yet completed; inspect `aem status` for eventual results.
+See [Automation and AEM updates](docs/automation.md) for mode comparisons, schedules, catalog and skill policies, and failure behavior.
 
 ## Update AEM itself
 
 ```bash
-python scripts/setup.py --shell bash --agent codex --self-update compatible
-aem setup --self-update off       # Change the saved automatic mode.
-aem self status                  # Installed version, mode, and last attempt.
-aem self update --dry-run         # Offline preview.
-aem self update                  # Queue an explicit compatible release update.
-aem self update --mode breaking  # Permit incompatible releases for this attempt.
+aem self update --dry-run
+aem self update
+aem self status
 ```
 
-`compatible` permits newer releases in the same major version; during `0.x`, it permits only patches in the same minor version.
-`breaking` permits any newer final release, including incompatible changes; review migration instructions before enabling it.
-Prereleases and untagged commits are excluded.
-AEM reads `vX.Y.Z` tags from its upstream Git repository, verifies the matching package metadata, and installs the selected commit through uv.
-Use the installer's `--update-repository URL` to select another release repository.
-Development checkout edits are not published or installed by this path.
-
-In `policies` mode with tool updates enabled, the existing startup callback queues at most one attempt per day across shell and agent events; failures are throttled too.
-It works without a bound content catalog.
-The worker waits for the requesting AEM process to exit, then uses the installer's external Python rather than the environment being replaced.
-The saved external Python and uv executables must remain available; rerun the installer if they move.
-A queued result means the attempt has been scheduled, not completed; use `aem self status` for the eventual result.
-Explicit updates bypass the daily throttle and work even with automatic updates off.
-Content updates, catalog delivery, instruction location callbacks, and `auto` do not update AEM itself.
-No daemon or OS scheduler is installed.
-
-Self-updates coordinate registered AEM commands sharing the same uv tools directory.
-Commands can report lock contention during replacement; startup remains fail-open.
-Other package-manager processes and external editors are not covered by these locks.
-A failed uv replacement is reported without a rollback guarantee; rerun `scripts/setup.py` to repair the installation if AEM cannot start.
-Native Windows worker/replacement and actual agent hook continuity require platform validation.
-
-## Automatic catalog updates
-
-Choose automatic catalog events during Git registration:
-
-```bash
-aem bootstrap --catalog-repository URL --catalog-path catalogs/personal.toml \
-  --catalog-trigger shell-start --catalog-trigger agent-start
-```
-
-Change the saved policy later:
-
-```bash
-aem setup --catalog-trigger agent-start --catalog-interval 3600 --catalog-timeout 5
-aem setup --catalog-trigger manual  # Disable automatic catalog updates.
-aem setup --catalog-trigger interval --dry-run
-```
-
-These options write device-local settings; no manual `machine.toml` edit is required.
-Repeated trigger options replace the complete event list; omitted options retain their saved values.
-Policy-only setup needs no executable or startup selections and leaves existing profiles alone.
-The underlying `catalog_update` table remains documented in [Configuration](docs/configuration.md#catalog-automatic-update-settings).
-
-The default trigger is `manual`; automatic updates require a Git catalog binding.
-In `policies` mode, setup's existing startup callback updates a due catalog first, then resolves skill policies from the validated new catalog.
-If that catalog attempt fails, the callback skips skill updates for the event and still allows startup to continue.
-External callers can use `aem catalog auto --trigger interval`; add `--dry-run` for an offline preview.
-`aem auto` continues to operate on skills only.
-
-Catalog automation shares one attempt clock across events, throttling failures too.
-It uses the same validation and fast-forward guards as `aem catalog update`, preserving local edits and the previous catalog on validation failure.
-The catalog update itself does not bootstrap or apply content; startup's subsequent skill policies retain their existing scope and require prepared sources.
-Explicit catalog updates bypass the automatic interval.
-See `aem catalog status` or `aem status` for the last automatic result.
-
-## Automatic updates
-
-In `policies` mode, automatic skill updates default to disabled (`trigger = []`).
-Opt in through the catalog:
-
-```toml
-[updates.defaults]
-trigger = ["shell-start", "agent-start"]
-action = "sync"
-min_interval = 600
-timeout = 5
-
-[skills.report.update]
-trigger = []
-```
-
-Policies apply only to skills and do not install integrations.
-Setup connects interactive shell and agent startup to a fail-open `startup` callback.
-Without setup, external callers can invoke `aem auto --trigger shell-start`, `agent-start`, or `interval`.
-For `interval`, arrange an OS scheduler; AEM does not run a daemon.
-Preview due work with `aem auto --trigger agent-start --dry-run`.
-
-Each skill has one attempt clock across events; failed attempts are throttled too.
-Automatic sync handles skills independently and preserves conflicts and detached items.
-Explicit `update`, `apply`, `sync`, and `status --refresh` ignore automatic policies.
-Agent startup shows a brief message for completed updates or installations; full outcomes and failures remain in status.
-Instruction location hooks installed by apply do not trigger updates.
-See [policy fields and precedence](docs/configuration.md#update-policies).
+`compatible` permits newer final releases in the same major version, or only patches in the same minor version during `0.x`.
+Explicit updates work with automation off and queue a worker; use `aem self status` to check completion.
+See [AEM update guidance](docs/automation.md#update-aem-itself) for automatic updates, incompatible releases, runtime requirements, and repair.
 
 ## Conflicts, detach, and recovery
 
-AEM refuses unmanaged targets and locally modified copies unless explicitly authorized:
+AEM refuses unmanaged targets and locally modified copies unless explicitly authorized.
+Detach preserves current contents and releases ownership; automatic work does not reinstall detached content.
 
 ```bash
-aem apply --item report --adopt     # Record matching existing content.
-aem apply --item report --replace   # Back up and replace a conflict.
-aem detach report                  # Keep contents and release ownership.
-aem detach personal:bundle personal:entry
+aem apply --item report --dry-run
+aem detach report
+aem status
+aem recover
 ```
 
-Skill backups are retained in `<machine-file>.state/skill-backups/<target-name>-<id>`, outside agent skill discovery roots.
-They preserve previous contents or link identity and support recovery across filesystems.
-Other target backups are retained as `<target>.aem-backup-<id>`.
-Existing sibling backups are preserved; move reviewed old skill backups outside discovery roots if they appear as duplicate skills.
-A directory item owns its entire subtree; local additions count as modifications.
-Detach materializes links, preserves copies, and records a tombstone to prevent automatic reinstall.
-After moving the preserved target aside, explicitly reattach with `aem apply --item report --reattach`.
-Detaching instructions retains hook configuration and locator records for the preserved copy; disable the retained hook in Codex if no longer wanted.
-
-Apply preflights selected items and journals each replacement before changing targets.
-Transactions are per target: earlier successful items can remain installed if a later item fails.
-After an interruption, inspect `status` and run `recover`.
-Recovery refuses to overwrite later user edits; keep state and backups.
-Never delete state to bypass ownership conflicts or unsupported state versions.
-Even when old or unknown machine fields block installation, `detach`, `recover`, `locate`, and removal-only `setup --remove-*` use saved ownership independently.
-Offline `status` falls back to saved IDs and target observations.
-These maintenance paths support state versions 1 and 2, preserving the original version and unknown fields without automatic migration.
-
-Git updates never stash, reset, rebase, commit, or push automatically.
-They reject tracked changes, nonignored untracked files, unfinished operations, local-ahead/divergent history, wrong branches, and checkout identity changes.
-Git-ignored regular files such as `__pycache__` may remain in managed checkouts; an incoming revision that would overwrite them is refused without deleting the local files.
-Ignored files remain visible through directory links and are included in directory copies and detach, which preserve the complete payload except root Git metadata.
-Changes made inside an installed copy, including newly generated caches, still count as local modifications and require explicit replacement before reinstallation.
-Updates also guard active link sources and instruction entries against removal or unsupported type changes, even after declarations disappear.
-Nested payload symlinks/junctions, special files, and submodules are unsupported.
-Portable copy metadata is preserved; platform-specific ACLs, alternate streams, and power-loss atomicity are outside the guarantee.
-
-To remove integrations, detach managed agent content first, then use `aem setup --remove-agent codex` and the appropriate `--remove-shell` options.
-Agent removal also attempts to remove the unchanged official skill link; failures are reported separately, and changed links, edited official sources, or substituted copies are preserved with their paths reported.
-Disable any retained detached instruction hooks before uninstalling AEM with `uv tool uninstall agent-env-man`.
+Transactions are per target, so earlier successful work can remain after a later failure.
+Recovery preserves later user edits; keep state and backups instead of deleting them to bypass conflicts.
+See [Maintenance and recovery](docs/maintenance.md) for adoption/replacement, reattachment, Git safety, backup locations, and uninstalling.
 
 ## License
 
