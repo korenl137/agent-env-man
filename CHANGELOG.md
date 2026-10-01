@@ -8,6 +8,8 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.5.2] &mdash; 2026-10-01
+
 ### Added
 
 - Version-matched local README, detailed docs, catalog examples, and license resources, located offline with `aem docs` independently of setup or machine configuration.
@@ -15,7 +17,6 @@ During 0.x development, minor releases may break compatibility; patch releases p
 ### Changed
 
 - Move the authoritative compatibility policy into bundled user documentation; keep contribution and release-history references as optional repository links and document the installed documentation strategy.
-
 - Expand CLI help with selection scope, settings stage locations and field choices, shell navigation requirements, and publication defaults without changing command behavior; define contributor guidance for concise, sufficient installed help.
 - Move detailed automation, AEM self-update, and maintenance/recovery guidance into dedicated docs guides; retain core workflows and preservation reminders in the README, and clarify contributor guidance without changing its structure or contracts.
 - Official skill contribution guidance prioritizes installed CLI help and authoritative local documentation; streamline `idk-aem` around important operation boundaries, publication scope, and preservation.
@@ -146,7 +147,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...v0.4.2
