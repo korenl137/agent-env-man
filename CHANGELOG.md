@@ -8,6 +8,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Fixed
+
+- Store the shared AEM installation lock beside the uv tools directory so uv does not discover it as an invalid tool environment.
+
 ## [0.5.2] &mdash; 2026-10-01
 
 ### Added

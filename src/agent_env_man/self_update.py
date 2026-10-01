@@ -130,7 +130,13 @@ def status(config):
 
 
 def installation_lock(settings):
-    return Path(settings['tool_dir']) / '.aem-update-lock' if 'tool_dir' in settings else None
+    """Identify the shared lock without adding entries to uv's tool inventory."""
+    if 'tool_dir' not in settings:
+        return None
+    # Resolve aliases so commands and copied workers sharing one installation
+    # agree on its lock. uv treats even hidden children as tool environments.
+    tools = Path(settings['tool_dir']).resolve()
+    return tools.parent / f'.{tools.name}.aem-update-lock'
 
 
 def schedule(config, *, automatic=False, mode=None, dry_run=False):

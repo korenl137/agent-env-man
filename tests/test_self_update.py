@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,41 @@ from test_setup import SetupFixture
 
 
 class Releases(unittest.TestCase):
+    def test_installation_lock_is_outside_tools_and_shared_by_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory) / 'tools'
+            tools.mkdir()
+            settings = {'tool_dir': str(tools)}
+            shared = self_update.installation_lock(settings)
+            self.assertEqual(shared, tools.parent / '.tools.aem-update-lock')
+            self.assertEqual(shared, self_update.installation_lock(
+                {'tool_dir': str(tools / '..' / 'tools')}))
+            self.assertNotEqual(shared, self_update.installation_lock(
+                {'tool_dir': str(tools.parent / 'other-tools')}))
+            with lock(shared):
+                self.assertEqual(list(tools.iterdir()), [])
+                with self.assertRaises(Error):
+                    with lock(self_update.installation_lock(settings)):
+                        self.fail('Shared installation lock did not serialize callers')
+            self.assertIsNone(self_update.installation_lock({}))
+
+    @unittest.skipUnless(shutil.which('uv'), 'uv is required for tool discovery regression')
+    def test_uv_tool_list_with_persistent_installation_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory) / 'tools'
+            tools.mkdir()
+            shared = self_update.installation_lock({'tool_dir': str(tools)})
+            environment = dict(os.environ, UV_TOOL_DIR=str(tools),
+                               UV_CACHE_DIR=str(Path(directory) / 'cache'))
+            with lock(shared):
+                result = subprocess.run([shutil.which('uv'), 'tool', 'list'],
+                                        env=environment, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((shared / 'lock').is_file())
+            result = subprocess.run([shutil.which('uv'), 'tool', 'list'],
+                                    env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_semver_boundaries_and_annotated_tags(self):
         refs = '\n'.join(f'{str(i) * 40}\trefs/tags/v{v}' for i, v in enumerate(
             ['0.2.0', '0.2.1', '0.2.10', '0.3.0', '1.0.0', '1.1.0', '1.2.0', '2.0.0', '3.0.0rc1']))
