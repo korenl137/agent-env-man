@@ -8,6 +8,10 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+### Changed
+
+- Official skill contribution guidance prioritizes installed CLI help and authoritative local documentation; streamline `idk-aem` around important operation boundaries, publication scope, and preservation.
+
 ## [0.5.1] &mdash; 2026-10-01
 
 ### Fixed

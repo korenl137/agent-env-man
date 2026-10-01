@@ -289,13 +289,26 @@ When adding or changing a workflow that connects multiple commands, verify that 
 Where source content and installed content can differ, cover link, copy, and detached states and verify which content an edit changes and which content the subsequent command consumes.
 Keep docs/configuration.md and docs/commands.md canonical for TOML fields and CLI contracts.
 Keep the README focused on user workflows and link to those references.
-When adding or changing user-facing commands, options, configuration, or workflows, review the relevant guidance in the packaged [idk-aem skill](skills/idk-aem/SKILL.md) and update affected portions in the same change.
-Keep the skill focused on operation selection, command sequencing, and practical constraints; retain detailed CLI and configuration contracts in their canonical documentation rather than duplicating them.
-Changes that do not affect the skill's guidance do not require a skill edit.
 Installation and update paths must reject unknown fields and invalid types instead of silently accepting misspelled or removed settings.
 Update examples and platform limitations with interface changes.
 Agent profiles are the internal extension boundary for paths, hook syntax, callback output, and notices.
 Do not add a dynamic plugin loader or additional source providers without a demonstrated use case.
+
+## Official skill guidance
+
+The packaged [idk-aem skill](skills/idk-aem/SKILL.md) should help agents choose and carry out AEM operations, with emphasis on important behavior, sequencing, and non-obvious consequences.
+Prefer discovery through the installed CLI's command help and authoritative local tool documentation over copying command inventories, option syntax, configuration schemas, or detailed procedures into the skill.
+Give agents concrete local entry points and explain when to consult them; use installed-version help for available syntax and local documentation matching that version for behavior.
+Use documentation paths only when they resolve in the installed environment; do not rely on repository-relative paths to unbundled files or web links that require fetching documentation.
+Assume a working installation provides its local help and documentation; missing or incomplete local materials are a separate installation/documentation issue, not a reason to add fallback instructions to the skill.
+Keep essential guidance inline when it prevents a material mistake, rather than making ordinary use depend on loading an entire manual.
+Do not move duplicated manuals into skill references merely to shorten the entrypoint.
+
+Retain distinctions that affect the requested outcome, such as preparation versus installation, source versus installed copy, live-link update effects, settings stages versus actual files, repository-wide publication, and preservation during recovery.
+The skill must not impose content-authoring policies or infer publication authorization from an editing request.
+When changing user-facing commands, options, configuration, or workflows, review the skill's guidance and documentation entry points in the same change.
+Update the skill when its decision guidance or discovery route changes; a new option or documentation detail alone does not require copying it into the skill.
+Verify that referenced documentation is available and retained guidance agrees with the actual command behavior.
 
 ## Machine setup and agent integration
 

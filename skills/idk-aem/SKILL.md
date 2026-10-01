@@ -5,59 +5,43 @@ description: Use AEM (agent-env-man) to configure agent integrations, manage cat
 
 # Use AEM
 
-Use the installed `aem` CLI for the requested operation.
-Consult `aem --help` and the relevant command's `--help` for the installed version rather than assuming options or reconstructing ownership from directory names.
-Put global options before the command: `aem --config /absolute/machine.toml --json status`.
-Use JSON reports when choosing subsequent commands; queued self-updates have not completed yet.
+Use the installed `aem` CLI for the requested operation and preserve the user's selected catalog, machine configuration, and automation settings.
+This skill covers AEM operations; content editing follows the user's task and the content's applicable instructions.
 
-## Choose the operation
+## Discover the relevant interface
 
-- `setup` connects agents and shells and configures machine automation. Agent integration includes this official skill. It does not install user catalog content or grant hook trust.
-- `bootstrap` binds or prepares a catalog and its content sources; `apply` installs declared content from prepared local paths.
-- `catalog` commands inspect, locate, update, or publish the catalog repository. Content `update` does not refresh the catalog.
-- `update` advances selected content sources; linked installations change immediately. `sync` updates and applies; copy installations need application to receive changes.
-- `settings prepare/collect/release/resolve` operate on editable settings stages; `export` reflects a stage in a Git/external source without publishing. Settings are excluded from automatic/full runs.
-- `status` inspects installations and pending recovery. `self status` and `self update` concern AEM itself, independently of catalog content.
-- `locate` identifies installed or source paths; `publish` publishes the selected source repository. Consult command help for selectors: preparation uses catalog names, while installation may use component ownership IDs.
+Start with `aem --help` and the relevant command's `--help` to learn the installed version's commands, selectors, options, and previews.
+Use JSON reports when subsequent actions depend on command results; a queued update is not a completed update.
 
-## Locate and publish
+Read the relevant command's local help before choosing selectors or sequencing operations.
+For staged settings, consult `aem settings --help` and the chosen subcommand's help before collection, deletion, release, or conflict resolution.
 
-Use `locate` to distinguish installed content from its editable source.
-Linked installations expose the source; installed copies and detached content can differ from it.
-Use `locate --source` when the task targets source content for publication.
-This skill identifies paths and manages AEM operations; it does not prescribe how to author or edit the content at those paths.
+## Important operation boundaries
 
-For directory navigation, use `aem locate NAME --cd`, adding `--source` to enter the prepared source instead of an installed copy or detached content.
-Use `aem catalog locate --cd` to enter the directory containing the catalog entry.
-These commands change the calling shell's directory only through the Bash, Zsh, or PowerShell integration registered by `setup --shell`; existing registrations need setup run again and the profile reloaded to gain this function.
-Without that integration, `--cd` prints only the absolute directory path; use it as a working directory for subsequent tool calls or with `cd -- "$(aem locate NAME --cd)"` in Bash/Zsh.
-Do not combine `--cd` with `--json`, and do not assume a directory change in one tool subprocess persists in later calls.
+`setup` connects agents and shells; `bootstrap` prepares catalog content; `apply` installs from prepared local paths.
+Agent setup includes this official skill but does not install user catalog content or grant hook trust.
+Catalog updates, content updates, and AEM self-updates are separate operations.
+Content `update` changes linked installations immediately; copies need `apply`, and `sync` combines update and application.
 
-For settings, default `locate NAME` identifies the editable stage, `--source` identifies the shared file, and `--target` identifies the actual application file.
-Apply uses the stage; update receives shared changes; collection of actual edits is explicit.
-New managed fields require `settings collect NAME --path '["section","key"]'` or stage editing.
-Deletion and `settings release` have different effects; release leaves actual values in place.
-Use `settings resolve` for shared conflicts and preserve stage edits on detach.
-Git settings publication includes export; external sources support export and leave synchronization to their existing service.
+Use `locate` to distinguish installed content from its editable source, and request `--source` when editing content for publication.
+Installed copies and detached contents can differ from the source; publishing does not collect their edits.
+Use returned paths as explicit working directories in tool calls rather than assuming shell navigation persists between subprocesses.
 
-Publication acts on the whole selected repository, including files outside the selected skill or instruction directory.
-A supplied commit message stages all nonignored changes; without a message, publication requires a clean worktree and pushes existing commits.
-Inspect the relevant changes and publication preview before publishing when the task calls for publication.
-AEM supports first publication when it successfully confirms that the registered remote has no refs, including tags; a clean checkout can push existing commits, or `--message` can commit changes first.
-A missing registered branch in a populated remote and authentication/network/fetch errors stop publication; do not bypass these by assuming an empty remote.
-Publication previews stay offline and do not confirm remote emptiness.
-Do not infer authorization to publish from a request to locate or edit content.
+Settings use an editable stage between the shared source and actual application file.
+Apply consumes the stage; collection of actual-file edits and export to the source are explicit.
+Removing a managed field requests deletion; releasing it leaves the actual value in place.
+Settings are excluded from automatic/full runs.
 
-## Conflicts and recovery
+## Publication and preservation
 
-Inspect reported targets and ownership before resolving a conflict.
-Do not delete state, reset a checkout, or use adoption/replacement merely to bypass a diagnostic.
-Use explicit selections for intentional adoption or replacement and preserve the user's local changes.
-Skill backups live in `<machine-file>.state/skill-backups`, outside skill discovery roots; preserve these along with state.
-Older sibling skill backups are retained and can be moved outside discovery roots after reviewing their contents.
-When a replacement is interrupted, inspect `status` and use `recover` before retrying.
-`detach` preserves contents and releases management; it does not restore the pre-installation contents.
+Publication acts on the entire selected repository, including changes outside the selected content directory.
+Supplying a commit message stages all nonignored changes; inspect the repository changes and publication preview to verify scope.
+A preview is offline and cannot confirm remote state; a remote failure does not establish an empty remote.
+A request to locate or edit content does not itself authorize publication.
+External-source synchronization remains the responsibility of its existing service.
 
-Respect the user's chosen catalog, machine configuration, automation settings, and existing authorization.
-Use available previews for consequential operations when they help verify scope.
-Keep content editing governed by the user's task and the content's applicable instructions.
+Inspect reported targets and ownership before resolving conflicts; preserve local changes, state, and recovery backups.
+Do not delete state, reset checkouts, or adopt/replace content merely to bypass a diagnostic.
+Use explicit selections for intentional adoption or replacement.
+After an interrupted replacement, inspect `status` and use `recover` before retrying.
+`detach` preserves current contents and releases management; it does not restore pre-installation contents.
