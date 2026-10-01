@@ -8,11 +8,12 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ## [Unreleased]
 
+## [0.5.0] &mdash; 2026-10-01
+
 ### Added
 
 - Staged application TOML settings with Git/external sources, explicit field collection, persistent deletion/release intent, source export, Git publication, conflict resolution, and grouped recovery.
 - Settings-aware locate/status and bootstrap `--setting-target` bindings; settings stages and actual files remain outside automatic/full runs.
-
 - `locate --cd` and `catalog locate --cd` enter the selected directory through the Bash, Zsh, or PowerShell setup integration; standalone use prints the directory path.
 
 ### Changed
@@ -126,7 +127,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/mirinae3145/agent-env-man/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mirinae3145/agent-env-man/compare/v0.3.0...v0.4.0
