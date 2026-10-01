@@ -30,7 +30,7 @@ Prepared sources remain usable offline.
 AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
 From 1.0.0 onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
 During 0.x development, minor releases may break compatibility; patch releases preserve it.
-During 0.x only, compatible supporting refinements to existing workflows may also ship in a patch release; new standalone capabilities still require a minor release.
+During 0.x only, compatible feature additions may also ship in a patch release; maintainers may choose a minor release based on their scope and significance.
 Review migration instructions before upgrading across an incompatible release.
 
 The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.

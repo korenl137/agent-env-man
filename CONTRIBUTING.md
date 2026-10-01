@@ -29,11 +29,13 @@ New optional inputs are compatible only when omitting them preserves existing be
 Backward compatibility means a newer package continues to support previously valid use; it does not require an older package to accept newly introduced inputs.
 
 From 1.0.0 onward, use PATCH for backward-compatible bug fixes, MINOR for backward-compatible functionality or public deprecation, and MAJOR for incompatible public-contract changes.
-During 0.x development, use MINOR for new functionality, public deprecation, or incompatible changes, and PATCH for backward-compatible fixes.
-Only during 0.x, compatible refinements confined to supporting material, ancillary integrations, or advisory output for existing workflows may also use PATCH.
-This exception does not cover new independently usable capabilities or relax compatibility: previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership/recovery guarantees without user migration.
+During 0.x development, PATCH may include backward-compatible fixes and functionality additions; a new command, option, or independently usable capability does not by itself require MINOR.
+Bounded additions to existing workflows, such as optional directory navigation from a lookup command, may ship in PATCH releases even when they include shell integration or new output behavior selected through an explicit option.
+Maintainers may choose MINOR for compatible additions according to their scope and significance, considering the breadth of new workflows, configuration or integration changes, and the overall size of the release; this is a release judgment rather than an automatic rule triggered by any new functionality.
+Use MINOR for public deprecation or incompatible changes during 0.x.
+PATCH eligibility never relaxes compatibility: previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership/recovery guarantees without user migration.
 An ancillary integration must report its own recoverable failure separately rather than prevent the existing workflow from completing; unsafe shared state and unresolved recovery remain fatal.
-Additive manager-owned side effects may qualify under this exception when they preserve user content and existing choices; required reconfiguration, new fatal prerequisites, and incompatible enum values do not.
+Additive manager-owned side effects may qualify for PATCH when they preserve user content and existing choices; required reconfiguration of existing use, new fatal prerequisites for previously valid calls, and incompatible enum values do not.
 From 1.0.0 onward, compatible functionality remains MINOR, including ancillary additions.
 Classify a release by its most significant change, based on the previous released contract rather than intermediate development states.
 Documentation corrections and internal maintenance that preserve the contract may ship in a PATCH release.

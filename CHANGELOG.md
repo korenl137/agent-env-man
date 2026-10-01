@@ -14,6 +14,7 @@ During 0.x development, minor releases may break compatibility; patch releases p
 
 ### Changed
 
+- During 0.x, permit compatible feature additions in PATCH releases, with MINOR chosen at maintainer discretion according to scope and significance; incompatible changes and public deprecation still require MINOR.
 - Contributor guidance requires reviewing and updating affected official skill guidance alongside user-facing changes; the `idk-aem` skill now covers directory navigation with `locate --cd`.
 
 ## [0.4.2] &mdash; 2026-10-01
