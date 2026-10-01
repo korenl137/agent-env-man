@@ -199,7 +199,7 @@ class Instructions(InstructionFixture):
     def test_invalid_git_entry_is_not_published_by_bootstrap(self):
         self.configure(git=True)
         checkout = self.checkouts / ".aem-repositories/guidance"
-        shutil.rmtree(checkout)
+        checkout.rename(self.root / "offline-checkouts")
         (self.bundle / "start.md").unlink()
         self.commit(self.external)
         self.run_cli("bootstrap", code=1)
@@ -309,5 +309,5 @@ class Instructions(InstructionFixture):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(str(self.bundle), context)
+        self.assertEqual(json.loads(context.split("\n")[1])["root"], str(self.bundle))
         self.assertNotIn("User-supplied guidance", context)

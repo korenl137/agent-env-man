@@ -9,6 +9,7 @@ import stat
 import tempfile
 
 from .model import Error
+from .link_paths import same_destination
 
 
 def exists(path: Path) -> bool:
@@ -67,6 +68,11 @@ def fingerprint(path: Path, *, exclude_git: bool = False) -> str:
 
     visit(path, "")
     return digest.hexdigest()
+
+
+def link_matches(observed: dict, source: str) -> bool:
+    """Compare desired link ownership without changing raw journal observations."""
+    return observed.get("kind") == "link" and same_destination(observed.get("to"), source)
 
 
 def observation(path: Path) -> dict:

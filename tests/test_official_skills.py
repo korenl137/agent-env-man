@@ -45,6 +45,47 @@ class OfficialSkills(SetupFixture):
         self.assertTrue(backups)
         self.assertTrue(all(path.is_symlink() for path in backups))
 
+    def test_refresh_relocates_owned_link_and_keeps_detached_skill(self):
+        from agent_env_man.setup import refresh_official
+
+        self.setup_cli('--agent', 'codex')
+        target = self.target()
+        relocated = self.root / 'new package location'
+        shutil.copytree(self.original, relocated)
+        config = Config(self.config)
+        manager = Manager(config, State(config.state_dir))
+        with patch('agent_env_man.official_skills.source', return_value=relocated):
+            result = refresh_official(manager, replaced=True)
+        self.assertEqual(target.resolve(), relocated)
+        self.assertEqual(result['integrations'][0]['action'], 'write')
+        record = manager.state.data['items']['setup:skill-codex-idk-aem']
+        official_skills.check({'skill': record})
+        record['detached'] = True
+        manager.state.save()
+        with patch('agent_env_man.official_skills.source', side_effect=AssertionError('Detached skill')):
+            self.assertEqual(refresh_official(manager, replaced=True), {'integrations': []})
+        self.assertEqual(target.resolve(), relocated)
+
+    def test_official_identity_rejects_invalid_records_and_equivalent_aliases(self):
+        self.setup_cli('--agent', 'codex')
+        record = self.state()['items']['setup:skill-codex-idk-aem']
+        for values, message in (({'official_hash': None}, 'malformed'),
+                                ({'source': 'relative-source'}, 'absolute')):
+            with self.subTest(values=values), self.assertRaisesRegex(ValueError, message):
+                official_skills.check({'skill': dict(record, **values)})
+        target = self.target()
+        parent_alias = self.root / 'redirected-parent'
+        parent_alias.symlink_to(target.parent, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'ancestry changed'):
+            official_skills.check({'skill': dict(record, target=str(parent_alias / target.name))})
+        source_alias = self.root / 'same-source-alias'
+        source_alias.symlink_to(self.original, target_is_directory=True)
+        target.unlink()
+        target.symlink_to(source_alias, target_is_directory=True)
+        self.assertTrue(target.samefile(self.original))
+        with self.assertRaisesRegex(ValueError, 'link changed'):
+            official_skills.check({'skill': record})
+
     def test_changed_link_and_copy_are_preserved_on_removal(self):
         for replacement in ('link', 'copy'):
             with self.subTest(replacement=replacement):

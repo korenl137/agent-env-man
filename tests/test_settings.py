@@ -250,7 +250,7 @@ class StagedSettings(unittest.TestCase):
         count = 0
         def fail(source, target):
             nonlocal count
-            if str(source).split('/')[-1].startswith('.aem-stage-'):
+            if Path(source).name.startswith('.aem-stage-'):
                 count += 1
                 if count == 2:
                     raise OSError('Simulated interruption')

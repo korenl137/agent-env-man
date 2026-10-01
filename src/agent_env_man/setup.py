@@ -13,7 +13,7 @@ import tomlkit
 from .agents import profile
 from .manager import Manager, Plan
 from .model import Config, Error, Item, absolute, overlaps
-from .storage import exists, is_reparse, observation
+from .storage import exists, is_reparse, observation, link_matches
 
 
 def official_plans(manager, agents, *, removing=(), refresh=False):
@@ -45,7 +45,7 @@ def official_plans(manager, agents, *, removing=(), refresh=False):
         if removal:
             original = saved_path(old.get('source'))
             record = dict(old, detached=True)
-            unchanged = before == {'kind': 'link', 'to': old['source']}
+            unchanged = link_matches(before, old['source'])
             if unchanged and target.exists():
                 try:
                     unchanged = official_skills.signature(original) == old.get('official_hash')
@@ -94,7 +94,7 @@ def official_plans(manager, agents, *, removing=(), refresh=False):
                   'official_skill': True, 'package_version': package_version, 'detached': False,
                   'agent': name, 'agents': [name]}
         item = Item('setup', record['id'], '.', original, target, 'link', 'setup', agent=name)
-        changed = before != {'kind': 'link', 'to': str(original)}
+        changed = not link_matches(before, str(original))
         plans.append(Plan(item, before, record, changed))
         report.append({'integration': f'agent-skill:{name}', 'target': str(target),
                        'action': 'write' if changed else 'unchanged'})

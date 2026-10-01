@@ -8,8 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+
 - Claude Code integration through the existing agent-profile boundary, preserving unrelated settings and Codex callback behavior.
+- Native Windows integration tests for encoded PowerShell hooks, literal-path shell navigation, interprocess locking, process-exit waits, and official skill link refresh.
+
 ### Fixed
+
+- Recognize Windows extended drive and UNC link destination spellings as the recorded source for skills, instruction bundles, and official skill checks, while preserving raw recovery observations and rejecting substituted aliases.
+- Make filesystem, hook metadata, rollback, and timeout tests portable across Windows drives, path separators, JSON escaping, and read-only Git objects; execute prerelease worker tests with a Windows-compatible fake installer.
 
 - Clarify instruction hook location metadata to discourage redundant entry reads and resolve references relative to each source document, including nested entries, without changing link installation or metadata fields.
 

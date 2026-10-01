@@ -288,7 +288,7 @@ C:/Users/me/.codex/hooks.json
 ```
 
 The generated command explicitly invokes an encoded PowerShell command on Windows and uses POSIX quoting on Linux/WSL; paths containing spaces are supported.
-Encoding tests run on Linux; native Windows hook execution still needs integration validation.
+Tests execute the generated encoded command in native Windows PowerShell with quoted configuration paths; delivery through a real approved agent session remains a separate integration check.
 AEM does not transfer the catalog or source documents between these devices.
 
 ## Changes, missing sources, and management removal
@@ -413,4 +413,5 @@ Older state and generated-guide installations are not upgraded in place; follow 
 ## Validation performed
 
 The offline tests cover bootstrap/preview without registration, exact original-entry links, preserved unrelated hooks, idempotence, local edits, failed writes and recovery, detached copies, missing sources, and command quoting.
-Native Windows execution and delivery into a real approved model session remain unverified.
+Native Windows tests also execute the generated hook in PowerShell and verify literal-path shell navigation in temporary environments.
+Delivery into a real approved model session remains unverified.

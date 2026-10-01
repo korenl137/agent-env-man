@@ -103,7 +103,10 @@ class BootstrapArguments(InstructionFixture):
         self.catalog.write_text(tomlkit.dumps(catalog), encoding='utf-8')
         other = self.root / 'reference'
         other.mkdir()
-        relative = os.path.relpath(other, Path.cwd())
-        self.boot('--external', f'reference={relative}')
+        # Relative paths must share a drive with the working directory on Windows.
+        from contextlib import chdir
+        with chdir(self.root):
+            relative = os.path.relpath(other, Path.cwd())
+            self.boot('--external', f'reference={relative}')
         bindings = tomlkit.parse(self.config.read_text(encoding='utf-8'))['external_paths']
         self.assertEqual(dict(bindings), {'personal': str(self.external), 'reference': str(other)})

@@ -6,6 +6,11 @@ import os
 from pathlib import Path
 import stat
 
+try:
+    from .link_paths import same_destination
+except ImportError:  # Copied worker runs without the installed package.
+    from link_paths import same_destination
+
 NAME = 'idk-aem'
 
 
@@ -63,7 +68,7 @@ def check(records, *, payload=True, package_version=None):
             raise ValueError('Official skill ownership paths must be absolute')
         if target.parent.resolve() / target.name != target:
             raise ValueError(f'Official skill target ancestry changed: {target}')
-        if not target.is_symlink() or os.readlink(target) != str(original):
+        if not target.is_symlink() or not same_destination(os.readlink(target), str(original)):
             raise ValueError(f'Official skill link changed: {target}; reconcile before setup/update')
         if (payload and (package_version is None or record.get('package_version') == package_version)
                 and signature(original) != record.get('official_hash')):

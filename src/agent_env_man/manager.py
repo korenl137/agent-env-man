@@ -12,7 +12,7 @@ import uuid
 from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
-from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path
+from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path, link_matches
 
 
 @dataclass
@@ -275,7 +275,7 @@ class Manager:
                 target = saved_path(record.get("target"))
                 linked = record.get("mode") == "link" and not record.get("detached")
                 if linked:
-                    if observation(target) != {"kind": "link", "to": record.get("source")}:
+                    if not link_matches(observation(target), record.get("source")):
                         raise Error(f"{name}: installed skill link was replaced; inspect status")
                 elif record.get("mode") not in ("link", "copy"):
                     raise Error(f"{name}: unsupported saved skill mode")
@@ -337,7 +337,7 @@ class Manager:
         if record.get("detached"):
             if target.is_symlink() or is_reparse(target):
                 raise Error(f"{name}: detached bundle directory was replaced by a link")
-        elif not target.is_symlink() or os.readlink(target) != record["source"]:
+        elif not target.is_symlink() or not link_matches(observation(target), record["source"]):
             raise Error(f"{name}: installed bundle link was replaced; inspect status")
         root = target.resolve(strict=True)
         if not root.is_dir():
@@ -365,7 +365,7 @@ class Manager:
             raise Error(f"{name}: installed global entry is unavailable")
         if record.get("detached") and (target.is_symlink() or is_reparse(target)):
             raise Error(f"{name}: detached global entry was replaced by a link")
-        if not record.get("detached") and observation(target) != {"kind": "link", "to": record["source"]}:
+        if not record.get("detached") and not link_matches(observation(target), record["source"]):
             raise Error(f"{name}: global entry link was replaced; inspect status")
         if found["detached"] and not record.get("detached"):
             # A directory can be detached independently while AGENTS.md still
@@ -423,7 +423,7 @@ class Manager:
             changed = not present or item.target.read_bytes() != content
             return Plan(item, before, record, changed, content=content)
         if item.mode == "link":
-            correct = before == {"kind": "link", "to": str(item.source)}
+            correct = link_matches(before, str(item.source))
             if old:
                 safe = correct or not present
             else:
@@ -585,7 +585,7 @@ class Manager:
         record = self.state.data['items'].get(pending.get('key'), {})
         official_removal = (record.get('official_skill') and record.get('kind') == 'setup'
                             and record.get('mode') == 'link' and record.get('target') == str(target)
-                            and pending['before'] == {'kind': 'link', 'to': record.get('source')}
+                            and link_matches(pending['before'], record.get('source'))
                             and pending['after'] == {'kind': 'missing'}
                             and backup.parent == self.config.state_dir / 'setup-backups'
                             and backup.parent.resolve() == backup.parent)
@@ -932,7 +932,7 @@ class Manager:
             return ("stale" if profile(item.agent).current(item.target, old["hook_marker"], old["hook_group"])
                     else "modified-locally"), None
         if item.mode == "link":
-            good = current == {"kind": "link", "to": str(item.source)}
+            good = link_matches(current, str(item.source))
             return ("current" if good else "modified-locally"), ("changed-live" if desired != old["hash"] else None)
         if item.mode == "copy":
             if current["kind"] not in ("file", "directory"):
@@ -1051,7 +1051,7 @@ class Manager:
                 from .settings import Settings
                 return Settings(self).status(record)["status"]
             if record["mode"] == "link":
-                if actual != {"kind": "link", "to": record["source"]}:
+                if not link_matches(actual, record["source"]):
                     return "modified-locally"
                 return "linked" if target.exists() else "broken-link"
             if record["mode"] == "agent-hook":

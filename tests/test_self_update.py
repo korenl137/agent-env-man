@@ -382,6 +382,19 @@ class SelfUpdate(SetupFixture):
         self.setup_cli('--shell', 'bash', *options)
         return Config(self.config)
 
+    def executable_fake_uv(self):
+        """Run the fake installer through Python on Windows, without a shebang."""
+        if os.name == 'nt':
+            script = self.uv.with_suffix('.py')
+            self.uv.rename(script)
+            self.uv = self.uv.with_suffix('.cmd')
+            self.uv.write_text('@echo off\n"' + sys.executable + '" "' + str(script) + '" %*\n')
+            self.settings['uv'] = str(self.uv)
+            self.setup_cli('--update-uv', str(self.uv))
+        else:
+            self.uv.chmod(0o755)
+        return Config(self.config)
+
     def finish_worker(self, config):
         # In-process tests close the lifetime pipe while their test runner
         # remains alive; model a terminated requester before releasing EOF.
@@ -477,7 +490,7 @@ class SelfUpdate(SetupFixture):
         self.uv.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
                            'if sys.argv[-1] == "list":\n print("agent-env-man v1.0.0rc1\\n - aem")\n'
                            'else:\n Path(' + repr(str(calls)) + ').write_text(json.dumps(sys.argv[1:]))\n')
-        self.uv.chmod(0o755)
+        config = self.executable_fake_uv()
         attempt = self_update.schedule(config)
         child = self_update._children[-1]
         self.finish_worker(config)
@@ -521,7 +534,7 @@ class SelfUpdate(SetupFixture):
         self.uv.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
                            'if sys.argv[-1] == "list":\n print("agent-env-man v1.0.0b0\\n - aem")\n'
                            'else:\n Path(' + repr(str(calls)) + ').write_text(json.dumps(sys.argv[1:]))\n')
-        self.uv.chmod(0o755)
+        config = self.executable_fake_uv()
         self_update.schedule(config)
         child = self_update._children[-1]
         self.finish_worker(config)

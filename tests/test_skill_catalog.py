@@ -412,7 +412,7 @@ class SkillCatalog(unittest.TestCase):
         target = self.destination / "standalone"
         before = fingerprint(self.checkouts / ".aem-repositories/standalone", exclude_git=True)
         self.run_cli("detach", "standalone")
-        shutil.rmtree(self.checkouts)
+        self.checkouts.rename(self.root / "offline-checkouts")
         self.assertFalse(target.is_symlink())
         self.assertFalse((target / ".git").exists())
         self.assertEqual(fingerprint(target), before)

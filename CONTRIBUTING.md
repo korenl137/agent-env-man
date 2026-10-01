@@ -116,6 +116,7 @@ AEM does not own the service that synchronizes an external folder.
 Keep source roots disjoint, and never nest externally synchronized sources inside managed Git checkouts.
 
 Targets directly link to local source content.
+Compare Windows link destinations with equivalent extended drive/UNC prefixes normalized, without following aliases or changing raw transaction observations.
 Do not add snapshot activation semantics silently: changing this contract requires an explicit design decision and updated user documentation.
 An `update` can therefore change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest catalog no longer declares those items.

@@ -1,6 +1,7 @@
 """Offline editing lookup distinguishes sources from installed copies."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -38,7 +39,7 @@ class Locate(unittest.TestCase):
         result = runner.invoke(cli, ['--config', str(self.config), 'locate', 'one', '--cd'])
         self.assertEqual(result.output, str(self.root / 'installed/one') + '\n')
 
-    @unittest.skipUnless(shutil.which('bash'), 'Bash unavailable')
+    @unittest.skipUnless(os.name != 'nt' and shutil.which('bash'), 'Requires POSIX paths and Bash')
     def test_shell_cd_success_failure_help_and_literal_paths(self):
         executable = self.root / "aem tool"
         executable.write_text('#!/bin/sh\nexec ' + shlex.join([sys.executable, '-m', 'agent_env_man']) + ' "$@"\n')
@@ -53,7 +54,7 @@ class Locate(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines().count(str(self.checkout / 'skill')), 3)
         self.assertIn('Usage:', result.stdout)
 
-    @unittest.skipUnless(shutil.which('bash'), 'Bash unavailable')
+    @unittest.skipUnless(os.name != 'nt' and shutil.which('bash'), 'Requires POSIX paths and Bash')
     def test_shell_cd_treats_special_characters_as_literal(self):
         destination = self.root / "directory with '$() chars"
         destination.mkdir()
@@ -105,7 +106,7 @@ class Locate(unittest.TestCase):
         self.assertTrue(self.cli('locate', 'one')['detached'])
         self.assertEqual(self.cli('locate', 'one', '--source')['root'], source['root'])
         self.catalog.unlink()
-        shutil.rmtree(self.checkout)
+        self.checkout.rename(self.root / "offline-checkouts")
         self.assertEqual(self.cli('locate', 'one')['root'], str(installed))
         self.cli('locate', 'one', '--source', code=1)
 
@@ -129,7 +130,7 @@ class Locate(unittest.TestCase):
         (self.checkout / 'skill/SKILL.md').unlink()
         self.assertIn('missing', self.cli('locate', 'one', code=1))
         self.cli('locate', 'unknown', code=1)
-        shutil.rmtree(self.checkout)
+        self.checkout.rename(self.root / "offline-checkouts")
         self.assertIn('bootstrap', self.cli('locate', 'personal', code=1))
 
     def test_redirected_source_entry_is_rejected(self):

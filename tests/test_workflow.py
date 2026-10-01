@@ -155,7 +155,7 @@ class Workflow(unittest.TestCase):
         self.run_cli("detach", "report")
         self.assertFalse(list(self.destination.glob("*.aem-backup-*")))
         self.assertEqual(list(self.destination.rglob("SKILL.md")), [self.destination / "report/SKILL.md"])
-        shutil.rmtree(self.checkouts)
+        self.checkouts.rename(self.root / "offline-checkouts")
         self.assertEqual(fingerprint(self.destination / "report"), expected)
 
     def test_failed_replacement_restores_previous_copy(self):
@@ -252,7 +252,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(cache.read_bytes(), contents)
         self.assertIn("Published change", (target / "SKILL.md").read_text())
         self.run_cli("detach", "report")
-        shutil.rmtree(self.checkouts)
+        self.checkouts.rename(self.root / "offline-checkouts")
         self.assertEqual(cache.read_bytes(), contents)
         self.assertFalse(target.is_symlink())
 
@@ -337,6 +337,8 @@ class Workflow(unittest.TestCase):
         processes = []
 
         def stalled(command, **kwargs):
+            if command[0] != "git":
+                return real_popen(command, **kwargs)
             process = real_popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
             processes.append(process)
             return process

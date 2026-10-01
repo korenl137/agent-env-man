@@ -53,7 +53,8 @@ Installed startup and instruction callbacks continue to emit their required JSON
 
 Requirements: Python 3.11 or later and Git.
 Linux/WSL and native Windows are supported in the implementation.
-Native Windows tests have covered non-symlink paths; link privileges and real shell/agent hook execution still require platform validation.
+Native Windows tests cover link installation and recovery, generated PowerShell command execution, and process locking/waiting in temporary environments.
+Link tests require symlink privileges; real agent-session delivery and replacement of a live tool installation remain separate integration checks.
 Configure Git credentials separately; AEM uses noninteractive authentication and SSH batch mode.
 
 With [uv](https://docs.astral.sh/uv/) installed, run from this checkout:

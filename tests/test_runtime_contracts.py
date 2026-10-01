@@ -25,7 +25,7 @@ class StandaloneRuntime(unittest.TestCase):
             root = Path(directory)
             request_directory = root / "request"
             request_directory.mkdir()
-            for name in ("self_update.py", "process_lock.py", "official_skills.py"):
+            for name in ("self_update.py", "process_lock.py", "official_skills.py", "link_paths.py"):
                 shutil.copyfile(Path(self_update.__file__).with_name(name), request_directory / name)
             config = root / "machine.toml"
             state = root / "machine.toml.state"

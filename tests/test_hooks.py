@@ -111,7 +111,7 @@ class HookInstallation(InstructionFixture):
         result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertEqual(result["hookSpecificOutput"]["hookEventName"], "SessionStart")
         context = result["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(str(self.bundle), context)
+        self.assertEqual(json.loads(context.split("\n")[1])["root"], str(self.bundle))
         self.assertNotIn("Read development/rules.md", context)
         self.assertEqual(state_path.read_bytes(), before)
         registered = self.hook_file().read_bytes()
@@ -120,7 +120,7 @@ class HookInstallation(InstructionFixture):
         shutil.rmtree(self.external)
         self.assertEqual(self.hook_file().read_bytes(), registered)
         result = self.run_cli("agent-hook", "personal", "--agent", "codex")
-        self.assertIn(str(self.rules / "personal"), result["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(json.loads(result["hookSpecificOutput"]["additionalContext"].split("\n")[1])["root"], str(self.rules / "personal"))
         self.assertFalse((self.agent / "AGENTS.md").is_symlink())
         self.assertTrue(State(Config(self.config).state_dir).data["items"]["personal:hook"]["detached"])
 
@@ -163,7 +163,7 @@ class HookInstallation(InstructionFixture):
                         self.assertIs(result["continue"], False)
                         self.assertIn("recover", result["stopReason"])
                     else:
-                        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+                        self.assertEqual(json.loads(result["hookSpecificOutput"]["additionalContext"].split("\n")[1])["root"], str(self.bundle))
 
     def test_instruction_callback_waits_for_installation_lock(self):
         self.configure()
@@ -175,7 +175,7 @@ class HookInstallation(InstructionFixture):
                     patch("agent_env_man.process_lock.time.sleep", side_effect=lambda _: holder.close()) as retry:
                 result = self.run_cli("agent-hook", "personal", "--agent", "codex")
             retry.assert_called_once()
-        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(json.loads(result["hookSpecificOutput"]["additionalContext"].split("\n")[1])["root"], str(self.bundle))
 
     def test_instruction_callback_shares_wait_budget_across_locks(self):
         self.configure()
@@ -187,7 +187,7 @@ class HookInstallation(InstructionFixture):
                 patch("agent_env_man.cli_runtime.lock", return_value=ExitStack()) as acquire:
             result = self.run_cli("agent-hook", "personal", "--agent", "codex")
         self.assertEqual([call.kwargs["timeout"] for call in acquire.call_args_list], [5, 1])
-        self.assertIn(str(self.bundle), result["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(json.loads(result["hookSpecificOutput"]["additionalContext"].split("\n")[1])["root"], str(self.bundle))
 
     def test_instruction_callbacks_stop_when_contention_outlasts_wait_budget(self):
         self.configure()

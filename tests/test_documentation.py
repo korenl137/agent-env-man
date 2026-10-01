@@ -125,7 +125,7 @@ class DocumentationBuild(unittest.TestCase):
         self.assertFalse((self.destination / "README.md").exists())
 
     def test_build_metadata_tracks_source_and_destination_resources(self):
-        mapping = {str(self.destination / relative): relative for relative in self.sources}
+        mapping = {str(self.destination / relative): str(Path(relative)) for relative in self.sources}
         self.assertEqual(self.command.get_output_mapping(), mapping)
-        self.assertEqual(set(self.command.get_source_files()), set(self.sources))
+        self.assertEqual(set(self.command.get_source_files()), {str(Path(relative)) for relative in self.sources})
         self.assertEqual(set(self.command.get_outputs(include_bytecode=False)), set(mapping))

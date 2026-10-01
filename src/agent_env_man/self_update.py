@@ -213,7 +213,7 @@ def launch(config, settings, attempt, *, filename='self-update.json', extra=None
                 raise ValueError(f'Updater {field} is missing; rerun scripts/setup.py')
         directory.mkdir(parents=True, exist_ok=True)
         from .storage import atomic_write
-        for name in ('self_update.py', 'process_lock.py', 'official_skills.py'):
+        for name in ('self_update.py', 'process_lock.py', 'official_skills.py', 'link_paths.py'):
             atomic_write(directory / name, Path(__file__).with_name(name).read_bytes())
         request = {'token': token, 'parent_pid': os.getpid(), 'config': str(config.path), 'settings': settings,
                    'saved_settings': dict(config.doc.get('self_update', {})), 'filename': filename, **(extra or {})}
