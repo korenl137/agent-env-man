@@ -16,6 +16,9 @@ Add the global `--json` option before the command to retain the existing JSON re
 Place global `--config` and `--json` before the command, for example `aem --json status`.
 Abbreviated long options are rejected, and invalid numeric CLI durations now exit `2` as usage errors before configuration reads or filesystem effects.
 - Centralize CLI configuration/locking, report output, and operational error handling while keeping command callbacks and reusable core operations separate.
+- Allow Git-ignored runtime files in prepared checkouts during bootstrap, apply, and content/catalog updates; ignored files alone no longer mark a content checkout dirty.
+Fast-forwards preserve local ignored files by refusing incoming path collisions.
+Directory links, copies, and detach retain ignored regular contents; installed-copy local edits and unsupported nested links/special files remain protected.
 
 ## [0.3.0] &mdash; 2026-09-30
 

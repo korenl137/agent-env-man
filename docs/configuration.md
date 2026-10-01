@@ -83,6 +83,11 @@ Without selected agents, machine `roots.skills` is required; bootstrap supplies 
 An explicit `root` overrides agent destinations; agents sharing a target share one ownership record.
 Skill names identify installation ownership and directory names, independently of the name inside `SKILL.md`.
 Root skills link directly to the repository root; copy and detach exclude only its top-level `.git` entry.
+Git-ignored regular files, including runtime caches, may coexist with prepared sources and are part of the directory payload.
+Directory links expose them, and copy/detach preserve them; AEM does not guess which ignored files are disposable or delete them.
+Tracked changes and nonignored untracked files still block bootstrap, apply, and update.
+Fast-forwards refuse incoming paths that would overwrite ignored local files, including file/directory collisions; relocate or reconcile the conflicting files explicitly before retrying.
+Installed copies retain full-tree ownership checks, so a cache created or changed in the installed copy counts as a local edit and blocks automatic replacement.
 
 A direct repository declaration remains supported and is not a legacy format:
 

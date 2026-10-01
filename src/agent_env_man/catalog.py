@@ -180,7 +180,7 @@ def command(config, state, args):
             git.clean(source)
             if git.run(source.path, "rev-parse", "HEAD").stdout != previous:
                 raise Error("Catalog changed during update; retry")
-            git.run(source.path, "merge", "--ff-only", "--no-autostash", revision)
+            git.fast_forward(source, revision)
             report.update(status="updated", revision=revision, last_update=now())
     except (Error, OSError, ValueError) as exc:
         report.update(status="failed", error=str(exc))

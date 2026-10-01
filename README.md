@@ -390,7 +390,10 @@ Offline `status` falls back to saved IDs and target observations.
 These maintenance paths support state versions 1 and 2, preserving the original version and unknown fields without automatic migration.
 
 Git updates never stash, reset, rebase, commit, or push automatically.
-They reject dirty/untracked/ignored content, unfinished operations, local-ahead/divergent history, wrong branches, and checkout identity changes.
+They reject tracked changes, nonignored untracked files, unfinished operations, local-ahead/divergent history, wrong branches, and checkout identity changes.
+Git-ignored regular files such as `__pycache__` may remain in managed checkouts; an incoming revision that would overwrite them is refused without deleting the local files.
+Ignored files remain visible through directory links and are included in directory copies and detach, which preserve the complete payload except root Git metadata.
+Changes made inside an installed copy, including newly generated caches, still count as local modifications and require explicit replacement before reinstallation.
 Updates also guard active link sources and instruction entries against removal or unsupported type changes, even after declarations disappear.
 Nested payload symlinks/junctions, special files, and submodules are unsupported.
 Portable copy metadata is preserved; platform-specific ACLs, alternate streams, and power-loss atomicity are outside the guarantee.

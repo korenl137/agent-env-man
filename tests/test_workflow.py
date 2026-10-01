@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import py_compile
 import shutil
 import subprocess
 import sys
@@ -149,14 +150,12 @@ class Workflow(unittest.TestCase):
             self.run_cli("apply", code=1)
         self.assertFalse(self.destination.exists())
 
-    def test_git_dirty_ignored_divergent_and_detached_checkouts(self):
+    def test_git_dirty_divergent_and_detached_checkouts(self):
         self.copy_mode()
-        (self.repo / ".gitignore").write_text("private.txt\n", encoding="utf-8")
-        self.commit(self.repo)
         self.bootstrap()
         self.run_cli("apply")
         checkout = self.checkouts / "report"
-        for name in ("unfinished.txt", "private.txt"):
+        for name in ("unfinished.txt",):
             with self.subTest(name=name):
                 (checkout / name).write_text("preserve", encoding="utf-8")
                 self.run_cli("update", code=1)
@@ -174,6 +173,93 @@ class Workflow(unittest.TestCase):
         report = self.run_cli("status")
         self.assertIn("expected attached branch", report["sources"][0]["error"])
         self.assertEqual(report["items"][0]["status"], "current")
+
+    def test_ignored_python_cache_allows_link_apply_update_bootstrap_and_detach(self):
+        self.require_links()
+        (self.repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.bootstrap()
+        self.run_cli("apply")
+        target = self.destination / "report"
+        cache = Path(py_compile.compile(str(target / "helper.py"), doraise=True))
+        contents = cache.read_bytes()
+        self.assertEqual(self.run_cli("status")["sources"][0]["checkout"], "clean")
+        self.run_cli("apply")
+        self.bootstrap()
+        self.publish_skill_change()
+        self.run_cli("update")
+        self.assertEqual(cache.read_bytes(), contents)
+        self.assertIn("Published change", (target / "SKILL.md").read_text())
+        self.run_cli("detach", "report")
+        shutil.rmtree(self.checkouts)
+        self.assertEqual(cache.read_bytes(), contents)
+        self.assertFalse(target.is_symlink())
+
+    def test_ignored_cache_is_preserved_in_copies_and_local_copy_edits_remain_protected(self):
+        self.copy_mode()
+        (self.repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.bootstrap()
+        payload = self.checkouts / "report/skills/report"
+        cache = Path(py_compile.compile(str(payload / "helper.py"), doraise=True))
+        self.run_cli("apply")
+        copied_cache = self.destination / "report" / cache.relative_to(payload)
+        self.assertEqual(copied_cache.read_bytes(), cache.read_bytes())
+        self.publish_skill_change()
+        self.run_cli("sync")
+        self.assertEqual(copied_cache.read_bytes(), cache.read_bytes())
+        copied_cache.write_bytes(b"local cache change")
+        self.run_cli("apply", code=1)
+        self.assertEqual(copied_cache.read_bytes(), b"local cache change")
+        self.run_cli("detach", "report")
+        self.assertEqual(copied_cache.read_bytes(), b"local cache change")
+
+    def test_incoming_tracked_paths_cannot_overwrite_ignored_files_or_directories(self):
+        self.copy_mode()
+        (self.repo / ".gitignore").write_text("cache*/\n*.pyc\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.bootstrap()
+        checkout = self.checkouts / "report"
+        head = self.git(checkout, "rev-parse", "HEAD")
+        # Exercise each collision independently so one blocked path cannot mask
+        # another. HEAD and the index must stay unchanged on every failure.
+        paths = ("skills/report/exact.pyc", "skills/report/parent.pyc", "skills/report/cache dir/data")
+        upstream = ("skills/report/exact.pyc", "skills/report/parent.pyc/child", "skills/report/cache dir")
+        for name in upstream:
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("upstream content", encoding="utf-8")
+            self.git(self.repo, "add", "--force", "--", name)
+        self.commit(self.repo)
+        for name in paths:
+            with self.subTest(name=name):
+                path = checkout / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("local cache", encoding="utf-8")
+                result = self.run_cli("update", code=1)
+                self.assertEqual(result[0]["status"], "failed")
+                self.assertEqual(self.git(checkout, "rev-parse", "HEAD"), head)
+                self.assertEqual(self.git(checkout, "diff", "--cached"), "")
+                self.assertEqual(path.read_text(), "local cache")
+                path.unlink()
+                if name.endswith("/data"):
+                    path.parent.rmdir()
+        self.run_cli("update")
+        for name in upstream:
+            self.assertEqual((checkout / name).read_text(), "upstream content")
+
+    def test_ignored_special_payloads_are_still_rejected(self):
+        self.require_links()
+        self.copy_mode()
+        (self.repo / ".gitignore").write_text("cache-link\n", encoding="utf-8")
+        self.commit(self.repo)
+        self.bootstrap()
+        outside = self.root / "outside.txt"
+        outside.write_text("outside", encoding="utf-8")
+        (self.checkouts / "report/skills/report/cache-link").symlink_to(outside)
+        self.run_cli("apply", code=1)
+        self.assertFalse((self.destination / "report").exists())
+        self.assertEqual(outside.read_text(), "outside")
 
     def test_status_refresh_keeps_checkout_and_installation(self):
         target = self.installed_copy()

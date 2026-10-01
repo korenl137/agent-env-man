@@ -765,7 +765,7 @@ class Manager:
                     entry["head"] = git.run(source.path, "rev-parse", "HEAD").stdout
                     branch = git.run(source.path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
                     entry["branch"] = branch.stdout if branch.returncode == 0 else "detached"
-                    entry["checkout"] = "dirty" if git.run(source.path, "status", "--porcelain", "--untracked-files=all", "--ignored").stdout else "clean"
+                    entry["checkout"] = "dirty" if git.run(source.path, "status", "--porcelain", "--untracked-files=all").stdout else "clean"
                     entry["remote_relation"] = git.relation(source)
                 else:
                     entry["remote_relation"] = "externally-managed-unknown"

@@ -69,12 +69,23 @@ class Git:
             raise Error(f"{source.name}: expected attached branch {source.branch}")
 
     def clean(self, source: Source):
+        """Require unchanged tracked content and no nonignored local additions.
+
+        Ignored runtime files may coexist with a managed checkout. They remain
+        local contents, and fast_forward separately protects them from incoming
+        tracked paths rather than treating every cache as an update conflict.
+        """
         self.validate(source)
         if self.run(source.path, "status", "--porcelain", "--untracked-files=all").stdout:
             raise Error(f"{source.name}: dirty checkout; commit or reconcile changes explicitly")
-        if self.run(source.path, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
-            raise Error(f"{source.name}: ignored local files exist; keep local-only data outside the managed checkout")
         self.idle(source)
+
+    def fast_forward(self, source: Source, revision: str):
+        """Advance without overwriting ignored local files or stashing edits."""
+        # Git overwrites ignored files by default, even on a fast-forward.
+        # The checkout may contain runtime caches, so retain Git's final collision
+        # check at the mutation itself rather than relying on a prior path scan.
+        self.run(source.path, "merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", revision)
 
     def idle(self, source: Source):
         """Reject incomplete Git operations without requiring a clean worktree."""
@@ -214,14 +225,11 @@ class Git:
             raise Error(f"{source.name}: {relation}; reconcile Git history manually")
         self.guard_links(source, candidate, records)
         self.clean(source)
-        self.run(source.path, "merge", "--ff-only", "--no-autostash", candidate)
+        self.fast_forward(source, candidate)
         source_state.update(last_update=now(), revision=candidate, error=None)
 
     def tracked_payload(self, source: Source, relative: str):
+        """Require a tracked payload root; local ignored contents remain part of its tree."""
         listing = self.run(source.path, "ls-tree", "-z", "HEAD", "--", relative).stdout
         if not listing or listing.split(" ", 1)[0] not in ("040000", "100644", "100755"):
             raise Error(f"{source.name}: payload must be a tracked regular file or directory: {relative}")
-        # Ignored files would otherwise quietly enter a directory installation.
-        ignored = self.run(source.path, "ls-files", "--others", "--ignored", "--exclude-standard", "--", relative).stdout
-        if ignored:
-            raise Error(f"{source.name}: ignored files inside payload: {relative}")

@@ -71,6 +71,25 @@ class GitCatalog(unittest.TestCase):
                         "--root", f"skills={self.root / 'installed'}",
                         "--root", f"agent={self.root / 'agent'}", *args, code=code)
 
+    def test_catalog_updates_preserve_ignored_caches_and_refuse_incoming_collisions(self):
+        (self.seed / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+        self.save_remote()
+        self.boot()
+        cache = self.checkout / "catalog cache.pyc"
+        cache.write_text("local cache", encoding="utf-8")
+        (self.seed / "notes.md").write_text("new upstream file", encoding="utf-8")
+        self.save_remote()
+        self.assertEqual(self.cli("catalog", "update")["status"], "updated")
+        self.assertEqual(cache.read_text(), "local cache")
+        head = self.git(self.checkout, "rev-parse", "HEAD")
+        (self.seed / cache.name).write_text("tracked upstream content", encoding="utf-8")
+        self.git(self.seed, "add", "--force", "--", cache.name)
+        self.save_remote()
+        self.assertEqual(self.cli("catalog", "update", code=1)["status"], "failed")
+        self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD"), head)
+        self.assertEqual(cache.read_text(), "local cache")
+        self.assertEqual(self.git(self.checkout, "diff", "--cached"), "")
+
     def state(self):
         return (self.root / "machine.toml.state/state.json").read_bytes()
 

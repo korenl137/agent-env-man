@@ -99,6 +99,9 @@ Targets directly link to local source content.
 Do not add snapshot activation semantics silently: changing this contract requires an explicit design decision and updated user documentation.
 `update` therefore can change live instruction contents without `apply`.
 The incoming-revision guard protects active link source paths, even if the latest catalog no longer declares those items.
+Allow Git-ignored runtime files in checkouts while continuing to reject tracked changes and nonignored untracked files.
+All content and catalog fast-forwards must refuse overwriting ignored local files at the Git mutation boundary; never delete caches or weaken local-file preservation to make an update succeed.
+Ignored regular contents remain part of directory payloads for hashing, copies, and detach; retain full-tree local-modification checks for installed copies and reject nested links and special files during payload validation.
 
 The primary input is a user-owned skill and instruction catalog, independent of the repositories it lists.
 The loader reads a local TOML file supplied directly or prepared through Git catalog delivery; policy composition must remain independent of this transport and any future auxiliary-file layout.

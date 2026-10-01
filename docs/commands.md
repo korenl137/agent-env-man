@@ -21,6 +21,8 @@ JSON consumers must ignore unknown object fields; field additions may appear in 
 Enum values are closed unless their interface explicitly documents unknown-value handling.
 JSON whitespace, object key order, and human-readable diagnostic wording are not stable interfaces.
 Commands lock one configuration; installations registered for self-updates also share a lock for their uv tools directory.
+Content and catalog updates allow Git-ignored regular caches in their checkouts and refuse any fast-forward that would overwrite them.
+In content status, `sources[].checkout` is `dirty` for tracked edits or nonignored untracked files; ignored files alone leave it `clean`.
 External editors and other package-manager processes do not participate in these locks.
 Read-only commands and dry runs may create the lock directory/file; `setup --dry-run`, `self update --dry-run`, and `automation --dry-run` do not.
 
