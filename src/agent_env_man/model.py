@@ -131,7 +131,8 @@ class Config(MachineFile):
         self.agents = bindings(self.doc)
         if not isinstance(self.doc.get('runtimes', {}), dict):
             raise Error('Machine runtimes must map names to absolute executable paths')
-        self.runtimes = {identifier(k): str(absolute(v)) for k, v in self.doc.get('runtimes', {}).items()}
+        from .personal_hooks import runtime_path
+        self.runtimes = {identifier(k): str(runtime_path(v)) for k, v in self.doc.get('runtimes', {}).items()}
         for name, paths in self.agents.items():
             for category, field in (("agent", "root"), ("skills", "skills")):
                 key, path = f"aem-{category}-{name}", absolute(paths[field])

@@ -14,6 +14,16 @@ from .storage import exists, is_reparse, observation, saved_path
 FIELDS = {'event', 'runtime', 'script', 'args', 'timeout', 'matcher'}
 
 
+def runtime_path(value):
+    # Resolving a venv's interpreter symlink discards its environment.
+    if not isinstance(value, str):
+        raise Error('Hook runtime paths must be strings')
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise Error('Hook runtime path must be absolute or start with ~/')
+    return path
+
+
 def validate_binding(data, adapter):
     if not isinstance(data, dict) or set(data) - FIELDS:
         raise Error('Hook binding accepts only ' + ', '.join(sorted(FIELDS)))

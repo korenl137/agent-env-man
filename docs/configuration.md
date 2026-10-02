@@ -436,6 +436,8 @@ Machine `runtimes` maps identifiers to absolute existing executable paths:
 python = "/absolute/python"
 ```
 
+Interpreter paths preserve symlinks, including virtualenv interpreter paths, so
+execution uses the bound environment rather than its base interpreter.
 Bootstrap's repeated `--runtime NAME=PATH` binds these paths without installing
 anything. Omitted bindings persist. Duplicate names in one call are refused.
 This additive syntax keeps catalog version 2 and machine version 1; older AEM

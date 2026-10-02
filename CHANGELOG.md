@@ -33,6 +33,7 @@ See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
 ### Fixed
 
 - Apply shared Claude preferences and instruction hooks in one file transaction, revalidating all hook sources before committing; preserve shared preferences when removing multiple or retired agent integrations.
+- Preserve bound personal-hook interpreter symlinks during bootstrap and configuration loading so virtualenv hooks execute in their selected environment.
 
 - Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.

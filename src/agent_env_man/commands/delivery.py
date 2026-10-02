@@ -88,7 +88,8 @@ def bootstrap_skills(config, state, args):
         if key in runtime_names:
             raise Error(f'Duplicate runtime binding: {key}')
         runtime_names.add(key)
-        document.setdefault('runtimes', {})[key] = str(absolute(location))
+        from ..personal_hooks import runtime_path
+        document.setdefault('runtimes', {})[key] = str(runtime_path(location))
     candidate = Config(config.path, document=document)
     # A remote inventory must be downloaded before its declarations can be
     # checked. Content repositories remain untouched until all preflight passes.

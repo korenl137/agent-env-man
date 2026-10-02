@@ -206,6 +206,20 @@ def verify():
         cli('apply', '--item', 'observer', selected_config=hook_machine)
         require(len(json.loads(hook_target.read_text())['hooks']['SessionEnd']) == 1,
                 'Installed wheel did not register selected personal hook')
+        machine = tomllib.loads(hook_machine.read_text(encoding='utf-8'))
+        require(machine['runtimes']['python'] == sys.executable,
+                'Bootstrap resolved the bound runtime out of its environment')
+        if os.name != 'nt':
+            # Execute only this explicit probe, after registration; a venv's
+            # symlinked interpreter must retain its own environment.
+            (hook_source / 'observe.py').write_text(
+                'import json,sys\nprint(json.dumps({"prefix":sys.prefix,"executable":sys.executable}))\n',
+                encoding='utf-8')
+            command = json.loads(hook_target.read_text())['hooks']['SessionEnd'][0]['hooks'][0]['command']
+            result = run_captured(command, shell=True, cwd=root, env=environment,
+                                  capture_output=True, text=True, check=True, timeout=30)
+            require(json.loads(result.stdout) == {'prefix': sys.prefix, 'executable': sys.executable},
+                    'Registered hook escaped its bound virtualenv')
         before = hook_target.read_bytes()
         cli('apply', '--item', 'observer', selected_config=hook_machine)
         require(hook_target.read_bytes() == before, 'Personal hook reapply was not idempotent')
