@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from unittest.mock import patch
 
 import tomlkit
@@ -195,6 +196,43 @@ class PersonalHooks(unittest.TestCase):
         self.assertEqual(result.returncode, 7)
         self.assertEqual(json.loads(result.stdout), self.doc['hooks']['observer']['agents']['codex']['args'])
         self.assertEqual(result.stderr, 'event stdin\n')
+
+    def virtualenv_runtime(self):
+        if os.name == 'nt':
+            self.skipTest('Native POSIX virtualenv symlink execution')
+        environment = self.root / 'hook venv'
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+        executable = environment / 'bin/python'
+        if not executable.is_symlink():
+            self.skipTest('Virtualenv interpreter symlink capability unavailable')
+        self.script.write_text('import json,sys\n'
+                               'print(json.dumps({"prefix":sys.prefix,"executable":sys.executable}))\n',
+                               encoding='utf-8')
+        return executable
+
+    def assert_virtualenv_execution(self, executable):
+        self.apply('--agent', 'codex')
+        command = self.document()['hooks']['SessionEnd'][0]['hooks'][0]['command']
+        expected = subprocess.run([str(executable), str(self.script)], capture_output=True,
+                                  text=True, check=True)
+        actual = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(actual.stdout), json.loads(expected.stdout))
+
+    def test_bootstrap_preserves_virtualenv_runtime_path(self):
+        executable = self.virtualenv_runtime()
+        self.call('bootstrap', self.catalog, '--external', f'scripts={self.source}',
+                  '--runtime', f'python={executable}')
+        machine = tomlkit.parse(self.machine.read_text(encoding='utf-8'))
+        self.assertEqual(machine['runtimes']['python'], str(executable))
+        self.assert_virtualenv_execution(executable)
+
+    def test_saved_virtualenv_runtime_uses_its_environment(self):
+        executable = self.virtualenv_runtime()
+        self.bootstrap()
+        machine = tomlkit.parse(self.machine.read_text(encoding='utf-8'))
+        machine['runtimes']['python'] = str(executable)
+        self.machine.write_text(tomlkit.dumps(machine), encoding='utf-8')
+        self.assert_virtualenv_execution(executable)
 
     def test_invalid_declarations_runtime_and_redirected_payload_refused(self):
         cases = [('event', 'Impossible'), ('timeout', 4), ('runtime', 'missing'), ('script', '../escape'),
