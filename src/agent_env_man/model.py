@@ -307,6 +307,16 @@ class Config(MachineFile):
         self.catalog()
         return getattr(self, '_full_update_policies', {})
 
+    def settings_update_policies(self, *, full=False):
+        """Settings own independent schedules; reception always includes apply."""
+        self.catalog()
+        from .updates import TRIGGERS, policy_fields
+        defaults = {"trigger": list(TRIGGERS) if full else "manual",
+                    "min_interval": 600, "timeout": 30}
+        return {name: {**policy_fields(defaults, "settings update defaults"),
+                       **policy_fields(data.get("update", {}), f"settings.{name}.update")}
+                for name, data in self._settings.items()}
+
     @property
     def sources(self) -> dict[str, Source]:
         """Derive checkout paths; the inventory never needs device-local bindings."""

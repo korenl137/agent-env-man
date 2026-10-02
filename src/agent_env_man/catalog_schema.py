@@ -86,7 +86,10 @@ def validate(document):
         raise Error("Catalog settings must be a table")
     for name, data in settings.items():
         identifier(name)
-        table(data, {"source", "path", "format"}, f"settings.{name}")
+        table(data, {"source", "path", "format", "update"}, f"settings.{name}")
+        if "update" in data:
+            table(data["update"], {"trigger", "min_interval", "timeout"}, f"settings.{name}.update")
+            _validate_policy(data["update"], f"settings.{name}.update")
         if not isinstance(data.get("source"), str) or data["source"] not in sources:
             raise Error(f"settings.{name}: source must name a declared source")
         from .model import relative
@@ -137,6 +140,8 @@ def normalize(document):
     for name, data in document.get("settings", {}).items():
         field = "repo" if sources[data["source"]]["type"] == "git" else "external"
         result["settings"][name] = {field: data["source"], "path": data["path"], "format": data["format"]}
+        if "update" in data:
+            result["settings"][name]["update"] = _policy_model(data["update"])
     updates = document.get("updates", {})
     result["updates"] = {"defaults": _policy_model(updates.get("defaults", {})),
                          "policies": {name: _policy_model(value) for name, value in updates.get("policies", {}).items()}}

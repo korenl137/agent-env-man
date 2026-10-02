@@ -271,15 +271,15 @@ aem publish editor -m "Update preferences" # Export, commit, and push a Git sour
 
 Update receives shared changes without applying them; publication never collects actual settings automatically.
 Unmanaged fields remain local, deleted fields propagate through metadata, and explicit release preserves actual values.
-Settings participate only in explicit commands, not full or skill automation.
+Settings have independent per-item automatic sync policies and participate by default in full automation, preserving empty-trigger exclusions and detached items.
 See [Staged settings](docs/settings-management.md) for declarations, conflicts, deletion/release, and recovery.
 
 ## Device automation modes
 
 A new installation defaults to `policies`, with AEM updates off and catalog/skill automation requiring opt-in.
-Choose `full` to queue AEM, catalog, and eligible skill/instruction updates in sequence, including preparation and installation of new declarations.
+Choose `full` to queue AEM, catalog, and eligible skill/instruction/settings updates in sequence, including preparation and installation of new declarations.
 Choose `off` to disable automatic work while retaining explicit commands.
-Application settings remain explicit in every mode.
+Settings automation receives and applies changes together; collection, export, and publication remain explicit.
 
 ```bash
 python scripts/setup.py --shell bash --agent codex --automation full --self-update compatible

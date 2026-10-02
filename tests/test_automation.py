@@ -232,6 +232,12 @@ class FullGitCatalog(unittest.TestCase):
     def test_real_cli_worker_refreshes_catalog_then_prepares_new_declarations(self):
         config = self.register()
         self.document['skills']['new'] = dict(self.document['skills']['tool'])
+        (self.seed / 'editor.toml').write_text('color = "blue"\n', encoding='utf-8')
+        self.document['settings'] = {'editor': {'source': 'tool', 'path': 'editor.toml', 'format': 'toml'}}
+        setting_target = self.root / 'app.toml'
+        machine = tomlkit.parse(self.config.read_text())
+        machine['settings'] = {'editor': {'target': str(setting_target)}}
+        self.config.write_text(tomlkit.dumps(machine))
         self.save_remote()
         executable = self.bin / 'aem'
         executable.write_text('#!' + sys.executable + '\nfrom agent_env_man.cli import main\nraise SystemExit(main())\n')
@@ -251,7 +257,9 @@ class FullGitCatalog(unittest.TestCase):
         self.assertEqual(result['stages']['catalog']['status'], 'updated')
         self.assertTrue((self.root / 'installed/new/SKILL.md').is_file())
         self.assertTrue(self.target.is_dir())
-        self.assertEqual(result['stages']['content']['sources'], ['tool', 'new'])
+        self.assertEqual(result['stages']['content']['sources'], ['tool', 'new', 'editor'])
+        self.assertEqual(tomlkit.parse(setting_target.read_text())['color'], 'blue')
+        self.assertNotIn('settings_automation', json.loads(self.state())['sources']['editor'])
         self.assertNotIn('catalog_automation', json.loads(self.state()))
         self.assertNotIn('automation', json.loads(self.state())['sources']['tool'])
 

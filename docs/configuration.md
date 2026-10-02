@@ -380,6 +380,18 @@ Mode, schedule, or runtime changes cancel queued work; the fresh continuation al
 ## Application settings declarations and bindings
 
 Catalog `[settings.NAME]` requires `source` (a declared Git/external source), `path` (a literal source-relative settings file), and `format` (currently only `"toml"`).
+Its optional `update` table defines a separate automatic sync policy:
+
+| Field | Type | Behavior |
+| --- | --- | --- |
+| `trigger` | Array of unique events | `shell-start`, `agent-start`, or `interval`; defaults to `[]` in policies mode. Explicit `[]` also excludes the item from full mode. |
+| `min_interval` | Integer or float | `600` seconds by default, finite and nonnegative; failures are throttled too. |
+| `timeout` | Integer or float | `30` seconds by default, finite and positive. |
+
+Settings do not inherit `updates.defaults` or named skill policies, and reject `action` and `policy` fields.
+Every automatic settings attempt receives shared changes and applies the stage after successful reception.
+Full mode includes settings with omitted triggers and replaces their individual schedule with the full-run schedule.
+Attempt observations are generated under `sources.NAME.settings_automation` in saved state; full runs do not change this clock.
 No other item fields are accepted; names cannot collide with skills or instructions.
 Machine `[settings.NAME]` requires only `target`, an absolute application-file path or `~/...`.
 Bootstrap `--setting-target NAME=PATH` persists these bindings and preserves omitted values.

@@ -502,7 +502,7 @@ aem automation --trigger EVENT [--dry-run]
 
 Runs the selected device mode.
 `off` returns `mode = "off"`, `status = "disabled"`, empty `outcomes`, and `failed = false`.
-`policies` returns the individual `self_update` / `catalog_update` outcomes, skill `outcomes`, and `failed`; catalog failures skip skill work.
+`policies` returns the individual `self_update` / `catalog_update` outcomes, skill `outcomes`, settings `settings_updates`, and `failed`; catalog failures skip both skill and settings work.
 `full` returns `not-triggered`, `throttled`, `planned` (preview), or `queued` and defers the whole sequence until requester termination.
 Only full mode uses the shared device trigger list and interval; individual modes retain their existing clocks.
 Dry run makes no remote requests or attempt records and creates no command lock files.
@@ -568,7 +568,8 @@ Old source registration, `codex-hook`, and throttled `sync` syntax are removed; 
 
 `bootstrap --setting-target NAME=PATH` prepares a setting stage and binds the actual application file.
 `update NAME` receives shared settings changes; `apply --item NAME` applies the stage; explicit sync updates then applies.
-Settings require explicit operations and are excluded from automatic policies and full automation.
+Settings have independent per-item automatic sync policies and participate by default in full automation; collection, export, and publication remain explicit.
+See [Staged settings](settings-management.md) for schedules, exclusions, and conflict behavior.
 
 | Command | Behavior |
 | --- | --- |

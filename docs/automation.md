@@ -8,9 +8,9 @@ For complete command syntax and configuration fields, see [Commands](commands.md
 | --- | --- | --- |
 | `off` | Automatic work is disabled; explicit commands remain available. | Use explicit bootstrap and apply. |
 | `policies` (default) | AEM, catalog, and skill updates use their independent opt-in policies. | Skill `sync` policies apply prepared skills; catalog updates do not install new declarations. |
-| `full` | One queued sequence updates AEM, then the catalog, then eligible skill/instruction sources. | Prepares new declarations and applies eligible content after delivery succeeds. |
+| `full` | One queued sequence updates AEM, then the catalog, then eligible skill/instruction/settings sources. | Prepares new declarations and applies eligible content after delivery succeeds. |
 
-Application settings participate only in explicit commands in every mode.
+Application settings have independent per-item sync policies in `policies` mode and participate by default in `full`, preserving explicit empty-trigger exclusions and detach.
 Linked content changes as soon as its shared source checkout advances, including links excluded from installation.
 See [Maintenance and recovery](maintenance.md) for conflicts, preservation, and repair.
 
@@ -31,7 +31,7 @@ aem setup --automation off
 
 1. Update AEM within its saved release range, or skip this stage when tool updates are off.
 1. Invoke the installed AEM afresh and validate/fast-forward the Git catalog; local or unbound catalogs skip delivery.
-1. Prepare and update eligible skill/instruction sources, then apply after all selected delivery succeeds.
+1. Prepare and update eligible skill/instruction/settings sources, receiving settings into their stages, then apply after all selected delivery succeeds.
 
 Full mode uses one shared trigger list and attempt interval, including failed attempts.
 Its defaults are shell/agent startup, 3600 seconds between attempts, and 30 seconds per content/catalog Git phase.
@@ -158,3 +158,12 @@ Explicit `update`, `apply`, `sync`, and `status --refresh` ignore automatic poli
 Agent startup shows a brief message for completed updates or installations; full outcomes and failures remain in status.
 Instruction location hooks installed by apply do not trigger updates.
 See [policy fields and precedence](configuration.md#update-policies).
+
+## Automatic settings sync
+
+Declare `[settings.NAME.update]` separately from skill update policies; see [Staged settings](settings-management.md) for fields and examples.
+`aem automation --trigger EVENT` runs due settings policies after skill policies in `policies` mode, with results under `settings_updates`.
+A failed catalog update skips both skill and settings work.
+Each setting uses its own persisted attempt clock across events, including failed attempts; previews are offline.
+Settings always receive and then apply, with no automatic collection, export, publication, replacement, or reattachment.
+Full mode includes settings by default and uses its shared schedule instead of individual clocks, while preserving explicit `trigger = []` exclusions.

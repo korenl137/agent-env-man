@@ -62,6 +62,103 @@ class StagedSettings(unittest.TestCase):
     def apply(self, *args, code=0):
         return self.call('apply', '--item', 'editor', *args, code=code)
 
+    def settings_policy(self, **values):
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['settings']['editor']['update'] = values
+        self.catalog.write_text(tomlkit.dumps(doc))
+
+    def test_settings_policy_is_independent_and_preview_is_offline(self):
+        from agent_env_man.updates import run_settings_updates
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['updates'] = {'defaults': {'trigger': ['interval'], 'action': 'check'}}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        manager = self.manager()
+        self.assertEqual(run_settings_updates(manager, 'interval')[0][0]['status'], 'not-triggered')
+        self.settings_policy(trigger=['interval'])
+        manager = self.manager()
+        before = manager.state.path.read_bytes()
+        with patch.object(manager, 'update', side_effect=AssertionError('Preview must not deliver')):
+            report, failed = run_settings_updates(manager, 'interval', dry_run=True)
+        self.assertFalse(failed)
+        self.assertEqual(report[0]['status'], 'planned')
+        self.assertEqual(manager.state.path.read_bytes(), before)
+        self.assertFalse(self.target.exists())
+
+    def test_settings_automation_external_sync_preserves_unmanaged_fields(self):
+        from agent_env_man.automation import run
+        self.apply()
+        self.edit(self.target, other=9)
+        self.edit(self.payload, color='remote')
+        self.settings_policy(trigger=['interval'])
+        report = run(self.manager(), 'interval')
+        self.assertFalse(report['failed'])
+        self.assertEqual(report['settings_updates'][0]['status'], 'synced')
+        actual = tomlkit.parse(self.target.read_text())
+        self.assertEqual(actual['color'], 'remote')
+        self.assertEqual(actual['other'], 9)
+        self.assertEqual(run(self.manager(), 'interval')['settings_updates'][0]['status'], 'throttled')
+
+    def test_settings_automation_conflicts_preserve_actual_and_throttle_failure(self):
+        from agent_env_man.updates import run_settings_updates
+        self.apply()
+        self.edit(self.target, color='actual')
+        self.edit(self.payload, color='remote')
+        self.settings_policy(trigger=['interval'])
+        before = self.target.read_bytes()
+        manager = self.manager()
+        report, failed = run_settings_updates(manager, 'interval')
+        self.assertTrue(failed)
+        self.assertEqual(report[0]['status'], 'failed')
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(run_settings_updates(manager, 'interval')[0][0]['status'], 'throttled')
+
+    def test_settings_automation_excludes_detached_and_off_mode(self):
+        from agent_env_man.updates import run_settings_updates
+        self.settings_policy(trigger=['interval'])
+        self.call('detach', 'editor')
+        self.assertEqual(run_settings_updates(self.manager(), 'interval')[0][0]['status'], 'detached')
+        self.call('setup', '--automation', 'off')
+        self.assertEqual(run_settings_updates(self.manager(), 'interval'), ([], False))
+
+    def test_full_settings_prepare_new_declaration_and_preserve_detach(self):
+        from agent_env_man.automation import full_content
+        self.call('detach', 'editor')
+        second = self.source / 'second.toml'
+        second.write_text('value = 2\n')
+        second_target = self.root / 'second-app.toml'
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['settings']['second'] = {'source': 'shared', 'path': 'second.toml', 'format': 'toml'}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        machine = tomlkit.parse(self.machine.read_text())
+        machine['settings']['second'] = {'target': str(second_target)}
+        self.machine.write_text(tomlkit.dumps(machine))
+        manager = self.manager()
+        report, failed = full_content(manager, 30)
+        self.assertFalse(failed)
+        self.assertEqual(report['sources'], ['second'])
+        self.assertEqual(report['excluded'], [{'source': 'editor', 'reason': 'detached'}])
+        self.assertEqual(tomlkit.parse(second_target.read_text())['value'], 2)
+        self.assertNotIn('settings_automation', manager.state.data['sources']['second'])
+        self.assertFalse(self.target.exists())
+
+    def test_settings_policy_does_not_prepare_new_stage(self):
+        from agent_env_man.updates import run_settings_updates
+        self.settings_policy(trigger=['interval'])
+        manager = self.manager()
+        del manager.state.data['items']['editor:settings']
+        report, failed = run_settings_updates(manager, 'interval')
+        self.assertFalse(failed)
+        self.assertEqual(report[0]['status'], 'not-prepared')
+        self.assertFalse(self.target.exists())
+
+    def test_settings_update_rejects_unsupported_fields_and_values(self):
+        for fields in ({'action': 'check'}, {'policy': 'skill-policy'}, {'trigger': 'interval'},
+                       {'trigger': ['manual']}, {'timeout': 0}, {'min_interval': -1}):
+            with self.subTest(fields=fields):
+                self.settings_policy(**fields)
+                with self.assertRaises(Error):
+                    self.manager().config.catalog()
+
     def test_prepare_locate_and_repeat_preserve_edits(self):
         self.assertFalse(self.target.exists())
         self.assertEqual(self.call('locate', 'editor')['entry'], str(self.stage))
@@ -338,7 +435,8 @@ class GitSettings(unittest.TestCase):
             'settings': {'editor': {'source': 'shared', 'path': 'editor.toml', 'format': 'toml'}}}))
         self.machine = self.root / 'machine.toml'
         self.target = self.root / 'app.toml'
-        self.call('bootstrap', str(self.catalog), '--setting-target', f'editor={self.target}')
+        self.call('bootstrap', str(self.catalog), '--setting-target', f'editor={self.target}',
+                  '--root', f'skills={self.root / "skills"}')
         self.checkout = self.root / 'machine.toml.checkouts/.aem-repositories/shared'
         self.payload = self.checkout / 'editor.toml'
         self.stage = self.root / 'machine.toml.stages/editor/config.toml'
@@ -422,13 +520,70 @@ class GitSettings(unittest.TestCase):
         self.call('publish', 'editor', '-m', 'Change color', code=1)
         self.assertEqual(self.payload.read_bytes(), before)
 
-    def test_full_content_excludes_settings(self):
+    def test_full_content_receives_and_applies_settings(self):
         from agent_env_man.automation import full_content
+        self.upstream('color="remote"\ncount=1\n')
         report, failed = full_content(self.manager(), 30)
         self.assertFalse(failed)
-        self.assertEqual(report['status'], 'skipped')
-        self.assertEqual(report['excluded'], [{'source': 'editor', 'reason': 'settings-manual'}])
+        self.assertEqual(report['status'], 'completed')
+        self.assertEqual(report['sources'], ['editor'])
+        self.assertEqual(tomlkit.parse(self.stage.read_text())['color'], 'remote')
+        self.assertEqual(tomlkit.parse(self.target.read_text())['color'], 'remote')
 
+    def test_full_settings_exclusions_and_conflict_stop_application(self):
+        from agent_env_man.automation import full_content
+        self.apply()
+        catalog = tomlkit.parse(self.catalog.read_text())
+        catalog['settings']['editor']['update'] = {'trigger': []}
+        self.catalog.write_text(tomlkit.dumps(catalog))
+        report, failed = full_content(self.manager(), 30)
+        self.assertFalse(failed)
+        self.assertEqual(report['excluded'], [{'source': 'editor', 'reason': 'manual'}])
+        del catalog['settings']['editor']['update']
+        self.catalog.write_text(tomlkit.dumps(catalog))
+        self.edit(self.stage, color='local')
+        self.upstream('color="remote"\ncount=1\n')
+        before = self.target.read_bytes()
+        report, failed = full_content(self.manager(), 30)
+        self.assertTrue(failed)
+        self.assertNotIn('apply', report)
+        self.assertEqual(self.target.read_bytes(), before)
+
+    def test_setting_policy_git_reception_and_apply(self):
+        from agent_env_man.updates import run_settings_updates
+        catalog = tomlkit.parse(self.catalog.read_text())
+        catalog['settings']['editor']['update'] = {'trigger': ['interval']}
+        self.catalog.write_text(tomlkit.dumps(catalog))
+        self.upstream('color="remote"\ncount=1\n')
+        manager = self.manager()
+        report, failed = run_settings_updates(manager, 'interval')
+        self.assertFalse(failed)
+        self.assertEqual(report[0]['status'], 'synced')
+        self.assertEqual(tomlkit.parse(self.target.read_text())['color'], 'remote')
+        self.assertEqual(run_settings_updates(manager, 'interval')[0][0]['status'], 'throttled')
+
+    def test_settings_sync_shared_checkout_requests_skill_reload(self):
+        from agent_env_man.updates import run_settings_updates, startup_skills_changed
+        skill = self.work / 'helper'
+        skill.mkdir()
+        (skill / 'SKILL.md').write_text('# Helper\n')
+        self.git(self.work, 'add', '.')
+        self.git(self.work, 'commit', '-m', 'Add shared skill')
+        self.git(self.work, 'push', 'origin', 'main')
+        self.call('update', 'editor')
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['skills'] = {'helper': {'source': 'shared', 'subdir': 'helper'}}
+        doc['settings']['editor']['update'] = {'trigger': ['interval']}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        self.call('bootstrap', str(self.catalog))
+        self.call('apply', '--item', 'helper')
+        (skill / 'SKILL.md').write_text('# Updated helper\n')
+        self.upstream('color="remote"\ncount=1\n')
+        manager = self.manager()
+        report, failed = run_settings_updates(manager, 'interval')
+        self.assertFalse(failed)
+        self.assertTrue(startup_skills_changed(report, manager.state.data['items'], 'codex', manager.config.sources))
+        self.assertIn('Updated helper', (self.root / 'skills/helper/SKILL.md').read_text())
 
     def test_publish_reports_unselected_pending_stage(self):
         catalog = tomlkit.parse(self.catalog.read_text())

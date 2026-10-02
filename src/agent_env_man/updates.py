@@ -170,6 +170,68 @@ def run_updates(manager, trigger, names=(), *, dry_run=False):
     return report, failed
 
 
+def run_settings_updates(manager, trigger, *, dry_run=False):
+    """Receive and apply due prepared settings without collecting or publishing.
+
+    Settings schedules are independent of skill defaults and clocks. Persist
+    attempts before delivery and stop application on a shared merge conflict.
+    The ordinary apply merge preserves actual-file edits and unmanaged fields.
+    """
+    if trigger not in TRIGGERS:
+        raise Error(f"Unknown automatic update trigger: {trigger}")
+    if manager.config.automation['mode'] == 'off':
+        return [], False
+    if manager.config.automation['mode'] == 'full':
+        raise Error('Use automation --trigger EVENT in full mode')
+    policies = manager.config.settings_update_policies()
+    manager.state.ready()
+    report, failed = [], False
+    initial_revisions = {}
+    for name, policy in policies.items():
+        entry = {"setting": name, "policy": policy}
+        report.append(entry)
+        record = manager.state.data['items'].get(f'{name}:settings')
+        previous = manager.state.data['sources'].get(name, {}).get('settings_automation', {})
+        current = time.time()
+        if trigger not in policy['trigger']:
+            entry['status'] = 'not-triggered'
+        elif record and record.get('detached'):
+            entry['status'] = 'detached'
+        elif not record:
+            entry['status'] = 'not-prepared'
+        elif current - previous.get('last_attempt', float('-inf')) < policy['min_interval']:
+            entry['status'] = 'throttled'
+        else:
+            entry['status'] = 'planned'
+        if entry['status'] != 'planned' or dry_run:
+            continue
+        manager.state.ready()
+        attempt = {'last_attempt': current, 'trigger': trigger, 'action': 'sync', 'status': 'running'}
+        manager.state.data['sources'].setdefault(name, {})['settings_automation'] = attempt
+        manager.state.save()
+        try:
+            source = manager.delivery_source(manager.config.sources[name])
+            if source.git:
+                git = Git(policy['timeout'])
+                if source.path not in initial_revisions:
+                    initial_revisions[source.path] = git.run(source.path, 'rev-parse', 'HEAD').stdout
+                entry['previous_revision'] = initial_revisions[source.path]
+            entry['update'], update_failed = manager.update([name], timeout=policy['timeout'])
+            if source.git:
+                entry['revision'] = git.run(source.path, 'rev-parse', 'HEAD').stdout
+            if update_failed:
+                raise Error(f'Setting {name}: reception failed; application skipped')
+            entry['apply'] = manager.apply([name], timeout=policy['timeout'])
+            entry['status'] = 'synced'
+            attempt.update(status='synced', last_success=time.time())
+        except (Error, OSError, ValueError) as exc:
+            failed = True
+            entry.update(status='failed', error=str(exc))
+            attempt.update(status='failed', error=str(exc))
+        manager.state.save()
+    return report, failed
+
+
 def startup_skills_changed(outcomes, records, agent, sources):
     """Include live links changed indirectly by an advanced shared checkout."""
     applied = set()
@@ -179,7 +241,7 @@ def startup_skills_changed(outcomes, records, agent, sources):
                     and outcome.get("revision") is not None
                     and outcome["previous_revision"] != outcome["revision"])
         if advanced:
-            source = sources.get(outcome["skill"])
+            source = sources.get(outcome.get("skill", outcome.get("setting")))
             if source is not None:
                 advanced_checkouts.add(source.path)
         if outcome.get("status") == "synced":

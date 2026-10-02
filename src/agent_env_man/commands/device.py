@@ -128,7 +128,12 @@ def self_publish_command(runtime, checkout, timeout, dry_run):
 @preview_option
 @pass_runtime
 def automation_command(runtime, trigger, dry_run):
-    """Run or preview the selected device automation mode."""
+    """Run or preview the selected device automation mode.
+
+    Policies mode runs independent tool, catalog, skill, and settings policies.
+    Settings always receive then apply; full also prepares new eligible items.
+    Collection, export, and publication remain explicit.
+    """
     def operation(session):
         report = device_automation.run(session.manager, trigger, dry_run=dry_run)
         return report, report.get("failed", False)
@@ -151,8 +156,9 @@ def startup(runtime, trigger, agent, aem_hook_id):
         session.state.save()
         outcomes = result.get("outcomes", [])
         # Empty results must not load catalogs skipped by disabled or queued automation.
-        skills_changed = bool(agent and outcomes) and startup_skills_changed(
-            outcomes, session.state.data["items"], agent, session.config.sources)
+        delivery_outcomes = outcomes + result.get("settings_updates", [])
+        skills_changed = bool(agent and delivery_outcomes) and startup_skills_changed(
+            delivery_outcomes, session.state.data["items"], agent, session.config.sources)
         report = (profile(agent).startup_result(startup_briefing(outcomes),
                   skills_changed=skills_changed)
                   if agent else {})

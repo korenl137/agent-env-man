@@ -40,11 +40,14 @@ class Manager:
             return replace(source, branch=branch)
         return source
 
-    def prepare_skills(self, names=(), *, timeout=30):
+    def prepare_skills(self, names=(), *, timeout=30, defer_settings=False):
         """Clone listed repositories, validating skills before publishing a checkout.
 
         Clone success does not install anything. Existing checkouts are checked
         in place and never reset or pulled by bootstrap.
+        Full automation may defer existing settings payload/stage preparation
+        until validated delivery succeeds, so new declarations can refer to
+        files that arrive in the incoming revision.
         """
         self.state.ready()
         sources = self.config.sources
@@ -89,6 +92,8 @@ class Manager:
                     if item.kind == "skill":
                         git.skill_descriptor(prepared, item.relative)
                     elif item.kind == "setting":
+                        if defer_settings and not created:
+                            continue
                         from .settings import Bundle, metadata_path
                         git.tracked_payload(prepared, item.relative)
                         Bundle.load(local_path / item.relative, metadata_path(local_path / item.relative),
@@ -140,7 +145,7 @@ class Manager:
         ready_names = {entry.get("skill", entry.get("source")) for entry in report
                        if entry.get("status") in ("cloned", "already-prepared", "external-ready")}
         for name, source in sources.items():
-            if name in self.config._settings and name in ready_names and (not names or name in names):
+            if not defer_settings and name in self.config._settings and name in ready_names and (not names or name in names):
                 try:
                     report.append(Settings(self).prepare(self.config.declarations(source)[0]))
                 except (Error, OSError, ValueError) as exc:
@@ -850,7 +855,7 @@ class Manager:
                 self.state.save()
         return results, failed
 
-    def update(self, names=(), *, timeout=30):
+    def update(self, names=(), *, timeout=30, prepare_settings=False):
         self.state.ready()
         if set(names) - self.config.sources.keys():
             raise Error("Unknown source selection")
@@ -883,7 +888,12 @@ class Manager:
                 from .settings import Settings
                 for selected_name, _ in selected:
                     if selected_name in self.config._settings:
-                        received = Settings(self).receive(selected_name)
+                        settings = Settings(self)
+                        if prepare_settings:
+                            # Initialize new full-run stages from delivered content;
+                            # existing stages retain edits and comparison bases.
+                            settings.prepare(self.config.declarations(self.config.sources[selected_name])[0])
+                        received = settings.receive(selected_name)
                         results.append(received)
                         failed |= received["status"] == "conflict"
             except (Error, OSError) as exc:

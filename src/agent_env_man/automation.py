@@ -2,7 +2,7 @@
 import time
 
 from .model import Error
-from .updates import TRIGGERS, policy_fields, run_updates
+from .updates import TRIGGERS, policy_fields, run_updates, run_settings_updates
 from . import catalog, self_update
 
 MODES = ('off', 'policies', 'full')
@@ -79,12 +79,14 @@ def run(manager, trigger, *, dry_run=False):
     try:
         result['catalog_update'], failed = catalog.run_auto(config, state, trigger, dry_run=dry_run)
         if failed:
-            raise Error('Automatic catalog update failed; skill updates skipped')
+            raise Error('Automatic catalog update failed; skill and settings updates skipped')
         if result['catalog_update']['status'] == 'updated':
             from .model import Config
             from .manager import Manager
             manager = Manager(Config(config.path), state)
         result['outcomes'], result['failed'] = run_updates(manager, trigger, dry_run=dry_run)
+        result['settings_updates'], failed = run_settings_updates(manager, trigger, dry_run=dry_run)
+        result['failed'] |= failed
     except (Error, OSError, ValueError) as exc:
         result.update(failed=True, error=str(exc))
         result.setdefault('catalog_update', {'status': 'failed', 'error': str(exc)})
@@ -99,12 +101,10 @@ def full_content(manager, timeout):
     hook selection from implicitly expanding into a preserved installation.
     Shared Git checkouts retain their ordinary cross-consumer link effects.
     """
-    policies = manager.config.full_update_policies()
+    policies = {**manager.config.full_update_policies(),
+                **manager.config.settings_update_policies(full=True)}
     sources, items, excluded = [], [], []
     for name, source in manager.config.sources.items():
-        if name in manager.config._settings:
-            excluded.append({'source': name, 'reason': 'settings-manual'})
-            continue
         if name in policies and policies[name]['trigger'] == ['manual']:
             excluded.append({'source': name, 'reason': 'manual'})
             continue
@@ -123,10 +123,10 @@ def full_content(manager, timeout):
     if not sources:
         return {**report, 'status': 'skipped'}, False
     manager.selected(items)  # Ownership preflight before cloning content.
-    report['prepare'], failed = manager.prepare_skills(sources, timeout=timeout)
+    report['prepare'], failed = manager.prepare_skills(sources, timeout=timeout, defer_settings=True)
     if failed:
         return {**report, 'status': 'failed'}, True
-    report['update'], failed = manager.update(sources, timeout=timeout)
+    report['update'], failed = manager.update(sources, timeout=timeout, prepare_settings=True)
     if failed:
         return {**report, 'status': 'failed'}, True
     report['apply'] = manager.apply(items, timeout=timeout)

@@ -1,7 +1,7 @@
 """Staged settings, semantic changes, and recoverable grouped file writes.
 
 Editable documents are separate from trusted comparison bases. Transport never
-activates these settings: only an explicit apply writes the application file.
+activates these settings: application is a separate phase of explicit or automatic sync.
 """
 
 from copy import deepcopy

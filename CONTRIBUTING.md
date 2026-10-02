@@ -288,7 +288,7 @@ Preview must not fetch or record attempts.
 Automatic sync applies each successfully updated skill independently.
 Explicit sync instead requires all updates to succeed before applying.
 Preserve existing per-target transactions, stop if recovery is pending, and never adopt, replace conflicts, or reattach detached skills automatically.
-Automatic policies cover catalog skills; explicit sync is unthrottled.
+Skill automatic policies cover catalog skills; settings schedules remain independent, and explicit sync is unthrottled.
 
 ## Device orchestration contracts
 
@@ -476,9 +476,12 @@ Shell quoting and PowerShell serialization tests do not establish native shell o
 ## Staged settings architecture
 
 Keep settings transport, editable stages, and actual application files distinct.
-Only explicit operations may collect, export, receive, or apply settings.
-Full device automation and automatic skill updates must exclude settings.
-A shared checkout update by another consumer may change the source but must not activate or rewrite its settings stage.
+Collection, export, and publication require explicit operations.
+Settings have independent per-item automatic schedules; never inherit skill defaults or named policies.
+Automatic settings work always receives shared changes and then applies the stage, stopping application on reception failure or conflicts.
+Full device automation includes settings by default, preserving explicit empty-trigger exclusions and detached items, and uses the shared full-run clock.
+A shared checkout update by another consumer may change the source but must not activate or rewrite an unselected settings stage.
+Automatic settings application retains the ordinary field conflict checks and must never replace local edits or reattach detached items.
 
 Keep format parsing, value identity, field enumeration, and preserving edits behind the format adapter.
 Do not use TOML parser nodes as persisted ownership values or expose them in CLI reports.

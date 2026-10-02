@@ -106,7 +106,7 @@ For automation changes, inspect `aem --json status` and choose the requested dev
 Use `aem automation --dry-run` to inspect the current mode's planned work.
 When mode or schedule choices remain unresolved, consult setup help first, then the local automation guide only if more behavioral detail is needed.
 For individual policies, use the relevant command help before consulting the guide as needed.
-Settings are excluded from automatic/full runs.
+Settings have independent automatic sync policies and participate by default in full runs, receiving then applying changes while preserving conflicts, explicit exclusions, and detach.
 Collection, export, and publication remain explicit.
 
 For an AEM tool update, inspect `aem self status`, then use `aem self update --dry-run` and the requested `aem self update`.
