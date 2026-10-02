@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Restore basic usage in the bundled AEM skill, organized by task workflows, with command help and local documentation consulted in sequence only when needed.
+
 ### Fixed
 
 - Disabled agent startup callbacks remain independent of missing or invalid content catalogs.

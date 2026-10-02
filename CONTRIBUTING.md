@@ -385,8 +385,11 @@ Verify isolated wheel builds, wheel contents, wheel builds from the sdist, insta
 ## Official skill guidance
 
 The packaged [idk-aem skill](skills/idk-aem/SKILL.md) should help agents choose and carry out AEM operations, with emphasis on important behavior, sequencing, and non-obvious consequences.
-Prefer discovery through the installed CLI's command help and authoritative local tool documentation over copying command inventories, option syntax, configuration schemas, or detailed procedures into the skill.
-Give agents concrete local entry points and explain when to consult them; use installed-version help for available syntax and local documentation matching that version for behavior.
+Organize the skill by the user's intended task, with enough basic commands and sequencing to carry out ordinary workflows directly.
+Do not lead with command inventories or require interface discovery before every operation.
+Keep exhaustive options, configuration schemas, and detailed procedures in installed CLI help and authoritative local documentation.
+When a workflow leaves a decision unresolved, consult the relevant installed command help first, then the matching local documentation only if help is insufficient.
+Give agents concrete local entry points, explain when to consult them, and reuse already verified guidance until the runtime changes or an incompatibility appears.
 Use documentation paths only when they resolve in the installed environment; do not rely on repository-relative paths to unbundled files or web links that require fetching documentation.
 Use the local help and documentation provided by the installation.
 Treat missing or incomplete advertised materials as an installation or documentation issue; do not add fallback instructions to the skill.
