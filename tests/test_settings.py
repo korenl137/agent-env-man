@@ -330,7 +330,7 @@ class StagedSettings(unittest.TestCase):
         meta.write_text('version=1\ndeleted=[["color"]]\n')
         self.apply(code=1)
         document = tomlkit.parse(self.catalog.read_text())
-        document['settings']['editor']['format'] = 'json'
+        document['settings']['editor']['format'] = 'jsonc'
         self.catalog.write_text(tomlkit.dumps(document))
         self.call('bootstrap', code=1)
 

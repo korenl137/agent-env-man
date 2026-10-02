@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Strict JSON application settings with exact numeric comparison, preserving field edits, and the existing staged merge, publication, automation, and recovery workflows.
 - Independent per-setting automatic sync schedules that receive shared settings and apply their stages together, with offline previews, failure throttling, and existing conflict preservation.
 
 ### Changed
@@ -18,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.
 - Disabled agent startup callbacks remain independent of missing or invalid content catalogs.
 
 ## [1.0.0-rc] &mdash; 2026-10-01

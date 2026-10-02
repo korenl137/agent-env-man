@@ -486,7 +486,11 @@ Automatic settings application retains the ordinary field conflict checks and mu
 Keep format parsing, value identity, field enumeration, and preserving edits behind the format adapter.
 Do not use TOML parser nodes as persisted ownership values or expose them in CLI reports.
 Shared intent metadata is an AEM contract, independent of the supported application format.
-The first implementation supports only TOML, treats arrays and empty tables as atomic values, and permits one owner per target file.
+Support TOML and strict JSON objects, treat arrays and empty tables/objects as atomic values, and permit one owner per target file.
+JSON numbers compare by exact numeric value regardless of spelling, with booleans kept distinct; preserve numeric tokens without conversion through binary floats.
+Keep JSON edits local to changed values and required punctuation, preserving untouched tokens and returning unchanged documents verbatim.
+Reject duplicate JSON keys, comments, trailing commas, and nonstandard numeric constants.
+Distinguish format-specific empty document construction from parsing an existing file; an existing empty JSON file is invalid.
 
 Editable stages never replace trusted shared/apply comparison bases.
 Deletion, ownership release, and local detach have distinct semantics; preserve intent records for newly connected and offline devices.

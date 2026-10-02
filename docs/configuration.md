@@ -379,7 +379,9 @@ Mode, schedule, or runtime changes cancel queued work; the fresh continuation al
 
 ## Application settings declarations and bindings
 
-Catalog `[settings.NAME]` requires `source` (a declared Git/external source), `path` (a literal source-relative settings file), and `format` (currently only `"toml"`).
+Catalog `[settings.NAME]` requires `source` (a declared Git/external source), `path` (a literal source-relative settings file), and `format` (`"toml"` or `"json"`).
+JSON settings require a strict top-level object with unique keys; comments and trailing commas are unsupported.
+See [Settings management](settings-management.md) for field ownership, exact numeric comparison, and preserving edits.
 Its optional `update` table defines a separate automatic sync policy:
 
 | Field | Type | Behavior |

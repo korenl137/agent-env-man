@@ -21,7 +21,7 @@ Prepared sources remain usable offline.
 - [TOML specification](docs/configuration.md): every field, default, constraint, and path rule.
 - [Command reference](docs/commands.md): complete command and option list.
 - [Instruction walkthrough](docs/instruction-bundles.md): external and Git bundles on Linux/WSL and Windows.
-- [Staged settings](docs/settings-management.md): edit and share selected application TOML fields.
+- [Staged settings](docs/settings-management.md): edit and share selected application TOML or JSON fields.
 - [Automation and AEM updates](docs/automation.md): device modes, independent policies, and tool updates.
 - [Maintenance and recovery](docs/maintenance.md): conflicts, detach, backups, repair, and uninstalling.
 - [Removed interfaces](docs/removed-interfaces.md): breaking changes and existing-installation precautions.
@@ -257,7 +257,7 @@ See [publish](docs/commands.md#publish) for commit scope, Git settings, and fail
 ## Application settings
 
 Manage selected application TOML fields through an editable local stage.
-Declare `[settings.NAME]` with `source`, `path`, and `format = "toml"` in the catalog, then bind its actual file:
+Declare `[settings.NAME]` with `source`, `path`, and `format = "toml"` or `format = "json"` in the catalog, then bind its actual file:
 
 ```bash
 aem bootstrap /absolute/catalog.toml --setting-target editor=/absolute/app/config.toml

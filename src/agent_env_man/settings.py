@@ -54,16 +54,27 @@ class Bundle:
     adapter: SettingsFormat = FORMATS["toml"]
 
     @classmethod
+    def empty(cls, *, format):
+        if not isinstance(format, str) or format not in FORMATS:
+            raise Error(f"Unsupported settings format: {format}")
+        adapter = FORMATS[format]
+        return cls(adapter.empty_document(), set(), set(), adapter)
+
+    @classmethod
     def load(cls, path, metadata=None, *, missing=False, format="toml"):
         regular(path, missing=missing)
         observations = {str(path): observation(path)}
-        text = path.read_text(encoding="utf-8") if exists(path) else ""
+        present = exists(path)
+        empty = cls.empty(format=format) if not present else None
+        text = path.read_bytes().decode("utf-8") if present else empty.adapter.dump(empty.document)
         meta = ""
         if metadata is not None:
             regular(metadata, missing=True)
             observations[str(metadata)] = observation(metadata)
-            meta = metadata.read_text(encoding="utf-8") if exists(metadata) else ""
+            meta = metadata.read_bytes().decode("utf-8") if exists(metadata) else ""
         bundle = cls.from_snapshot({"config": text, "management": meta}, format=format)
+        if not present:
+            bundle.document = empty.document
         for location, before in observations.items():
             if observation(Path(location)) != before:
                 raise Error(f"Settings changed while reading: {location}")
@@ -491,7 +502,7 @@ class Settings:
             raise Error("Setting is detached; use --reattach")
         desired = self.working(record)
         actual = Bundle.load(item.target, missing=True, format=record["format"])
-        base = Bundle.from_snapshot(record["applied"], format=record["format"]) if record.get("applied") and not record.get("detached") else Bundle.from_snapshot({"config": "", "management": ""}, format=record["format"])
+        base = Bundle.from_snapshot(record["applied"], format=record["format"]) if record.get("applied") and not record.get("detached") else Bundle.empty(format=record["format"])
         fields, prior = actual.operations(), base.operations()
         conflicts = []
         operations = desired.operations()

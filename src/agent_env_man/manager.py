@@ -826,7 +826,7 @@ class Manager:
                 setting_names = [n for n in selected if n in self.config._settings]
                 report["unpublished_settings"] = [n for n, _ in members if n not in selected and n in self.config._settings
                     and (r := settings.record(n, required=False))
-                    and changed(Bundle.from_snapshot(r["shared"]), settings.working(r, conflicts=True))]
+                    and changed(Bundle.from_snapshot(r["shared"], format=r["format"]), settings.working(r, conflicts=True))]
                 if setting_names:
                     if not dry_run:
                         observed = git.publication_preflight(source)

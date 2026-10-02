@@ -1,7 +1,7 @@
 # Staged application settings
 
 AEM can manage selected fields in application settings independently of its own machine configuration.
-The first supported file format is TOML.
+Supported file formats are TOML and strict JSON objects.
 Settings use an editable local stage instead of linking an application's entire configuration to a shared source.
 Explicit commands can receive, collect, apply, export, or publish settings changes.
 Automatic settings sync receives shared changes and applies the stage; collection, export, and publication remain explicit.
@@ -30,7 +30,7 @@ format = "toml"
 ```
 
 Names are unique across skills, instructions, and settings.
-The required `path` is a literal source-relative file path using `/`; `format` currently accepts only `toml`.
+The required `path` is a literal source-relative file path using `/`; `format` accepts `toml` or `json`.
 Git settings must be tracked regular UTF-8 files.
 An external source uses `type = "external"` with a machine `--external preferences=PATH` binding instead of a repository declaration.
 The catalog declares the shared content; the machine binds the actual application file:
@@ -48,7 +48,7 @@ The corresponding machine table is:
 target = "/absolute/app/config.toml"
 ```
 
-Bootstrap prepares the source and initializes `<machine-file>.stages/editor/config.toml` and `management.toml` without writing the application file.
+Bootstrap prepares the source and initializes `<machine-file>.stages/editor/config.toml` (or `config.json`) and `management.toml` without writing the application file.
 `settings prepare NAME [--dry-run]` also initializes a stage from an already prepared source, with no cloning or binding changes.
 Existing stages retain edits and require an explicit update to receive shared changes.
 A file has at most one AEM setting owner, although that owner manages only its declared fields.
@@ -77,16 +77,42 @@ The target path may be reported before the application file exists.
 Locate reports `root`, `entry`, `metadata` (null for the actual file), `location` (`stage`, `source`, or `target`), `prepared`, and `detached`.
 `--cd` prints the root directory and retains the existing shell integration semantics.
 
-Edit `config.toml` to prepare added or changed values.
+Edit the reported stage entry (`config.toml` or `config.json`) to prepare added or changed values.
 Removing a previously managed field prepares a deletion; AEM records the deletion in metadata on the next successful stage operation, apply, or export.
 Arrays, including arrays of tables, and empty tables are managed as complete values.
 Ordinary tables expose individual leaves.
 Quoted keys containing dots remain distinct from nested keys.
 TOML types remain distinct during comparison, including integer versus float and boolean, dates, times, and special float values.
 
+For a JSON setting, declare the application's file using the same catalog and target binding workflow:
+
+```toml
+[settings.assistant]
+source = "preferences"
+path = "assistant.json"
+format = "json"
+```
+
+```bash
+aem bootstrap --setting-target assistant=/absolute/app/settings.json
+```
+
+JSON files must contain one top-level object, with unique keys in every nested object, including inside arrays.
+Comments, trailing commas, `NaN`, and `Infinity` are unsupported; JSONC is not accepted.
+An existing empty or whitespace-only file is invalid, while a missing target is initialized as an empty object before applying fields.
+Nonempty objects expose their leaves; arrays and empty objects are atomic values.
+`null` is a value, distinct from deleting or releasing a field.
+Literal dotted keys, empty keys, and escaped keys use the same string-array path selection as TOML.
+Numbers compare by exact numeric value: `1`, `1.0`, and `1e0` are equal, as are signed and unsigned zero, while `true` is distinct from `1`.
+Numeric tokens are retained without binary floating-point conversion, preserving large integers and precise decimal values.
+Object key order is ignored for comparison; array order remains meaningful.
+
 Apply consumes the stage without fetching, exporting, or collecting application changes.
 It preserves nonmanaged fields and their comments, preserves existing file permissions and line endings, and avoids rewriting semantically unchanged values.
 Formatting within changed nodes can change.
+JSON edits preserve untouched value tokens and key order, changing only the selected values and necessary punctuation or separators.
+Semantically unchanged JSON targets retain their original bytes, including numeric spelling and string escapes.
+New JSON targets use two-space indentation and a final newline; inserted members in existing objects follow their indentation when available.
 A missing application file is created; deleting all managed fields leaves a file rather than deleting it.
 Initial identical values and already absent deletion targets are adopted automatically.
 Different existing values require `aem apply --item editor --replace`; replacement is limited to managed fields.
@@ -169,7 +195,7 @@ Shared merges compare the last accepted shared state, current stage, and incomin
 Application merges compare the last applied state, current actual settings, and stage.
 One-sided changes and identical concurrent changes merge; different edits, deletion versus modification, and overlapping structural changes conflict.
 A conflict in an actual file aborts the whole file operation.
-A shared conflict is saved separately from the valid editable TOML and blocks apply/export/publish until resolved:
+A shared conflict is saved separately from the valid editable settings file and blocks apply/export/publish until resolved:
 
 ```bash
 aem settings resolve editor --path '["color"]' --take local
