@@ -52,6 +52,11 @@ Bootstrap prepares the source and initializes `<machine-file>.stages/editor/conf
 `settings prepare NAME [--dry-run]` also initializes a stage from an already prepared source, with no cloning or binding changes.
 Existing stages retain edits and require an explicit update to receive shared changes.
 A file has at most one AEM setting owner, although that owner manages only its declared fields.
+Claude's `settings.json` can also contain AEM setup and instruction hook groups.
+A JSON setting may share that exact file with Claude hook integrations, but cannot
+manage the top-level `hooks` field or any of its descendants, including deletion
+or release metadata. Setup and settings preserve each other's fields; two settings
+owners still cannot share a target. Overlapping directory targets remain rejected.
 Targets and stage storage must not overlap sources, catalog storage, AEM state, or other managed targets.
 Symlinks, junctions, redirected ancestry, and special files are rejected.
 Changing the source, target, or format of an active item requires detach first.

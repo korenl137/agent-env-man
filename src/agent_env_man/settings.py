@@ -30,6 +30,20 @@ def regular(path, *, missing=False):
         raise Error(f"Settings require a regular file: {path}")
 
 
+def shares_hook_file(setting, hook):
+    """Profiles explicitly opt into shared settings/hook-file ownership."""
+    from .agents import profile
+    return (setting.get("kind") == "setting" and setting.get("mode") == "settings"
+            and setting.get("format") == "json" and hook.get("mode") == "agent-hook"
+            and profile(hook.get("agent", "codex")).shared_settings_format == setting.get("format")
+            and setting.get("target") == hook.get("target"))
+
+
+def protect_hook_fields(bundle):
+    if any(path[0] == "hooks" for path in bundle.operations()):
+        raise Error("Agent hooks are owned by agent integration; JSON settings must not manage hooks")
+
+
 def parse_path(value):
     try:
         parts = json.loads(value)
@@ -358,16 +372,40 @@ class Settings:
             if exists(cursor) and (cursor.is_symlink() or is_reparse(cursor)):
                 raise Error("Settings source path redirects")
             cursor = cursor.parent
-        return Bundle.load(item.source, metadata_path(item.source), format=self.config._settings[item.source_name]["format"])
+        format = self.config._settings[item.source_name]["format"]
+        bundle = Bundle.load(item.source, metadata_path(item.source), format=format)
+        self.protect_hooks({"kind": "setting", "mode": "settings", "target": str(item.target), "format": format}, bundle)
+        return bundle
+
+    def check_hook_ownership(self, record):
+        protect_hook_fields(self.working(record, conflicts=True))
+        if record.get("applied"):
+            protect_hook_fields(Bundle.from_snapshot(record["applied"], format="json"))
+
+    def protect_hooks(self, record, bundle):
+        target = record["target"]
+        from .agents import profile
+        configured = any(profile(name).shared_settings_format == record.get("format")
+                         and str(Path(binding["root"]) / profile(name).hook_name) == target
+                         for name, binding in getattr(self.config, "agents", {}).items())
+        shared = any(not old.get("detached") and shares_hook_file(record, old)
+                     for old in self.state.data["items"].values())
+        if record.get("format") == "json" and (configured or shared):
+            protect_hook_fields(bundle)
+            if record.get("applied"):
+                protect_hook_fields(Bundle.from_snapshot(record["applied"], format="json"))
 
     def working(self, record, *, conflicts=False):
         if record.get("conflicts") and not conflicts:
             raise Error("Unresolved settings conflicts; use settings resolve")
         config, meta = self.stage_paths(record)
         current = Bundle.load(config, meta, format=record["format"])
-        return normalize(current, Bundle.from_snapshot(record["working"], format=record["format"]))
+        bundle = normalize(current, Bundle.from_snapshot(record["working"], format=record["format"]))
+        self.protect_hooks(record, bundle)
+        return bundle
 
     def save_stage(self, record, bundle, *, dry_run=False):
+        self.protect_hooks(record, bundle)
         config, meta = self.stage_paths(record)
         snapshot = bundle.snapshot()
         record["working"] = snapshot

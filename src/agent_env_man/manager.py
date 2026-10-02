@@ -220,6 +220,19 @@ class Manager:
                                  or (old_other.get("mode") == "agent-hook"
                                      and old_other.get("agent", "codex") == item.agent))):
                         continue
+                    from .settings import Settings, shares_hook_file
+                    current = {"kind": item.kind, "mode": item.mode, "agent": item.agent,
+                               "target": str(item.target),
+                               "format": getattr(self.config, "_settings", {}).get(item.source_name, {}).get("format")}
+                    peer = dict(old_other)
+                    if other:
+                        peer.update(kind=other.kind, mode=other.mode, agent=other.agent, target=str(other.target),
+                                    format=getattr(self.config, "_settings", {}).get(other.source_name, {}).get("format"))
+                    if shares_hook_file(current, peer) or shares_hook_file(peer, current):
+                        saved = old if item.kind == "setting" else old_other
+                        if saved and saved.get("kind") == "setting":
+                            Settings(self).check_hook_ownership(saved)
+                        continue
                     raise Error(f"Overlapping targets: {item.key} and {key}")
             owners[item.key] = item.target
 
