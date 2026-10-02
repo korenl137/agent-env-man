@@ -194,3 +194,49 @@ class ClaudeSettings(SetupFixture):
             self.apply_preferences(code=1)
         self.assertEqual(self.target.read_bytes(), before)
         self.assertEqual(self.state()['items'], records)
+
+    def prepare_combined_apply(self):
+        self.require_links()
+        self.setup_cli('--agent', 'claude')
+        self.bootstrap()
+        (self.source / 'RULES.md').write_text('Personal rules', encoding='utf-8')
+        catalog = tomlkit.parse(self.catalog.read_text(encoding='utf-8'))
+        catalog['instructions'] = {'rules': {'source': 'preferences', 'entry': 'RULES.md'}}
+        self.catalog.write_text(tomlkit.dumps(catalog), encoding='utf-8')
+        self.run_cli('bootstrap', '--item', 'rules')
+
+    def test_combined_apply_rolls_back_hook_preferences_and_records(self):
+        from agent_env_man.storage import State
+        self.prepare_combined_apply()
+        before, stage = self.target.read_bytes(), self.stage.read_bytes()
+        original = State.save
+        def fail_commit(state):
+            if (state.data['items'].get('preferences:settings', {}).get('applied')
+                    and 'rules:hook@claude' in state.data['items']):
+                raise OSError('injected shared-file commit failure')
+            return original(state)
+        with patch.object(State, 'save', fail_commit):
+            self.run_cli('apply', code=1)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.stage.read_bytes(), stage)
+        records = self.state()['items']
+        self.assertIsNone(records['preferences:settings']['applied'])
+        self.assertNotIn('rules:hook@claude', records)
+        self.assertIsNone(self.state()['pending'])
+
+    def test_combined_apply_preserves_concurrent_target_edit(self):
+        from agent_env_man import settings
+        self.prepare_combined_apply()
+        original = settings.transaction
+        def edit_before_commit(state, writes, records, **options):
+            document = json.loads(self.target.read_text(encoding='utf-8'))
+            document['later_user_edit'] = True
+            self.target.write_text(json.dumps(document), encoding='utf-8')
+            return original(state, writes, records, **options)
+        with patch.object(settings, 'transaction', edit_before_commit):
+            self.run_cli('apply', code=1)
+        document = json.loads(self.target.read_text(encoding='utf-8'))
+        self.assertTrue(document['later_user_edit'])
+        self.assertNotIn('awaySummaryEnabled', document)
+        self.assertEqual(len(document['hooks']['SessionStart']), 1)
+        self.assertNotIn('rules:hook@claude', self.state()['items'])

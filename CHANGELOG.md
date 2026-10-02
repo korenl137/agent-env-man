@@ -26,6 +26,8 @@ See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
 
 ### Fixed
 
+- Apply shared Claude preferences and instruction hooks in one file transaction, and preserve shared preferences when removing multiple agent integrations.
+
 - Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.
 - Disabled agent startup callbacks remain independent of missing or invalid content catalogs.

@@ -7,9 +7,9 @@ detach and recovery. This is an internal extension boundary, not a public plugin
 API or a general application-settings manager.
 
 | Contract | Codex | Claude Code |
-|---|---|---|
+| --- | --- | --- |
 | root | CODEX_HOME or ~/.codex | CLAUDE_CONFIG_DIR or ~/.claude |
-| skills | ~/.agents/skills | <root>/skills |
+| skills | ~/.agents/skills | \<root>/skills |
 | entry | AGENTS.md | CLAUDE.md |
 | hook file | hooks.json | settings.json; unrelated fields preserved |
 | owned marker | statusMessage | command argument; supported fields only |

@@ -514,7 +514,7 @@ def remove_integrations(manager, args):
             if (plan.item.target == Path(value) and plan.item.mode == 'agent-hook'
                     and isinstance(old.get('hook_marker'), str) and isinstance(old.get('hook_group'), dict)):
                 continue
-            if shares_hook_file(old, {'mode': plan.item.mode, 'agent': record.get('agent'), 'target': str(plan.item.target)}):
+            if shares_hook_file(old, {'mode': plan.item.mode, 'agent': plan.record.get('agent'), 'target': str(plan.item.target)}):
                 Settings(manager).check_hook_ownership(old)
                 continue
             raise Error(f'Removal target overlaps {key}')

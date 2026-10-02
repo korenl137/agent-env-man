@@ -705,11 +705,34 @@ class Manager:
                              trust="not-managed-by-aem", notice=profile(plan.item.agent).notice,
                              hook_group=plan.record["hook_group"])
         grouped = self.group_hooks(plans)
+        # Shared Claude preferences and hook groups commit one target image and
+        # all comparison records, rather than racing two precomputed writes.
+        settings_by_target = {i.target: (i, writes, record) for i, writes, record in setting_plans}
+        joint_records = {}
+        ordinary = []
+        for plan in grouped:
+            if plan.item.mode != 'agent-hook' or plan.item.target not in settings_by_target:
+                ordinary.append(plan)
+                continue
+            item, writes, record = settings_by_target[plan.item.target]
+            from .settings_formats import FORMATS
+            adapter = FORMATS['json']
+            path, content, before = writes[0]
+            if before != plan.before:
+                raise Error('Shared settings/hook target changed during preflight')
+            for peer in [plan, *plan.peers]:
+                if self.payload(peer.item) != peer.record['hash']:
+                    raise Error('Hook source changed during shared-file preflight')
+            document = adapter.parse(content.decode())
+            value = adapter.parse(plan.content.decode('utf-8')).root.children['hooks']
+            adapter.put(document, ('hooks',), value)
+            writes[0] = (path, adapter.dump(document).encode(), before)
+            joint_records[item.key] = {plan.item.key: plan.record, **plan.records}
         if not dry_run:
-            for plan in grouped:
+            for plan in ordinary:
                 self.install(plan)
         for item, writes, record in setting_plans:
-            transaction(self.state, writes, {item.key: record}, dry_run=dry_run)
+            transaction(self.state, writes, {item.key: record, **joint_records.get(item.key, {})}, dry_run=dry_run)
             report.append({"item": item.key, "action": "apply", "target": str(item.target)})
         return report
 
