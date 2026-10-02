@@ -1,6 +1,7 @@
 """Claude setup hooks and non-hook JSON preferences share one temporary file."""
 import json
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 import tomlkit
@@ -72,6 +73,51 @@ class ClaudeSettings(SetupFixture):
         self.assertEqual(self.target.read_bytes(), before)
         self.setup_cli('--agent', 'claude')
         self.assertEqual(self.target.read_bytes(), before)
+
+    def test_apply_together_installs_instruction_hook_and_preferences(self):
+        self.require_links()
+        self.setup_cli('--agent', 'claude')
+        self.bootstrap()
+        (self.source / 'RULES.md').write_text('Personal rules', encoding='utf-8')
+        catalog = tomlkit.parse(self.catalog.read_text(encoding='utf-8'))
+        catalog['instructions'] = {'rules': {'source': 'preferences', 'entry': 'RULES.md'}}
+        self.catalog.write_text(tomlkit.dumps(catalog), encoding='utf-8')
+        self.run_cli('bootstrap', '--item', 'rules')
+        before, records = self.target.read_bytes(), self.state()['items']
+        self.run_cli('apply', '--dry-run')
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.state()['items'], records)
+
+        self.run_cli('apply')
+        actual = json.loads(self.target.read_text(encoding='utf-8'))
+        self.assertFalse(actual['awaySummaryEnabled'])
+        self.assertEqual(len(actual['hooks']['SessionStart']), 2)
+        records = self.state()['items']
+        for key in ('setup:agent-claude', 'rules:hook@claude'):
+            self.assertIn(records[key]['hook_group'], actual['hooks']['SessionStart'])
+        self.assertIsNotNone(records['preferences:settings']['applied'])
+        before = self.target.read_bytes()
+        self.run_cli('apply')
+        self.assertEqual(self.target.read_bytes(), before)
+
+    def test_remove_multiple_agents_preserves_shared_preferences(self):
+        self.setup_cli('--agent', 'claude', '--agent', 'codex')
+        self.bootstrap()
+        self.apply_preferences()
+        applied = self.state()['items']['preferences:settings']['applied']
+
+        self.setup_cli('--remove-agent', 'claude', '--remove-agent', 'codex')
+        actual = json.loads(self.target.read_text(encoding='utf-8'))
+        self.assertFalse(actual['awaySummaryEnabled'])
+        records = self.state()['items']
+        for agent in ('claude', 'codex'):
+            record = records[f'setup:agent-{agent}']
+            self.assertTrue(record['detached'])
+            document = json.loads(Path(record['target']).read_text(encoding='utf-8'))
+            self.assertNotIn(record['hook_group'], document['hooks']['SessionStart'])
+        self.assertEqual(records['preferences:settings']['applied'], applied)
+        self.assertFalse(records['preferences:settings']['detached'])
+        self.apply_preferences()
 
     def test_hook_fields_refused_from_source_stage_collect_and_metadata(self):
         self.setup_cli('--agent', 'claude')
