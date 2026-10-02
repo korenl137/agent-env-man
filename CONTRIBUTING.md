@@ -18,13 +18,17 @@ Runtime dependencies are Click and TOML Kit.
 Tests use the standard-library `unittest` runner and Click's `CliRunner` to check command behavior.
 The development extra adds coverage.py for optional coverage measurement and setuptools for build-hook regression tests.
 
+The following commands run the complete unittest suite and basic source checks:
+
 ```bash
 python -m unittest discover -s tests -v
 python -m compileall -q src tests
 git diff --check
 ```
 
-Run these commands from the activated environment.
+These examples assume an activated development environment.
+Select checks according to the affected behavior and remaining uncertainty; a complete suite run is not required for every change.
+Reuse passing results when subsequent changes cannot affect them.
 On native Windows the same test command works with `.\.venv\Scripts\python.exe`.
 Tests use temporary sources, targets, configuration, state, and local Git remotes.
 Do not use actual user homes, credentials, or network remotes in tests.
