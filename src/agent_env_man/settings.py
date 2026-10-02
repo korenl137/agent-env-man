@@ -543,7 +543,9 @@ class Settings:
         text = desired.adapter.dump(result)
         if exists(item.target):
             raw = item.target.read_bytes()
-            if b"\r\n" in raw:
+            # Preserve an unchanged document verbatim, including mixed line
+            # endings from existing content or TOML-generated blank lines.
+            if text != actual.adapter.dump(actual.document) and b"\r\n" in raw:
                 text = text.replace("\r\n", "\n").replace("\n", "\r\n")
         record.update(detached=False, applied=desired.snapshot(), working=desired.snapshot(),
                       target=str(item.target), source=str(item.source), relative=item.relative)

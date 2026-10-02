@@ -325,6 +325,15 @@ class StagedSettings(unittest.TestCase):
         self.assertEqual(first, self.target.read_bytes())
         self.assertEqual(tomlkit.parse(first.decode())['a.b'], 4)
 
+    def test_unchanged_toml_target_retains_mixed_line_endings(self):
+        self.target.parent.mkdir()
+        original = b'# user comment\r\ncolor = "blue"\ncount = 1\r\nprivate = 4\n'
+        self.target.write_bytes(original)
+        self.apply()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.apply()
+        self.assertEqual(self.target.read_bytes(), original)
+
     def test_metadata_validation_and_format_validation(self):
         meta = self.stage.with_name('management.toml')
         meta.write_text('version=1\ndeleted=[["color"]]\n')

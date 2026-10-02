@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.
 - Disabled agent startup callbacks remain independent of missing or invalid content catalogs.
 

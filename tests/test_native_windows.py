@@ -12,12 +12,48 @@ from unittest.mock import patch
 
 import tomlkit
 
-from agent_env_man import process_lock, self_update
+from agent_env_man import process_lock, self_update, storage
+from agent_env_man.model import Error
 from test_instructions import InstructionFixture
 
 
 @unittest.skipUnless(os.name == "nt", "Native Windows process APIs")
 class NativeProcesses(unittest.TestCase):
+    def test_terminated_owner_releases_lock_without_removing_lock_file(self):
+        with tempfile.TemporaryDirectory(prefix="aem-native-crash-") as folder:
+            path = Path(folder)
+            program = ("import sys; sys.path.insert(0, sys.argv[2]); from pathlib import Path; "
+                       "from agent_env_man.process_lock import lock; "
+                       "guard = lock(Path(sys.argv[1])); guard.__enter__(); "
+                       "print('locked', flush=True); sys.stdin.read(1)")
+            # Launch the interpreter directly so kill() reaches the lock owner
+            # rather than a Windows virtual-environment redirector.
+            child = subprocess.Popen([sys._base_executable, "-c", program, str(path),
+                                      str(Path(process_lock.__file__).parents[1])],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+            try:
+                # A bounded readiness handshake avoids timing assumptions and
+                # leaves an unresponsive child available for cleanup.
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as reader:
+                    ready = reader.submit(child.stdout.readline)
+                    try:
+                        self.assertEqual(ready.result(timeout=10), "locked\n")
+                        with self.assertRaisesRegex(RuntimeError, "holds this config's lock"):
+                            with process_lock.lock(path):
+                                self.fail("Entered while another process owned the lock")
+                    finally:
+                        child.kill()
+                        child.wait(timeout=10)
+                with process_lock.lock(path):
+                    self.assertTrue((path / "lock").exists())
+                self.assertEqual((path / "lock").read_bytes(), b"0")
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.communicate(timeout=10)
+
     def test_parent_wait_timeout_then_real_process_exit(self):
         child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read(1)"],
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
@@ -49,6 +85,32 @@ class NativeProcesses(unittest.TestCase):
             child = subprocess.run([sys.executable, "-c", program, str(path)],
                                    capture_output=True, text=True, timeout=15)
             self.assertEqual(child.returncode, 0, child.stderr)
+
+
+@unittest.skipUnless(os.name == "nt", "Native Windows junction payloads")
+class NativePayloads(unittest.TestCase):
+    def test_junction_is_rejected_without_copying_or_changing_external_contents(self):
+        with tempfile.TemporaryDirectory(prefix="aem-native-junction-") as folder:
+            root = Path(folder)
+            outside = root / "external files"
+            outside.mkdir()
+            original = b"preserve external contents\n"
+            (outside / "user.txt").write_bytes(original)
+            payload = root / "payload"
+            payload.mkdir()
+            junction = payload / "redirect"
+            result = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J",
+                                     str(junction), str(outside)],
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(storage.is_reparse(junction))
+            for source in (junction, payload):
+                with self.subTest(source=source):
+                    destination = root / "copy"
+                    with self.assertRaisesRegex(Error, "symlinks/junctions are unsupported"):
+                        storage.copy_payload(source, destination)
+                    self.assertFalse(destination.exists())
+                    self.assertEqual((outside / "user.txt").read_bytes(), original)
 
 
 @unittest.skipUnless(os.name == "nt", "Native PowerShell hook execution")

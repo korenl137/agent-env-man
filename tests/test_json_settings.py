@@ -95,6 +95,15 @@ class JsonSettings(JsonFixture, unittest.TestCase):
         metadata = tomlkit.parse(self.payload.with_name('editor.json.aem.toml').read_text(encoding='utf-8'))
         self.assertIn(['nullable'], metadata['deleted'])
 
+    def test_unchanged_json_target_retains_mixed_line_endings(self):
+        self.target.parent.mkdir()
+        original = b'{\r\n"color":"blue",\n"count":1e0, "private":900719925474099312345\r\n}\n'
+        self.target.write_bytes(original)
+        self.apply()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.apply()
+        self.assertEqual(self.target.read_bytes(), original)
+
     def test_exact_numbers_and_literal_keys_survive_apply_collect_export(self):
         text = '{"a.b": 900719925474099312345, "": 0.12345678901234567890123456789, "a": {"b": null}, "quote\\\"\\\\": true, "한글": "값", "array": [1, {"x": null}], "empty": {}}\n'
         self.stage.write_text(text, encoding='utf-8')

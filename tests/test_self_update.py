@@ -393,6 +393,7 @@ class SelfUpdate(SetupFixture):
             self.setup_cli('--update-uv', str(self.uv))
         else:
             self.uv.chmod(0o755)
+        self.uv_script = script if os.name == 'nt' else self.uv
         return Config(self.config)
 
     def finish_worker(self, config):
@@ -558,7 +559,6 @@ class SelfUpdate(SetupFixture):
             self.assertEqual(self_update.perform({'settings': self.settings, 'current': '0.2.0'}),
                              {'status': 'up-to-date'})
 
-    @unittest.skipIf(os.name == 'nt', 'Fake executable integration requires a POSIX shebang')
     def test_worker_waits_for_parent_then_updates_with_local_git(self):
         config = self.register()
         self.release('0.2.1')
@@ -566,7 +566,7 @@ class SelfUpdate(SetupFixture):
         self.uv.write_text('#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
                            'if sys.argv[-1] == "list":\n print("agent-env-man v0.2.0\\n - aem")\n'
                            'else:\n Path(' + repr(str(calls)) + ').write_text(json.dumps(sys.argv[1:]))\n')
-        self.uv.chmod(0o755)
+        config = self.executable_fake_uv()
         # Real lifetime pipe: worker must do no update until it receives EOF.
         with lock(config.state_dir):
             attempt = self_update.schedule(config)
@@ -597,20 +597,19 @@ class SelfUpdate(SetupFixture):
             spawn.assert_not_called()
         self.assertEqual(State(config.state_dir).data['startup']['self_update']['status'], 'failed')
 
-    @unittest.skipIf(os.name == 'nt', 'Fake executable integration requires a POSIX shebang')
     def test_worker_failure_recorded_and_explicit_retry_succeeds(self):
         config = self.register()
         self.release('0.2.1')
         self.uv.write_text('#!' + sys.executable + '\nimport sys\n'
                            'if sys.argv[-1] == "list":\n print("agent-env-man v0.2.0")\n'
                            'else:\n sys.exit(1)\n')
-        self.uv.chmod(0o755)
+        config = self.executable_fake_uv()
         self_update.schedule(config)
         child = self_update._children[-1]
         self.finish_worker(config)
         self.assertEqual(child.wait(timeout=15), 0)
         self.assertEqual(self_update.read_result(self_update.result_path(config))['status'], 'failed')
-        self.uv.write_text(self.uv.read_text().replace('sys.exit(1)', 'sys.exit(0)'))
+        self.uv_script.write_text(self.uv_script.read_text().replace('sys.exit(1)', 'sys.exit(0)'))
         # Exercise the real entrypoint: stdout must finish without waiting on
         # worker-owned handles, and the external child outlives the callback.
         response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config),
@@ -625,7 +624,6 @@ class SelfUpdate(SetupFixture):
             time.sleep(0.02)
         self.assertEqual(result['status'], 'updated')
 
-    @unittest.skipIf(os.name == 'nt', 'Fake executable integration requires a POSIX shebang')
     def test_queued_worker_cancels_for_pending_recovery(self):
         config = self.register()
         self_update.schedule(config)
@@ -639,7 +637,6 @@ class SelfUpdate(SetupFixture):
         self.assertEqual(result['status'], 'cancelled')
         self.assertEqual(result['reason'], 'Recovery is pending')
 
-    @unittest.skipIf(os.name == 'nt', 'Fake executable integration requires a POSIX shebang')
     def test_queued_worker_cancels_when_policy_changes(self):
         config = self.register()
         with lock(config.state_dir):
