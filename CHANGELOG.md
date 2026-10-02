@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Reorganize contributor guidance into linked architecture, testing, and documentation-authoring guides while retaining development setup and essential preservation rules in CONTRIBUTING.
 - Restore basic usage in the bundled AEM skill, organized by task workflows, with command help and local documentation consulted in sequence only when needed.
 - **Breaking relative to `1.0.0-rc`:** Full device automation now prepares, receives, and applies settings by default, retaining explicit empty-trigger exclusions and detached items.
 To retain manual-only settings in an existing full-mode configuration, disable device automation before upgrading, then set `trigger = []` in each setting's catalog `update` table before restoring full mode; settings remain opt-in in policies mode.

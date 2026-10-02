@@ -34,16 +34,8 @@ These files match the installed package and can be read without a repository che
 
 ## Versioning and compatibility
 
-AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
-For final releases from `1.0.0` onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
-The first final `1.0.0` establishes the stable contract; prereleases may refine it, with behavior changes and migration documented before upgrading.
-Review migration instructions before upgrading across an incompatible release.
-
-The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.
-In the default workflow, AEM writes machine settings through setup/bootstrap and manages saved state.
-Documented manual settings and continued operation of generated configuration and hooks are also covered by the package's compatibility policy.
-Users do not need to coordinate separate file-format releases or manually change version markers.
-See the [compatibility policy](docs/compatibility.md) and [existing-installation precautions](docs/removed-interfaces.md).
+AEM uses one package version for command, catalog, and existing-installation compatibility.
+Review the [compatibility policy](docs/compatibility.md) and [existing-installation precautions](docs/removed-interfaces.md) before upgrading across an incompatible release.
 
 CLI commands show readable fields and indented lists by default.
 For scripts, add the global `--json` option before the command, for example `aem --json status`.
@@ -257,7 +249,7 @@ See [publish](docs/commands.md#publish) for commit scope, Git settings, and fail
 
 ## Application settings
 
-Manage selected application TOML fields through an editable local stage.
+Manage selected application TOML or JSON fields through an editable local stage.
 Declare `[settings.NAME]` with `source`, `path`, and `format = "toml"` or `format = "json"` in the catalog, then bind its actual file:
 
 ```bash
