@@ -15,6 +15,8 @@ First stable major release; Git tag `v1.0.0` corresponds to Python package versi
 
 ### Added
 
+- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings, group ownership, saved offline removal and existing transaction/recovery protections. Personal registrations remain excluded from automatic full runs.
+
 - Strict JSON application settings with exact numeric comparison, preserving field edits, and the existing staged merge, publication, automation, and recovery workflows.
 - Independent per-setting automatic sync schedules that receive shared settings and apply their stages together, with offline previews, failure throttling, and existing conflict preservation.
 - Installed-wheel runtime verification for TOML and JSON settings reception, staged edits, application, export, local Git publication, conflict preservation, and detach without development dependencies.

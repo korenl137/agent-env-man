@@ -215,6 +215,7 @@ Operational failures are returned in this report on stdout, including with `--js
 aem bootstrap [CATALOG | --catalog PATH] [--checkout-root PATH]
               [--catalog-repository URL --catalog-path RELATIVE_PATH [--catalog-branch BRANCH]]
               [--root NAME=PATH ...] [--external NAME=PATH ...]
+              [--setting-target NAME=PATH ...] [--runtime NAME=PATH ...]
               [--item NAME ...] [--timeout TIMEOUT]
               [--catalog-trigger TRIGGER ...] [--catalog-interval SECONDS]
               [--catalog-timeout SECONDS]
@@ -233,7 +234,7 @@ The default branch is discovered and written to the machine binding; repeating r
 Catalog, checkout-root, and external CLI paths resolve relative to the working directory and are saved as absolute paths.
 Root paths must be absolute or begin with `~/`.
 Repeated `--external` binds declared external names; duplicate names in one invocation are invalid, and omitted saved bindings remain.
-`--item` selects catalog skill, instruction, or setting names for preparation, not ownership IDs or repository names.
+`--item` selects catalog skill, instruction, setting or personal hook names for preparation, not ownership IDs or repository names.
 No selection prepares all declared sources.
 Missing repositories are cloned and validated; existing checkouts are validated without pulling or resetting.
 A failed content download leaves the machine binding saved so bootstrap can be retried.
@@ -377,7 +378,7 @@ aem apply [--agent AGENT] [--item ID ...] [--timeout TIMEOUT]
           [--adopt | --replace] [--reattach] [--dry-run]
 ```
 
-Omit items to install all declared, non-detached items.
+Omit items to install all declared, non-detached items except personal hooks, which require explicit selection.
 Skill IDs are skill names; instruction IDs are `NAME:bundle`, `NAME:entry`, and `NAME:hook`.
 Selecting an entry or hook also selects its bundle and the other instruction items.
 Selecting only a bundle installs its directory link alone.
@@ -602,3 +603,26 @@ runs and failures without a relevant change do not request reload. In full async
 mode, wait for worker completion and start a fresh session to discover changes.
 The hidden --aem-hook-id identifies supported command-field ownership.
 See [profile contracts](agent-profiles.md).
+
+
+## hooks remove
+
+```text
+aem hooks remove NAME... [--agent AGENT] [--dry-run]
+```
+
+NAME selects saved personal hook resources, not source repository names or
+instruction hooks. Omit `--agent` to remove all saved agent groups for those
+names. Removal checks the exact saved group and stable identity, preserves
+unselected groups/preferences, and releases ownership. Edited, duplicate,
+missing or detached groups are refused; no force removal is supplied.
+It works offline without a catalog, runtime or source. Dry run preserves targets
+and records. Detach instead preserves groups. Explicit selected reattachment is
+required after removal. This operation does not remove AEM setup/instruction
+hooks or revoke product trust.
+
+Prepare with `bootstrap --runtime NAME=ABSOLUTE_EXECUTABLE`, then register with
+`apply --item NAME` (or `NAME:hook` / `NAME:hook@claude`). Plain apply and plain
+sync exclude personal hook registration. Update visits the source without
+changing installed definitions; its live script contents may change immediately.
+See [Personal hooks](personal-hooks.md).
