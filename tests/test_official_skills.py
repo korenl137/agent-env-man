@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +16,44 @@ from agent_env_man.setup import official_plans
 from agent_env_man.storage import State, observation
 import test_self_update
 from test_setup import SetupFixture
+
+
+class OfficialSkillResources(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="aem-skill-resources-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def test_source_checkout_fallback_requires_a_descriptor(self):
+        module = self.root / "src/agent_env_man/official_skills.py"
+        payload = self.root / "skills" / official_skills.NAME
+        payload.mkdir(parents=True)
+        descriptor = payload / "SKILL.md"
+        descriptor.write_bytes(b"source skill\n")
+        missing_package = ModuleNotFoundError(name="agent_env_man.builtin_skills")
+        with patch.object(official_skills, "__file__", str(module)), patch.object(
+                official_skills.resources, "files", side_effect=missing_package):
+            self.assertEqual(official_skills.source(), payload)
+            descriptor.unlink()
+            with self.assertRaisesRegex(ValueError, "missing from the installation"):
+                official_skills.source()
+
+    def test_unrelated_import_failure_is_not_hidden_by_checkout_fallback(self):
+        error = ModuleNotFoundError(name="unrelated_dependency")
+        with patch.object(official_skills.resources, "files", side_effect=error):
+            with self.assertRaises(ModuleNotFoundError) as raised:
+                official_skills.source()
+        self.assertIs(raised.exception, error)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO payload fixture requires POSIX")
+    def test_nonregular_payload_is_rejected_without_opening_it(self):
+        payload = self.root / "payload"
+        payload.mkdir()
+        fifo = payload / "pipe"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "not regular"):
+            official_skills.signature(payload)
+        self.assertTrue(fifo.exists())
 
 
 class OfficialSkills(SetupFixture):
