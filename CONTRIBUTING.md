@@ -86,6 +86,7 @@ Use a separate temporary environment; on Windows pass its `Scripts/python.exe` t
 The pip installation command uses the development environment's pip to install only the wheel and its runtime dependencies into the target environment.
 Package acquisition may require network access; verification itself uses only temporary local Git repositories and never registers integrations.
 The verifier rejects editable installations and environments containing development dependencies, disables Python source-path inheritance, and checks installed CLI help, local documentation, and bootstrap/apply/status/detach behavior.
+It also exercises TOML and JSON settings reception, stage editing, application, export, local Git publication, conflict preservation, and detach through the installed CLI.
 Verify both a direct wheel and a wheel rebuilt from the sdist as required by the installed-documentation contract below.
 
 ### Coverage measurement

@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Strict JSON application settings with exact numeric comparison, preserving field edits, and the existing staged merge, publication, automation, and recovery workflows.
 - Independent per-setting automatic sync schedules that receive shared settings and apply their stages together, with offline previews, failure throttling, and existing conflict preservation.
+- Installed-wheel runtime verification for TOML and JSON settings reception, staged edits, application, export, local Git publication, conflict preservation, and detach without development dependencies.
 
 ### Changed
 

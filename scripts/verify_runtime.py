@@ -10,11 +10,74 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 
 
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def run_captured(*arguments, **options):
+    """Run verification children without opening Windows console windows."""
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(*arguments, **options)
+
+
+def verify_settings(cli, root, source, git):
+    """Exercise both installed format adapters and preserve actual-file edits."""
+    for format in ("toml", "json"):
+        name = "settings_" + format
+        payload = source / (name + "." + format)
+        target = root / (name + "." + format)
+        parse = tomllib.loads if format == "toml" else json.loads
+
+        def document(count, *, local=False):
+            if format == "toml":
+                return f'# preserved comment\ncount = {count}\n' + ('private = "local"\n' if local else '')
+            return f'{{"count": {count}' + (', "private": "local"' if local else '') + '}\n'
+
+        target.write_text(document(1, local=True), encoding="utf-8")
+        cli("apply", "--item", name)
+        before = target.read_bytes()
+        cli("apply", "--item", name)
+        require(target.read_bytes() == before, f"{format}: unchanged apply rewrote the target")
+        stage = Path(json.loads(cli("locate", name))["entry"])
+        payload.write_text(document(2), encoding="utf-8")
+        git("add", payload.name)
+        git("-c", "user.name=AEM runtime check", "-c", "user.email=runtime@example.invalid",
+            "commit", "-m", "Update settings fixture")
+        cli("update", name)
+        require(parse(stage.read_text(encoding="utf-8"))["count"] == 2, f"{format}: update did not receive settings")
+        require(parse(target.read_text(encoding="utf-8"))["count"] == 1, f"{format}: update applied settings implicitly")
+        cli("apply", "--item", name)
+        require(parse(target.read_text(encoding="utf-8")) == {"count": 2, "private": "local"},
+                f"{format}: received stage did not apply safely")
+        stage.write_text(document(3), encoding="utf-8")
+        cli("apply", "--item", name)
+        require(parse(target.read_text(encoding="utf-8")) == {"count": 3, "private": "local"},
+                f"{format}: stage apply failed or lost unmanaged fields")
+        if format == "toml":
+            require("# preserved comment" in target.read_text(encoding="utf-8"), "TOML apply lost a local comment")
+        cli("export", name)
+        checkout_payload = Path(json.loads(cli("locate", name, "--source"))["entry"])
+        require(parse(checkout_payload.read_text(encoding="utf-8"))["count"] == 3,
+                f"{format}: export did not write staged values")
+        require("private" not in parse(checkout_payload.read_text(encoding="utf-8")),
+                f"{format}: export implicitly collected unmanaged fields")
+        cli("publish", name, "-m", "Publish settings fixture")
+        require(parse(payload.read_text(encoding="utf-8"))["count"] == 3,
+                f"{format}: local Git publication did not deliver staged values")
+
+        target.write_text(document(4, local=True), encoding="utf-8")
+        stage.write_text(document(5), encoding="utf-8")
+        before = target.read_bytes()
+        cli("apply", "--item", name, code=1)
+        require(target.read_bytes() == before, f"{format}: conflict overwrote a local field edit")
+        cli("detach", name)
+        require(target.read_bytes() == before, f"{format}: detach changed actual settings")
+        require(json.loads(cli("locate", name))["detached"], f"{format}: detach retained ownership")
 
 
 def verify():
@@ -44,7 +107,9 @@ def verify():
                            XDG_CONFIG_HOME=str(home / ".config"), CODEX_HOME=str(home / ".codex"),
                            APPDATA=str(home / "AppData/Roaming"), LOCALAPPDATA=str(home / "AppData/Local"),
                            GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-                           GIT_ALLOW_PROTOCOL="file", GIT_TEMPLATE_DIR="")
+                           GIT_ALLOW_PROTOCOL="file", GIT_TEMPLATE_DIR="",
+                           GIT_AUTHOR_NAME="AEM runtime check", GIT_AUTHOR_EMAIL="runtime@example.invalid",
+                           GIT_COMMITTER_NAME="AEM runtime check", GIT_COMMITTER_EMAIL="runtime@example.invalid")
         environment.pop("PYTHONPATH", None)
         environment.pop("PYTHONHOME", None)
         environment["PYTHONNOUSERSITE"] = "1"
@@ -53,7 +118,7 @@ def verify():
         def cli(*arguments, code=0, selected_config=config):
             # -I ignores ambient PYTHONPATH and user-site packages; cwd is
             # outside the checkout so imports must come from the wheel.
-            result = subprocess.run([sys.executable, "-I", "-m", "agent_env_man", "--json",
+            result = run_captured([sys.executable, "-I", "-m", "agent_env_man", "--json",
                                      "--config", str(selected_config), *map(str, arguments)],
                                     cwd=root, env=environment, capture_output=True, text=True, timeout=30)
             require(result.returncode == code,
@@ -64,7 +129,7 @@ def verify():
         invalid.write_text("invalid TOML [", encoding="utf-8")
         executable = Path(sysconfig.get_path("scripts")) / ("aem.exe" if os.name == "nt" else "aem")
         require(executable.is_file(), "Installed aem console entrypoint is missing")
-        help_result = subprocess.run([str(executable), "--config", str(invalid), "--help"],
+        help_result = run_captured([str(executable), "--config", str(invalid), "--help"],
                                      cwd=root, env=environment, capture_output=True, text=True, timeout=30)
         require(help_result.returncode == 0 and "Usage:" in help_result.stdout,
                 f"Installed console help failed: {help_result.stderr}")
@@ -80,31 +145,46 @@ def verify():
         source.mkdir()
         skill = b"---\nname: smoke\ndescription: Local runtime verification\n---\n\nTest content.\n"
         (source / "SKILL.md").write_bytes(skill)
-        for arguments in (("init", "-b", "main"), ("add", "SKILL.md"),
+        for format in ("toml", "json"):
+            (source / f"settings_{format}.{format}").write_text(
+                'count = 1\n' if format == "toml" else '{"count": 1}\n', encoding="utf-8")
+
+        def git(*arguments):
+            return run_captured(["git", "-C", str(source), "-c", f"core.hooksPath={os.devnull}", *arguments],
+                                cwd=root, env=environment, check=True, capture_output=True, text=True, timeout=30)
+
+        for arguments in (("init", "-b", "main"), ("add", "SKILL.md", "settings_toml.toml", "settings_json.json"),
                           ("-c", "user.name=AEM runtime check", "-c", "user.email=runtime@example.invalid",
                            "commit", "-m", "Local fixture")):
-            subprocess.run(["git", "-C", str(source), "-c", f"core.hooksPath={os.devnull}", *arguments],
-                           cwd=root, env=environment, check=True, capture_output=True, text=True, timeout=30)
+            git(*arguments)
+        # The local fixture accepts publication into its checked-out branch;
+        # no real remote or user Git configuration is involved.
+        git("config", "receive.denyCurrentBranch", "updateInstead")
         catalog = root / "catalog.toml"
         catalog.write_text('version = 2\n[sources.fixture]\ntype = "git"\n'
                            f'repository = {json.dumps(str(source), ensure_ascii=False)}\n'
-                           '[skills.smoke]\nsource = "fixture"\n[skills.smoke.install]\nmode = "copy"\n',
+                           '[skills.smoke]\nsource = "fixture"\n[skills.smoke.install]\nmode = "copy"\n'
+                           '[settings.settings_toml]\nsource = "fixture"\npath = "settings_toml.toml"\nformat = "toml"\n'
+                           '[settings.settings_json]\nsource = "fixture"\npath = "settings_json.json"\nformat = "json"\n',
                            encoding="utf-8")
         destination = root / "skills"
         cli("bootstrap", catalog, "--checkout-root", root / "checkouts",
-            "--root", f"skills={destination}", "--root", f"agent={home / '.codex'}")
+            "--root", f"skills={destination}", "--root", f"agent={home / '.codex'}",
+            "--setting-target", f"settings_toml={root / 'settings_toml.toml'}",
+            "--setting-target", f"settings_json={root / 'settings_json.json'}")
         target = destination / "smoke"
         require(not target.exists(), "Bootstrap installed content before apply")
-        cli("apply")
+        cli("apply", "--item", "smoke")
         require((target / "SKILL.md").read_bytes() == skill, "Apply did not install the selected payload")
         json.loads(cli("status"))
         (target / "local.txt").write_bytes(b"preserve local edit")
-        cli("apply", code=1)
+        cli("apply", "--item", "smoke", code=1)
         require((target / "local.txt").read_bytes() == b"preserve local edit", "Apply lost local edits")
         cli("detach", "smoke")
         require((target / "local.txt").read_bytes() == b"preserve local edit", "Detach lost local edits")
         state = json.loads((Path(str(config) + ".state") / "state.json").read_text(encoding="utf-8"))
         require(state["items"]["smoke"].get("detached"), "Detach did not release ownership")
+        verify_settings(cli, root, source, git)
         for path, content in markers.items():
             require(path.read_bytes() == content, "Runtime verification changed a shell profile")
         require(not (home / ".codex/hooks.json").exists(), "Runtime verification registered agent hooks")
@@ -124,7 +204,7 @@ def main(argv=None):
         # the installed runtime and the standard library, not test helpers.
         command = [str(interpreter), "-I", "-c",
                    "import runpy; runpy.run_path(__import__('sys').argv[1])['verify']()", str(Path(__file__).resolve())]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        result = run_captured(command, capture_output=True, text=True, timeout=180)
         if result.stdout:
             print(result.stdout, end="")
         if result.returncode:
