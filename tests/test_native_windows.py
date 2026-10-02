@@ -19,6 +19,25 @@ from test_instructions import InstructionFixture
 
 @unittest.skipUnless(os.name == "nt", "Native Windows process APIs")
 class NativeProcesses(unittest.TestCase):
+    def test_detached_worker_children_have_no_console_and_preserve_results(self):
+        # Match the queued worker's console-less parent, rather than inheriting
+        # the test runner's console and accidentally masking console allocation.
+        child_code = 'import ctypes,sys; print(ctypes.windll.kernel32.GetConsoleWindow()); sys.exit(7)'
+        program = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
+                   'from agent_env_man.self_update import run_captured,git; '
+                   'result=run_captured([sys.executable,"-c",sys.argv[2]],capture_output=True,text=True,timeout=10); '
+                   'print(json.dumps({"code":result.returncode,"stdout":result.stdout,"stderr":result.stderr,'
+                   '"git":git("--version")}))')
+        result = subprocess.run([sys._base_executable, '-c', program, str(Path(self_update.__file__).parents[1]), child_code],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
+                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observation = json.loads(result.stdout)
+        self.assertEqual(observation['code'], 7)
+        self.assertEqual(observation['stdout'].strip(), '0')
+        self.assertEqual(observation['stderr'], '')
+        self.assertTrue(observation['git'].startswith('git version'))
+
     def test_terminated_owner_releases_lock_without_removing_lock_file(self):
         with tempfile.TemporaryDirectory(prefix="aem-native-crash-") as folder:
             path = Path(folder)

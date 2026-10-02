@@ -32,7 +32,7 @@ class Git:
         # Existing SSH_COMMAND customizations remain usable, but cannot prompt.
         env["GIT_SSH_COMMAND"] = env.get("GIT_SSH_COMMAND", "ssh") + " -oBatchMode=yes"
         kwargs = {"start_new_session": True} if os.name != "nt" else {
-            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    stdin=subprocess.DEVNULL, env=env, **kwargs)
         try:
@@ -40,7 +40,8 @@ class Git:
         except subprocess.TimeoutExpired as exc:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             else:
                 os.killpg(process.pid, signal.SIGKILL)
             process.kill()

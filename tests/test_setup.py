@@ -254,6 +254,8 @@ class MachineSetup(SetupFixture):
             run.return_value.stdout = str(path)
             self.assertEqual(shell_path('powershell'), path)
             self.assertIn('$PROFILE.CurrentUserAllHosts', run.call_args.args[0][-1])
+            if os.name == 'nt':
+                self.assertEqual(run.call_args.kwargs['creationflags'], subprocess.CREATE_NO_WINDOW)
         _, _, text = shell_block('powershell', self.home / "a'$name.toml", self.executable, self.executable.parent)
         self.assertIn("a''$name.toml'", text)
         self.assertIn('$aemPreviousExitCode', text)

@@ -18,14 +18,16 @@ class GitProcess(unittest.TestCase):
         windows = SimpleNamespace(name="nt", devnull=os.devnull, environ={})
         with patch("agent_env_man.git_source.os", windows), patch.object(
                 subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), patch(
+                "agent_env_man.git_source.subprocess.CREATE_NO_WINDOW", 0x08000000, create=True), patch(
                 "agent_env_man.git_source.subprocess.Popen", return_value=process) as launch, patch(
                 "agent_env_man.git_source.subprocess.run") as terminate:
             with self.assertRaisesRegex(Error, "checkout may need inspection"):
                 Git().run(None, "fetch")
-        self.assertEqual(launch.call_args.kwargs["creationflags"], 512)
+        self.assertEqual(launch.call_args.kwargs["creationflags"], 512 | 0x08000000)
         self.assertNotIn("start_new_session", launch.call_args.kwargs)
         terminate.assert_called_once_with(["taskkill", "/PID", "12345", "/T", "/F"],
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                                          creationflags=0x08000000)
         process.kill.assert_called_once_with()
         self.assertEqual(process.communicate.call_count, 2)
 

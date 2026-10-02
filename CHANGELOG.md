@@ -26,6 +26,7 @@ See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
 - Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.
 - Disabled agent startup callbacks remain independent of missing or invalid content catalogs.
+- Suppress transient Windows console windows for captured Git, self-update worker children, and PowerShell profile discovery while preserving output and process exit handling.
 
 ## [1.0.0-rc] &mdash; 2026-10-01
 

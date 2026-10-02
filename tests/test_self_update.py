@@ -23,6 +23,19 @@ from test_setup import SetupFixture
 
 
 class Releases(unittest.TestCase):
+    def test_worker_capture_preserves_options_and_hides_windows_children(self):
+        for platform in ('nt', 'posix'):
+            with self.subTest(platform=platform), patch.object(self_update, 'os', SimpleNamespace(name=platform)), patch.object(
+                    self_update.subprocess, 'CREATE_NO_WINDOW', 0x08000000, create=True), patch.object(
+                    self_update.subprocess, 'run') as run:
+                self_update.run_captured(['git', '--version'], capture_output=True, text=True, timeout=30)
+                self.assertEqual(run.call_args.kwargs['timeout'], 30)
+                self.assertTrue(run.call_args.kwargs['capture_output'])
+                if platform == 'nt':
+                    self.assertEqual(run.call_args.kwargs['creationflags'], 0x08000000)
+                else:
+                    self.assertNotIn('creationflags', run.call_args.kwargs)
+
     def test_installation_lock_is_outside_tools_and_shared_by_aliases(self):
         with tempfile.TemporaryDirectory() as directory:
             tools = Path(directory) / 'tools'

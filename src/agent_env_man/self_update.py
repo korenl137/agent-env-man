@@ -244,8 +244,20 @@ atexit.register(close_workers)
 
 def git(*arguments, cwd=None):
     environment = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
-    return subprocess.run(['git', *arguments], cwd=cwd, env=environment, check=True,
+    return run_captured(['git', *arguments], cwd=cwd, env=environment, check=True,
                           capture_output=True, text=True, encoding='utf-8', timeout=TIMEOUT).stdout.strip()
+
+
+def run_captured(*arguments, **options):
+    """Suppress console windows for worker children, including their descendants.
+
+    The copied worker has no parent console on Windows. Redirecting its child
+    streams alone does not prevent console allocation by Git, uv or fresh CLI.
+    Keep this helper standard-library-only for copied-worker execution.
+    """
+    if os.name == 'nt':
+        options['creationflags'] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(*arguments, **options)
 
 
 def git_url(repository):
@@ -263,7 +275,7 @@ def perform(request, records=None):
     repository = settings.get('repository', REPOSITORY)
     environment = dict(os.environ, UV_TOOL_DIR=settings['tool_dir'], UV_TOOL_BIN_DIR=settings['bin_dir'],
                        GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
-    listing = subprocess.run([settings['uv'], 'tool', 'list'], env=environment, check=True,
+    listing = run_captured([settings['uv'], 'tool', 'list'], env=environment, check=True,
                              capture_output=True, text=True, timeout=TIMEOUT).stdout
     installed = re.search(r'^agent-env-man v(\S+)', listing, re.MULTILINE)
     if installed is None:
@@ -291,7 +303,7 @@ def perform(request, records=None):
                '--from', git_url(repository) + '@' + selected['revision'], 'agent-env-man']
     if records is not None:
         check_official_skills(records, package_version=installed[1])
-    subprocess.run(command, env=environment, check=True, capture_output=True, text=True, timeout=TIMEOUT)
+    run_captured(command, env=environment, check=True, capture_output=True, text=True, timeout=TIMEOUT)
     return {'status': 'updated', **selected}
 
 
@@ -379,7 +391,7 @@ def worker(request_path):
         if refresh_skills:
             executable = Path(request['settings']['bin_dir']) / ('aem.exe' if os.name == 'nt' else 'aem')
             try:
-                process = subprocess.run([str(executable), '--config', str(config), '--json', '_self-skill-refresh',
+                process = run_captured([str(executable), '--config', str(config), '--json', '_self-skill-refresh',
                                           '--token', request['token'], '--result-file', result.name],
                                          capture_output=True, text=True, timeout=TIMEOUT)
                 if process.returncode:
@@ -404,7 +416,7 @@ def worker(request_path):
             # one-use token in the result so retries cannot repeat a continuation.
             executable = Path(request['settings']['bin_dir']) / ('aem.exe' if os.name == 'nt' else 'aem')
             try:
-                process = subprocess.run([str(executable), '--config', str(config), '_full-run',
+                process = run_captured([str(executable), '--config', str(config), '_full-run',
                                           '--token', request['token']], capture_output=True)
                 failed = process.returncode != 0
             except (OSError, subprocess.SubprocessError):

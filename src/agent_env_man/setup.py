@@ -177,7 +177,8 @@ def shell_path(name):
         raise Error('PowerShell is not available; install it before selecting powershell')
     value = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
                             '[Console]::Write($PROFILE.CurrentUserAllHosts)'],
-                           capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+                           capture_output=True, text=True, check=True, timeout=10,
+                           **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {})).stdout.strip()
     if not value or not Path(value).is_absolute():
         raise Error('PowerShell returned an invalid profile path')
     return Path(value)

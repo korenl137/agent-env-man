@@ -128,6 +128,8 @@ Help and usage validation must complete before reading machine configuration or 
 Global options belong before the command; repeated policy options must preserve the distinction between omission and an explicit replacement list.
 Machine callbacks must emit the JSON required by their agent or worker contracts regardless of ordinary output mode.
 The standalone installer and external update worker remain standard-library-only because they run outside the installed package environment.
+Captured background processes on Windows must not open console windows, including Git, uv, PowerShell profile discovery, and fresh-CLI worker continuations.
+Keep the worker lifetime pipe, process-group termination, captured output, and exit-code behavior intact when controlling console creation.
 
 The manager owns reusable installation and delivery behavior.
 Personal instructions, research guidance, skills, and settings remain user-supplied content outside this repository.
