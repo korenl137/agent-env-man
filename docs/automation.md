@@ -66,6 +66,8 @@ aem self update --mode breaking  # Permit incompatible releases for this attempt
 For final releases from `1.0.0` onward, `compatible` permits newer final releases in the same major version.
 For a prerelease, `compatible` permits only a higher numeric subversion with the same base `X.Y.Z` and the same `a`, `b`, or `rc` label (for example, `1.0.0rc1` to `1.0.0rc2`).
 Changing the label, base version, or moving to a final release requires `breaking`.
+This permission also gates the first stable release: `1.0.0rc0` to `1.0.0` requires `breaking`, without implying a `2.0.0` version requirement.
+Same-series subversion releases must preserve compatibility because existing `compatible` installations can select them automatically.
 Final installations retain their existing compatible range and do not select prereleases in `compatible` mode.
 `breaking` permits any newer final or prerelease version, including incompatible changes; review migration instructions before enabling it.
 Supported prereleases use Python package notation `X.Y.ZaN`, `X.Y.ZbN`, or `X.Y.ZrcN`, with an optional nonnegative numeric subversion without leading zeroes.
@@ -167,3 +169,20 @@ A failed catalog update skips both skill and settings work.
 Each setting uses its own persisted attempt clock across events, including failed attempts; previews are offline.
 Settings always receive and then apply, with no automatic collection, export, publication, replacement, or reattachment.
 Full mode includes settings by default and uses its shared schedule instead of individual clocks, while preserving explicit `trigger = []` exclusions.
+
+### Upgrading from manual-only settings
+
+In releases through `1.0.0-rc`, settings participated only in explicit commands, including when device automation was `full`.
+After upgrading, existing full-mode configurations also prepare, receive, and apply settings with omitted triggers.
+To keep settings manual during the transition, disable device automation with `aem setup --automation off` before upgrading.
+After upgrading, add an explicit empty trigger list to each setting that should remain manual before restoring full mode:
+
+```toml
+[settings.editor.update]
+trigger = []
+```
+
+Repeat this for each setting that should remain manual.
+Older packages reject the new settings `update` table, so add it only after upgrading.
+In `policies` mode, omitted settings triggers still disable automatic settings work.
+Once the exclusions are saved, restore full mode with `aem setup --automation full` and inspect `aem automation --trigger agent-start --dry-run` before invoking the next automatic event.

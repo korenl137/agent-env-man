@@ -27,7 +27,9 @@ Output extensibility does not relax the requirement to reject unknown input conf
 New optional inputs are compatible only when omitting them preserves existing behavior.
 Backward compatibility means a newer package continues to support previously valid use; it does not require an older package to accept newly introduced inputs.
 
-Use PATCH for backward-compatible bug fixes, MINOR for backward-compatible functionality or public deprecation, and MAJOR for incompatible public-contract changes.
+## Final release classification
+
+For final releases from `1.0.0` onward, use PATCH for backward-compatible bug fixes, MINOR for backward-compatible functionality or public deprecation, and MAJOR for incompatible public-contract changes.
 PATCH eligibility never relaxes compatibility requirements.
 Previously valid calls must retain their success conditions, primary results, configuration compatibility, and ownership and recovery guarantees without user migration.
 An ancillary integration must report recoverable failures separately so the existing workflow can complete.
@@ -39,6 +41,20 @@ Do not modify an already released version's contents.
 A bug-fix label alone does not justify breaking previously valid documented use in a PATCH release.
 Removing an option, changing a default or selection scope so previously valid use loses its promised behavior, invalidating an existing catalog, breaking an installed callback, or dropping a supported runtime requires the incompatible-change increment.
 Document replacements and any required user migration when deprecating or breaking an interface.
+
+## Prereleases and the first stable release
+
+The first final `1.0.0` defines the stable public contract; its prereleases may refine that contract without requiring a `2.0.0` release.
+Prerelease changes still require compatibility review, preservation of user data and ownership, and documented migration for changed behavior.
+Do not replace the contents of an existing release tag or package version.
+
+AEM self-update permissions are distinct from the required final-release version increment.
+For prereleases, `compatible` permits only a higher numeric subversion with the same base version and label, so releases within that series must preserve the previous released contract.
+Changing the base version or label, or graduating to final, requires `breaking` permission even when the transition contains no incompatible change.
+The permission therefore allows a transition; it does not assert that every such transition breaks compatibility or requires another MAJOR increment.
+See [release selection](automation.md#update-aem-itself) for supported tag spellings and ordering.
+
+## Configuration and saved-state formats
 
 Catalog, machine, and state format versions are integer interpretation markers, not independently released product versions.
 Do not increment them for ordinary compatible additions; change a marker when readers need to distinguish incompatible representations or interpretations.

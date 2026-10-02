@@ -15,7 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Restore basic usage in the bundled AEM skill, organized by task workflows, with command help and local documentation consulted in sequence only when needed.
-- Full device automation now prepares, receives, and applies settings by default, retaining explicit empty-trigger exclusions and detached items.
+- **Breaking relative to `1.0.0-rc`:** Full device automation now prepares, receives, and applies settings by default, retaining explicit empty-trigger exclusions and detached items.
+To retain manual-only settings in an existing full-mode configuration, disable device automation before upgrading, then set `trigger = []` in each setting's catalog `update` table before restoring full mode; settings remain opt-in in policies mode.
+See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
+- Clarify that the first final `1.0.0` establishes the stable public contract, while prerelease self-update series retain their compatibility boundaries and graduation to final requires `breaking` permission.
 
 ### Fixed
 
@@ -210,7 +213,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-beta...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-rc...HEAD
+[1.0.0-rc]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-beta...v1.0.0-rc
 [1.0.0-beta]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.3...v1.0.0-beta
 [0.5.3]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.1...v0.5.2

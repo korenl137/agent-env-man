@@ -35,7 +35,8 @@ These files match the installed package and can be read without a repository che
 ## Versioning and compatibility
 
 AEM uses one package version to communicate compatibility across its commands, catalog syntax, and existing installations.
-It follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
+For final releases from `1.0.0` onward, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html): incompatible changes require a major release, compatible features a minor release, and compatible fixes a patch release.
+The first final `1.0.0` establishes the stable contract; prereleases may refine it, with behavior changes and migration documented before upgrading.
 Review migration instructions before upgrading across an incompatible release.
 
 The catalog is the user-authored interface; its integer `version` identifies a format generation, not a separate release version.
