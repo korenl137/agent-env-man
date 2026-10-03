@@ -129,6 +129,60 @@ class PersonalHooks(unittest.TestCase):
         self.assertEqual(before_claude, self.target('claude').read_bytes())
         self.assertEqual(self.call('locate', 'observer', '--agent', 'codex')['entry'], str(self.script))
 
+    def write_precise_foreign_groups(self, *, large='1e200'):
+        foreign = ('{ "hooks": [{"type":"command", "command":"echo user", '
+                   '"timeout":1.0000000000000001}], '
+                   '"metadata":{"tiny":1e-400,"large":' + large + ',"spelling":4.20e+1} }')
+        for agent in ('codex', 'claude'):
+            target = self.target(agent)
+            owned = self.document(agent)['hooks']['SessionEnd'] if target.exists() else []
+            target.parent.mkdir(exist_ok=True)
+            groups = ', '.join([foreign, *map(json.dumps, owned)])
+            target.write_text('{"hooks":{"SessionEnd":[' + groups + '],"Stop":[' + foreign +
+                              ']},"precision":1.234567890123456789}\n', encoding='utf-8')
+        return foreign
+
+    def assert_precise_foreign_groups(self, foreign):
+        for agent in ('codex', 'claude'):
+            text = self.target(agent).read_text(encoding='utf-8')
+            self.assertEqual(text.count(foreign), 2, text)
+            self.assertIn('1.234567890123456789', text)
+
+    def test_registration_preserves_unowned_group_numeric_tokens(self):
+        self.bootstrap()
+        foreign = self.write_precise_foreign_groups()
+        self.apply()
+        self.assert_precise_foreign_groups(foreign)
+
+    def test_event_move_preserves_unowned_group_numeric_tokens(self):
+        self.bootstrap()
+        self.apply()
+        foreign = self.write_precise_foreign_groups()
+        for binding in self.doc['hooks']['observer']['agents'].values():
+            binding['event'] = 'SessionStart'
+        self.save()
+        self.apply()
+        self.assert_precise_foreign_groups(foreign)
+        for agent in ('codex', 'claude'):
+            self.assertEqual(len(self.document(agent)['hooks']['SessionEnd']), 1)
+            self.assertEqual(len(self.document(agent)['hooks']['SessionStart']), 1)
+
+    def test_registration_accepts_unowned_numbers_beyond_float_range(self):
+        self.bootstrap()
+        foreign = self.write_precise_foreign_groups(large='1e400')
+        self.apply()
+        self.assert_precise_foreign_groups(foreign)
+
+    def test_saved_removal_preserves_unowned_group_numeric_tokens(self):
+        self.bootstrap()
+        self.apply()
+        foreign = self.write_precise_foreign_groups()
+        self.catalog.unlink()
+        self.call('hooks', 'remove', 'observer')
+        self.assert_precise_foreign_groups(foreign)
+        for agent in ('codex', 'claude'):
+            self.assertEqual(len(self.document(agent)['hooks']['SessionEnd']), 1)
+
     def test_local_edits_duplicate_identity_and_missing_groups_are_protected(self):
         self.bootstrap()
         self.apply()
