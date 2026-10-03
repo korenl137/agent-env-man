@@ -19,7 +19,7 @@ See [Maintenance and recovery](maintenance.md) for conflicts, preservation, and 
 ```bash
 python scripts/setup.py --shell bash --agent codex --automation full --self-update compatible
 aem setup --automation full --automation-trigger shell-start --automation-trigger agent-start \
-  --automation-interval 3600 --automation-timeout 30
+  --automation-interval 3600 --automation-git-timeout 30
 aem automation --trigger agent-start --dry-run
 aem setup --automation policies
 aem setup --automation off
@@ -110,7 +110,7 @@ aem bootstrap --catalog-repository URL --catalog-path catalogs/personal.toml \
 Change the saved policy later:
 
 ```bash
-aem setup --catalog-trigger agent-start --catalog-interval 3600 --catalog-timeout 5
+aem setup --catalog-trigger agent-start --catalog-interval 3600 --catalog-git-timeout 5
 aem setup --catalog-trigger manual  # Disable automatic catalog updates.
 aem setup --catalog-trigger interval --dry-run
 ```

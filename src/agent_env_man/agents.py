@@ -40,12 +40,12 @@ class Codex:
         return {'root': str(Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').expanduser().resolve()),
                 'skills': str(Path.home() / '.agents/skills')}
 
-    def definition(self, config, name, *, startup=False):
+    def definition(self, config, name, *, startup=False, startup_timeout=10):
         identity = f'{self.name}:startup' if startup else f'{self.name}:{name}'
         args = ['startup', '--trigger', 'agent-start', '--agent', self.name] if startup else ['agent-hook', name, '--agent', self.name]
         marker = hooks.marker(config, identity, 'startup' if startup else 'instruction roots')
         return marker, {'matcher': '^(startup|resume|clear|compact)$', 'hooks': [
-            {'type': 'command', 'command': hooks.command(config, args), 'timeout': 10,
+            {'type': 'command', 'command': hooks.command(config, args), 'timeout': startup_timeout if startup else 10,
              'statusMessage': marker, 'additionalContextLimit': 1000}]}
 
     def render(self, path, marker, group, old, **options):
@@ -101,14 +101,14 @@ class Claude:
         root = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude').expanduser().resolve()
         return {'root': str(root), 'skills': str(root / 'skills')}
 
-    def definition(self, config, name, *, startup=False):
+    def definition(self, config, name, *, startup=False, startup_timeout=10):
         identity = f'{self.name}:startup' if startup else f'{self.name}:{name}'
         marker = hooks.marker(config, identity, 'startup' if startup else 'instruction roots')
         args = (['startup', '--trigger', 'agent-start', '--agent', self.name] if startup else
                 ['agent-hook', name, '--agent', self.name])
         command = hooks.command(config, [*args, '--aem-hook-id', marker], preserve_exit=True)
         return marker, {'matcher': '^(startup|resume|clear|compact|fork)$', 'hooks': [
-            {'type': 'command', 'command': command, 'timeout': 10}]}
+            {'type': 'command', 'command': command, 'timeout': startup_timeout if startup else 10}]}
 
     def render(self, path, marker, group, old, **options):
         return hooks.render(path, marker, group, old, marker_field='command', **options)
