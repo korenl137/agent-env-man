@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings, group ownership, saved offline removal and existing transaction/recovery protections. Personal registrations remain excluded from automatic full runs.
+
+### Fixed
+
+- Preserve bound personal-hook interpreter symlinks during bootstrap and configuration loading so virtualenv hooks execute in their selected environment.
+- Remove saved personal-hook registrations without consulting missing agent profiles or editable preference stages.
+
 ## [1.0.0] &mdash; 2026-10-03
 
 First stable major release; Git tag `v1.0.0` corresponds to Python package version `1.0.0`.
@@ -14,8 +23,6 @@ First stable major release; Git tag `v1.0.0` corresponds to Python package versi
 - Allow non-hook JSON preferences to share Claude's settings file with AEM setup and instruction hook groups. Reserve the entire hooks field for agent integration, including during collection, source reception, and explicit replacement; preserve settings on setup removal.
 
 ### Added
-
-- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings, group ownership, saved offline removal and existing transaction/recovery protections. Personal registrations remain excluded from automatic full runs.
 
 - Strict JSON application settings with exact numeric comparison, preserving field edits, and the existing staged merge, publication, automation, and recovery workflows.
 - Independent per-setting automatic sync schedules that receive shared settings and apply their stages together, with offline previews, failure throttling, and existing conflict preservation.
@@ -33,8 +40,6 @@ See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
 ### Fixed
 
 - Apply shared Claude preferences and instruction hooks in one file transaction, revalidating all hook sources before committing; preserve shared preferences when removing multiple or retired agent integrations.
-- Remove saved personal-hook registrations without consulting missing agent profiles or editable preference stages.
-- Preserve bound personal-hook interpreter symlinks during bootstrap and configuration loading so virtualenv hooks execute in their selected environment.
 
 - Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.
