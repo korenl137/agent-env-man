@@ -7,9 +7,9 @@ detach and recovery. This is an internal extension boundary, not a public plugin
 API or a general application-settings manager.
 
 | Contract | Codex | Claude Code |
-|---|---|---|
+| --- | --- | --- |
 | root | CODEX_HOME or ~/.codex | CLAUDE_CONFIG_DIR or ~/.claude |
-| skills | ~/.agents/skills | <root>/skills |
+| skills | ~/.agents/skills | \<root>/skills |
 | entry | AGENTS.md | CLAUDE.md |
 | hook file | hooks.json | settings.json; unrelated fields preserved |
 | owned marker | statusMessage | command argument; supported fields only |
@@ -21,7 +21,7 @@ API or a general application-settings manager.
 
 Every profile supplies name, entry_name, hook_name, notice, failure_to_stderr,
 failure_exit_code, defaults, definition,
-render, current, remove, context, failure, startup_result and validate_skill_name.
+render, current, remove, context, failure, startup_result, validate_skill_name and shared_settings_format.
 Defaults return root/skills. definition returns an identity marker and hook group.
 render/current/remove respect saved ownership and preserve unrelated content.
 context/failure/startup_result return the product's payload. Startup accepts the
@@ -47,3 +47,7 @@ resource, owner-ID migration or application preference synchronization is added.
 Consumers sharing a skill target retain upstream shared ownership behavior.
 The upstream ancillary official skill still warns if two agent bindings select
 the same destination; use native separate roots for new installs.
+
+Profiles declare `shared_settings_format` when their hook file also accepts
+application preferences. Claude opts into JSON; Codex keeps separate files. Shared
+ownership reserves the top-level hooks subtree for group-owned integration.

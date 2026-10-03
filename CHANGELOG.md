@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- Allow non-hook JSON preferences to share Claude's settings file with AEM setup and instruction hook groups. Reserve the entire hooks field for agent integration, including during collection, source reception, and explicit replacement; preserve settings on setup removal.
+
 ### Added
 
 - Strict JSON application settings with exact numeric comparison, preserving field edits, and the existing staged merge, publication, automation, and recovery workflows.
@@ -23,6 +25,8 @@ See [upgrade guidance](docs/automation.md#upgrading-from-manual-only-settings).
 - Clarify that the first final `1.0.0` establishes the stable public contract, while prerelease self-update series retain their compatibility boundaries and graduation to final requires `breaking` permission.
 
 ### Fixed
+
+- Apply shared Claude preferences and instruction hooks in one file transaction, revalidating all hook sources before committing; preserve shared preferences when removing multiple or retired agent integrations.
 
 - Reapplying unchanged TOML or JSON settings preserves mixed line endings byte for byte on Windows.
 - Settings publication comparisons use each item's saved format, including unselected stages in shared checkouts.

@@ -220,6 +220,19 @@ class Manager:
                                  or (old_other.get("mode") == "agent-hook"
                                      and old_other.get("agent", "codex") == item.agent))):
                         continue
+                    from .settings import Settings, shares_hook_file
+                    current = {"kind": item.kind, "mode": item.mode, "agent": item.agent,
+                               "target": str(item.target),
+                               "format": getattr(self.config, "_settings", {}).get(item.source_name, {}).get("format")}
+                    peer = dict(old_other)
+                    if other:
+                        peer.update(kind=other.kind, mode=other.mode, agent=other.agent, target=str(other.target),
+                                    format=getattr(self.config, "_settings", {}).get(other.source_name, {}).get("format"))
+                    if shares_hook_file(current, peer) or shares_hook_file(peer, current):
+                        saved = old if item.kind == "setting" else old_other
+                        if saved and saved.get("kind") == "setting":
+                            Settings(self).check_hook_ownership(saved)
+                        continue
                     raise Error(f"Overlapping targets: {item.key} and {key}")
             owners[item.key] = item.target
 
@@ -692,11 +705,41 @@ class Manager:
                              trust="not-managed-by-aem", notice=profile(plan.item.agent).notice,
                              hook_group=plan.record["hook_group"])
         grouped = self.group_hooks(plans)
+        # Shared Claude preferences and hook groups commit one target image and
+        # all comparison records, rather than racing two precomputed writes.
+        settings_by_target = {i.target: (i, writes, record) for i, writes, record in setting_plans}
+        joint_records = {}
+        joint_hooks = {}
+        ordinary = []
+        for plan in grouped:
+            if plan.item.mode != 'agent-hook' or plan.item.target not in settings_by_target:
+                ordinary.append(plan)
+                continue
+            item, writes, record = settings_by_target[plan.item.target]
+            from .settings_formats import FORMATS
+            adapter = FORMATS['json']
+            path, content, before = writes[0]
+            if before != plan.before:
+                raise Error('Shared settings/hook target changed during preflight')
+            for peer in [plan, *plan.peers]:
+                if self.payload(peer.item) != peer.record['hash']:
+                    raise Error('Hook source changed during shared-file preflight')
+            document = adapter.parse(content.decode())
+            value = adapter.parse(plan.content.decode('utf-8')).root.children['hooks']
+            adapter.put(document, ('hooks',), value)
+            writes[0] = (path, adapter.dump(document).encode(), before)
+            joint_records[item.key] = {plan.item.key: plan.record, **plan.records}
+            joint_hooks[item.key] = [plan, *plan.peers]
         if not dry_run:
-            for plan in grouped:
+            for plan in ordinary:
                 self.install(plan)
         for item, writes, record in setting_plans:
-            transaction(self.state, writes, {item.key: record}, dry_run=dry_run)
+            # Ordinary installs can take time; retain install's source guard at
+            # the shared hook commit boundary, including every grouped peer.
+            for hook in joint_hooks.get(item.key, ()):
+                if self.payload(hook.item) != hook.record['hash']:
+                    raise Error(f'{hook.item.key}: source changed before shared-file commit')
+            transaction(self.state, writes, {item.key: record, **joint_records.get(item.key, {})}, dry_run=dry_run)
             report.append({"item": item.key, "action": "apply", "target": str(item.target)})
         return report
 

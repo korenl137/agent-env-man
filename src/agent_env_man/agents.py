@@ -22,6 +22,7 @@ class Codex:
     name: str = 'codex'
     entry_name: str = 'AGENTS.md'
     hook_name: str = 'hooks.json'
+    shared_settings_format: str | None = None
     notice: str = hooks.TRUST_NOTICE
     failure_to_stderr: bool = False
     failure_exit_code: int = 0
@@ -72,6 +73,7 @@ class Claude:
     name: str = 'claude'
     entry_name: str = 'CLAUDE.md'
     hook_name: str = 'settings.json'
+    shared_settings_format: str | None = 'json'
     failure_to_stderr: bool = True
     failure_exit_code: int = 2
     notice: str = ("Claude Code hooks are registered in the user settings file; review them with /hooks. "
