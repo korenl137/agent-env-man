@@ -112,8 +112,11 @@ class Config(MachineFile):
             identifier(name)
             absolute(value)
         setup = self.doc.get("setup", {})
-        if not isinstance(setup, dict) or set(setup) - {"shells", "executable"}:
-            raise Error("Machine setup accepts only shells and executable")
+        if not isinstance(setup, dict) or set(setup) - {"shells", "executable", "startup_hook_timeout"}:
+            raise Error("Machine setup accepts only shells, executable, and startup_hook_timeout")
+        from .updates import policy_fields
+        self.startup_hook_timeout = setup.get("startup_hook_timeout", 10)
+        policy_fields({"timeout": self.startup_hook_timeout}, "setup.startup_hook_timeout")
         shells = setup.get("shells", {})
         if not isinstance(shells, dict) or any(
                 name not in ("bash", "zsh", "powershell") or not isinstance(path, str)

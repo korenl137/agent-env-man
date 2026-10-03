@@ -254,7 +254,8 @@ AEM derives `aem-agent-codex` and `aem-skills-codex` roots from the agent bindin
 
 ### Saved setup
 
-`setup` accepts only `executable` and `shells`.
+`setup` accepts only `executable`, `shells`, and `startup_hook_timeout`.
+See [Agent startup hook duration](#agent-startup-hook-duration) for the independent callback limit.
 `executable` is an absolute path to the installed `aem` executable.
 `setup.shells` maps `bash`, `zsh`, or `powershell` to absolute profile paths.
 Manage these selections with `aem setup`; editing TOML does not itself install or remove profile blocks, hook groups, or official skill links.
@@ -328,7 +329,7 @@ Existing machine files remain usable with self-updates disabled until runtime re
 ## Catalog automatic update settings
 
 The machine-owned `catalog_update` table controls the bound Git catalog, without relying on policies inside the file it updates.
-Manage it with `bootstrap` during registration or `setup` afterward: repeat `--catalog-trigger` for events, set `--catalog-interval` for `min_interval`, and use `--catalog-timeout` for `timeout`.
+Manage it with `bootstrap` during registration or `setup` afterward: repeat `--catalog-trigger` for events, set `--catalog-interval` for `min_interval`, and use `--catalog-git-timeout` for `timeout`.
 Supplied triggers replace the saved list; omitted options retain their existing fields.
 `--catalog-trigger manual` disables automatic catalog updates.
 Policy-only setup supports `--dry-run`, requires no integration selections or executable, and does not rewrite existing profiles.
@@ -351,7 +352,7 @@ The policy does not register startup hooks or an OS scheduler; use setup's exist
 ## Device automation settings
 
 Manage the machine-owned `automation` table through installer/setup options.
-Use `--automation MODE`, repeated `--automation-trigger EVENT`, `--automation-interval SECONDS`, and `--automation-timeout SECONDS`.
+Use `--automation MODE`, repeated `--automation-trigger EVENT`, `--automation-interval SECONDS`, and `--automation-git-timeout SECONDS`.
 Omitted fields retain saved values; a supplied trigger list replaces the saved list.
 Policy-only setup uses the machine journal and does not rewrite profiles or require integration selections.
 Unknown fields are rejected.
@@ -402,3 +403,13 @@ Catalog version remains 2, machine version 1, and state envelope version 2.
 Existing states require no conversion; new settings records and grouped journals are interpreted by the current AEM.
 Older AEM versions cannot operate on these new declarations or recovery operations.
 See [Staged settings](settings-management.md) for the canonical metadata grammar, storage, ownership, and merge semantics.
+
+## Agent startup hook duration
+
+Machine `[setup].startup_hook_timeout` is a finite positive integer or float in seconds, defaulting to `10`; Boolean values are invalid.
+Set it with `aem setup --startup-hook-timeout 60` or `python scripts/setup.py --startup-hook-timeout 60`.
+Setup updates the registered Codex and Claude startup hooks and preserves the saved value when the option is omitted.
+It can also save the value before agents are registered.
+Instruction-location hooks retain their ten-second limit, and shell callbacks have no corresponding agent hook limit.
+Git policy `timeout` fields remain independent; in policies mode, all synchronous startup work must fit within the outer agent limit.
+In full mode, the callback queues the update sequence for execution after it exits.

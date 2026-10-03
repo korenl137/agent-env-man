@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Configure the agent startup callback duration through setup and the standalone installer, retaining the ten-second default and preserving instruction hooks.
+- Introduce explicit Git timeout option names while retaining the previous CLI names as compatible aliases and preserving saved policy keys.
+
 ## [1.0.0] &mdash; 2026-10-03
 
 First stable major release; Git tag `v1.0.0` corresponds to Python package version `1.0.0`.

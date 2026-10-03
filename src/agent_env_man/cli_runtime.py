@@ -169,7 +169,7 @@ pass_runtime = click.make_pass_decorator(Runtime)
 
 
 def timeout_option(function):
-    return click.option("--timeout", type=SECONDS, default=30.0, show_default=True,
+    return click.option("--git-timeout", "--timeout", "timeout", type=SECONDS, default=30.0, show_default=True,
                         help="Seconds per Git phase.")(function)
 
 
@@ -191,7 +191,7 @@ def catalog_policy_options(function):
         click.option("--catalog-trigger", multiple=True, type=click.Choice(("manual", *TRIGGERS)),
                      help="Replace catalog triggers; repeat for multiple events."),
         click.option("--catalog-interval", type=INTERVAL, help="Minimum seconds between automatic catalog attempts."),
-        click.option("--catalog-timeout", type=SECONDS, help="Seconds per Git phase for automatic catalog updates."),
+        click.option("--catalog-git-timeout", "--catalog-timeout", "catalog_timeout", type=SECONDS, help="Seconds per Git phase for automatic catalog updates."),
     )):
         function = decorator(function)
     return function
