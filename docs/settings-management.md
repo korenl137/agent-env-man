@@ -57,6 +57,7 @@ A JSON setting may share that exact file with Claude hook integrations, but cann
 manage the top-level `hooks` field or any of its descendants, including deletion
 or release metadata. Setup and settings preserve each other's fields; two settings
 owners still cannot share a target. Overlapping directory targets remain rejected.
+Removal validates the saved hook group and settings ownership without requiring the current agent profile or reading the editable settings stage.
 Targets and stage storage must not overlap sources, catalog storage, AEM state, or other managed targets.
 Symlinks, junctions, redirected ancestry, and special files are rejected.
 Changing the source, target, or format of an active item requires detach first.

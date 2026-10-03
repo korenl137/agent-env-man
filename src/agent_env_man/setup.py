@@ -514,8 +514,12 @@ def remove_integrations(manager, args):
             if (plan.item.target == Path(value) and plan.item.mode == 'agent-hook'
                     and isinstance(old.get('hook_marker'), str) and isinstance(old.get('hook_group'), dict)):
                 continue
-            if shares_hook_file(old, {'mode': plan.item.mode, 'agent': plan.record.get('agent'), 'target': str(plan.item.target)}):
-                Settings(manager).check_hook_ownership(old)
+            # The saved group has already been validated. Removing it needs no
+            # current profile capability and must preserve the JSON field owner.
+            if (plan.item.mode == 'agent-hook' and plan.item.target == Path(value)
+                    and old.get('kind') == 'setting' and old.get('mode') == 'settings'
+                    and old.get('format') == 'json'):
+                Settings(manager).check_hook_ownership(old, saved=True)
                 continue
             raise Error(f'Removal target overlaps {key}')
     if observation(config.path) != before_config:

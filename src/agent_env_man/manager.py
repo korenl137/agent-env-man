@@ -709,6 +709,7 @@ class Manager:
         # all comparison records, rather than racing two precomputed writes.
         settings_by_target = {i.target: (i, writes, record) for i, writes, record in setting_plans}
         joint_records = {}
+        joint_hooks = {}
         ordinary = []
         for plan in grouped:
             if plan.item.mode != 'agent-hook' or plan.item.target not in settings_by_target:
@@ -728,10 +729,16 @@ class Manager:
             adapter.put(document, ('hooks',), value)
             writes[0] = (path, adapter.dump(document).encode(), before)
             joint_records[item.key] = {plan.item.key: plan.record, **plan.records}
+            joint_hooks[item.key] = [plan, *plan.peers]
         if not dry_run:
             for plan in ordinary:
                 self.install(plan)
         for item, writes, record in setting_plans:
+            # Ordinary installs can take time; retain install's source guard at
+            # the shared hook commit boundary, including every grouped peer.
+            for hook in joint_hooks.get(item.key, ()):
+                if self.payload(hook.item) != hook.record['hash']:
+                    raise Error(f'{hook.item.key}: source changed before shared-file commit')
             transaction(self.state, writes, {item.key: record, **joint_records.get(item.key, {})}, dry_run=dry_run)
             report.append({"item": item.key, "action": "apply", "target": str(item.target)})
         return report

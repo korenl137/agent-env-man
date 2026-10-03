@@ -377,8 +377,12 @@ class Settings:
         self.protect_hooks({"kind": "setting", "mode": "settings", "target": str(item.target), "format": format}, bundle)
         return bundle
 
-    def check_hook_ownership(self, record):
-        protect_hook_fields(self.working(record, conflicts=True))
+    def check_hook_ownership(self, record, *, saved=False):
+        # Removal consumes saved ownership, independently of current profiles
+        # and editable stages. Installation must also inspect current intent.
+        working = (Bundle.from_snapshot(record["working"], format="json") if saved
+                   else self.working(record, conflicts=True))
+        protect_hook_fields(working)
         if record.get("applied"):
             protect_hook_fields(Bundle.from_snapshot(record["applied"], format="json"))
 
