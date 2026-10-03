@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0] &mdash; 2026-10-03
+
+First stable major release; Git tag `v1.0.0` corresponds to Python package version `1.0.0`.
+
 - Allow non-hook JSON preferences to share Claude's settings file with AEM setup and instruction hook groups. Reserve the entire hooks field for agent integration, including during collection, source reception, and explicit replacement; preserve settings on setup removal.
 
 ### Added
@@ -220,7 +224,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-rc...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-rc...v1.0.0
 [1.0.0-rc]: https://github.com/mirinae3145/agent-env-man/compare/v1.0.0-beta...v1.0.0-rc
 [1.0.0-beta]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.3...v1.0.0-beta
 [0.5.3]: https://github.com/mirinae3145/agent-env-man/compare/v0.5.2...v0.5.3
