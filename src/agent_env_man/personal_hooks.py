@@ -216,7 +216,7 @@ def remove(manager, names, *, agent=None, dry_run=False):
             if (record.get('kind') == 'setting' and record.get('mode') == 'settings'
                     and record.get('format') == owner.get('shared_settings_format') == 'json'
                     and record.get('target') == str(target)):
-                Settings(manager).check_hook_ownership(record)
+                Settings(manager).check_hook_ownership(record, saved=True)
                 continue
             raise Error(f'Hook removal overlaps {key}')
     from .settings import transaction
