@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Configure the agent startup callback duration through setup and the standalone installer, retaining the ten-second default and preserving instruction hooks.
 - Introduce explicit Git timeout option names while retaining the previous CLI names as compatible aliases and preserving saved policy keys.
+- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings that preserve virtualenv interpreters, group ownership and existing transaction/recovery protections.
+Saved offline removal uses ownership records without requiring current agent profiles or editable preference stages.
+Personal registrations remain excluded from automatic full runs.
+
+### Fixed
+
+- Preserve numeric precision in unrelated hook groups when registering or removing AEM hooks, fixing JSON reserialization loss.
 
 ## [1.0.0] &mdash; 2026-10-03
 

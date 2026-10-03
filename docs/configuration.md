@@ -27,9 +27,9 @@ CLI path arguments have their own resolution rules described in [Commands](comma
 
 ## Catalog
 
-The only top-level fields are `version`, `sources`, `skills`, `instructions`, `settings`, and `updates`.
+The only top-level fields are `version`, `sources`, `skills`, `instructions`, `settings`, `hooks`, and `updates`.
 All tables are optional; an instruction-only catalog needs no skills table.
-Skill and instruction names share a namespace; source names have a separate namespace.
+Skill, instruction, setting and personal hook names share a namespace; source names have a separate namespace.
 A source declaration is not an installable item by itself.
 
 ```toml
@@ -67,7 +67,7 @@ Git sources accept only `type`, required `repository`, and optional `branch`.
 `repository` is a Git URL, SSH repository location, or absolute local repository path.
 When `branch` is absent, bootstrap discovers and records the remote default branch.
 External sources accept only `type`; their device-local paths belong in machine `external_paths.NAME`.
-External sources support instruction bundles and staged settings; skills still require Git sources.
+External sources support instruction bundles, staged settings and personal hooks; skills still require Git sources.
 AEM neither fetches external folders nor administers the service that synchronizes them.
 
 Items referencing the same source name share its checkout; different names have independent checkouts even with equal URLs.
@@ -175,6 +175,7 @@ Explicit commands ignore these policies and clocks.
 | `checkout_root` | String | Managed Git storage; defaults to sibling `<machine-file>.checkouts`. |
 | `roots` | Table of paths | User-named installation roots; bootstrap defaults missing `skills` and `agent`. |
 | `agents` | Table | Agent selections and path bindings, normally written by setup. |
+| `runtimes` | Table of paths | Personal hook interpreter bindings; bootstrap never installs executables. |
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill names mapped to `"link"` or `"copy"`. Unknown skill names fail catalog validation. |
 | `setup` | Table | Saved startup selections; normally written by setup. |
@@ -403,6 +404,48 @@ Catalog version remains 2, machine version 1, and state envelope version 2.
 Existing states require no conversion; new settings records and grouped journals are interpreted by the current AEM.
 Older AEM versions cannot operate on these new declarations or recovery operations.
 See [Staged settings](settings-management.md) for the canonical metadata grammar, storage, ownership, and merge semantics.
+
+## Personal hook declarations and runtime bindings
+
+`hooks.NAME` accepts exactly `source` (a declared source name) and `agents` (a
+nonempty table of product bindings). Names share the content namespace. At least
+one declared agent must be selected by the machine. Each binding accepts:
+
+| Field | Contract |
+|---|---|
+| `event` | Required supported native event, case-sensitive. |
+| `runtime` | Required identifier in machine `runtimes`. |
+| `script` | Required literal source-relative regular UTF-8 file; no redirected paths. Git files must be tracked. |
+| `args` | Optional array of literal strings, default `[]`; no shell templates or NUL. |
+| `timeout` | Positive integer seconds; defaults to 10, except Codex SessionEnd/Interrupt default and maximum 3. |
+| `matcher` | Optional native regular-expression string; expressions must pass Python regex syntax validation (`"*"` is also accepted as match-all), and unsupported matcher events are refused. Use expressions supported by the target product. |
+
+Both profiles support SessionStart, SessionEnd, PreToolUse, PermissionRequest,
+PostToolUse, PreCompact, PostCompact, SubagentStart, Stop, SubagentStop and
+UserPromptSubmit. Codex additionally supports Interrupt; Claude additionally
+supports PostToolUseFailure. UserPromptSubmit and Stop do not accept matchers; Codex Interrupt also refuses them.
+Claude SessionEnd timeout is capped at 60 seconds.
+Only command hooks are supported; async/prompt/agent hooks, environment maps and
+plugin-only fields are not part of this declaration. Native products may impose
+additional event restrictions; the script must follow their actual contract.
+
+Machine `runtimes` maps identifiers to absolute existing executable paths:
+
+```toml
+[runtimes]
+python = "/absolute/python"
+```
+
+Interpreter paths preserve symlinks, including virtualenv interpreter paths, so
+execution uses the bound environment rather than its base interpreter.
+Bootstrap's repeated `--runtime NAME=PATH` binds these paths without installing
+anything. Omitted bindings persist. Duplicate names in one call are refused.
+This additive syntax keeps catalog version 2 and machine version 1; older AEM
+packages reject the new fields. No migration is needed for existing catalogs.
+Personal ownership IDs are `NAME:hook` for Codex and `NAME:hook@claude` for Claude.
+Select `NAME` to apply all declared agent bindings, or an exact ID for one binding;
+`--agent` further filters the selection. Plain apply and automatic full mode
+exclude these items. See [Personal hooks](personal-hooks.md) for the lifecycle.
 
 ## Agent startup hook duration
 

@@ -23,6 +23,15 @@ class Codex:
     entry_name: str = 'AGENTS.md'
     hook_name: str = 'hooks.json'
     shared_settings_format: str | None = None
+    command_events: tuple = ('SessionStart', 'SessionEnd', 'PreToolUse', 'PermissionRequest',
+                             'PostToolUse', 'PreCompact', 'PostCompact', 'SubagentStart',
+                             'SubagentStop', 'UserPromptSubmit', 'Stop', 'Interrupt')
+    hook_timeout_limits: tuple = (('SessionEnd', 3), ('Interrupt', 3))
+    unmatched_hook_events: tuple = ('UserPromptSubmit', 'Stop', 'Interrupt')
+
+    def personal_command(self, marker, args):
+        from .personal_hooks import direct_command
+        return direct_command(marker, args)
     notice: str = hooks.TRUST_NOTICE
     failure_to_stderr: bool = False
     failure_exit_code: int = 0
@@ -74,6 +83,15 @@ class Claude:
     entry_name: str = 'CLAUDE.md'
     hook_name: str = 'settings.json'
     shared_settings_format: str | None = 'json'
+    command_events: tuple = ('SessionStart', 'SessionEnd', 'PreToolUse', 'PermissionRequest',
+                             'PostToolUse', 'PostToolUseFailure', 'PreCompact', 'PostCompact',
+                             'SubagentStart', 'SubagentStop', 'UserPromptSubmit', 'Stop')
+    hook_timeout_limits: tuple = (('SessionEnd', 60),)
+    unmatched_hook_events: tuple = ('UserPromptSubmit', 'Stop')
+
+    def personal_command(self, marker, args):
+        from .personal_hooks import direct_command
+        return direct_command(marker, args)
     failure_to_stderr: bool = True
     failure_exit_code: int = 2
     notice: str = ("Claude Code hooks are registered in the user settings file; review them with /hooks. "

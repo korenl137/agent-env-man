@@ -186,3 +186,10 @@ Repeat this for each setting that should remain manual.
 Older packages reject the new settings `update` table, so add it only after upgrading.
 In `policies` mode, omitted settings triggers still disable automatic settings work.
 Once the exclusions are saved, restore full mode with `aem setup --automation full` and inspect `aem automation --trigger agent-start --dry-run` before invoking the next automatic event.
+
+## Personal hooks
+
+Personal hook registrations are always excluded from policies and full mode.
+Explicit `apply --item NAME` is required. A skill sharing a source checkout can
+still update a live script; registration definitions and trust remain unchanged.
+See [Personal hooks](personal-hooks.md).
