@@ -240,3 +240,64 @@ class ClaudeSettings(SetupFixture):
         self.assertNotIn('awaySummaryEnabled', document)
         self.assertEqual(len(document['hooks']['SessionStart']), 1)
         self.assertNotIn('rules:hook@claude', self.state()['items'])
+
+    def assert_combined_apply_refuses_source_change(self, *, delete=False):
+        from agent_env_man.manager import Manager
+        self.prepare_combined_apply()
+        before, stage = self.target.read_bytes(), self.stage.read_bytes()
+        entry = self.source / 'RULES.md'
+        original = Manager.install
+        def change_after_entry_install(manager, plan):
+            result = original(manager, plan)
+            if plan.item.kind == 'instruction-entry':
+                if delete:
+                    entry.unlink()
+                else:
+                    entry.write_text('Concurrent user edit', encoding='utf-8')
+            return result
+        with patch.object(Manager, 'install', change_after_entry_install):
+            error = self.run_cli('apply', code=1)
+        self.assertIn('regular entry document' if delete else 'source changed', error)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.stage.read_bytes(), stage)
+        records = self.state()['items']
+        self.assertNotIn('rules:hook@claude', records)
+        self.assertIsNone(records['preferences:settings']['applied'])
+        self.assertIsNone(self.state()['pending'])
+        if delete:
+            self.assertFalse(entry.exists())
+        else:
+            self.assertEqual(entry.read_text(encoding='utf-8'), 'Concurrent user edit')
+
+    def test_combined_apply_refuses_source_edit_after_entry_install(self):
+        self.assert_combined_apply_refuses_source_change()
+
+    def test_combined_apply_refuses_source_deletion_after_entry_install(self):
+        self.assert_combined_apply_refuses_source_change(delete=True)
+
+    def test_retired_agent_removal_preserves_shared_preferences(self):
+        from agent_env_man.model import Config
+        self.setup_cli('--agent', 'claude')
+        self.bootstrap()
+        self.apply_preferences()
+        state = self.state()
+        preferences = state['items']['preferences:settings']
+        record = state['items'].pop('setup:agent-claude')
+        record.update(agent='retired', agents=['retired'])
+        state['items']['setup:agent-retired'] = record
+        (Config(self.config).state_dir / 'state.json').write_text(json.dumps(state), encoding='utf-8')
+        document = tomlkit.parse(self.config.read_text(encoding='utf-8'))
+        document['agents']['retired'] = document['agents'].pop('claude')
+        self.config.write_text(tomlkit.dumps(document), encoding='utf-8')
+        self.catalog.unlink()
+        before = json.loads(self.target.read_text(encoding='utf-8'))
+
+        self.run_cli('setup', '--remove-agent', 'retired')
+
+        expected = dict(before, hooks=dict(before['hooks'], SessionStart=[]))
+        self.assertEqual(json.loads(self.target.read_text(encoding='utf-8')), expected)
+        records = self.state()['items']
+        self.assertTrue(records['setup:agent-retired']['detached'])
+        self.assertEqual(records['preferences:settings'], preferences)
+        document = tomlkit.parse(self.config.read_text(encoding='utf-8'))
+        self.assertNotIn('retired', document.get('agents', {}))
