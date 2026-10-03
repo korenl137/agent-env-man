@@ -9,12 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings, group ownership, saved offline removal and existing transaction/recovery protections. Personal registrations remain excluded from automatic full runs.
+- Explicit personal command hook resources for Codex and Claude, with machine-local runtime bindings that preserve virtualenv interpreters, group ownership and existing transaction/recovery protections.
+Saved offline removal uses ownership records without requiring current agent profiles or editable preference stages.
+Personal registrations remain excluded from automatic full runs.
 
 ### Fixed
 
-- Preserve bound personal-hook interpreter symlinks during bootstrap and configuration loading so virtualenv hooks execute in their selected environment.
-- Remove saved personal-hook registrations without consulting missing agent profiles or editable preference stages.
+- Preserve numeric precision in unrelated hook groups when registering or removing AEM hooks, fixing JSON reserialization loss present in 1.0.0.
 
 ## [1.0.0] &mdash; 2026-10-03
 

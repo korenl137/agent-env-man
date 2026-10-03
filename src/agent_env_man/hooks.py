@@ -63,12 +63,25 @@ def read(path: Path) -> dict:
 
 
 def serialize(path, doc):
-    """Edit just hooks, preserving unrelated JSON numeric tokens and preferences."""
+    """Edit event arrays while retaining original tokens of unchanged groups."""
     from .settings_formats import FORMATS
     adapter = FORMATS['json']
     document = adapter.parse(path.read_text(encoding='utf-8')) if exists(path) else adapter.empty_document()
-    value = adapter.parse(json.dumps({'hooks': doc['hooks']})).root.children['hooks']
-    adapter.put(document, ('hooks',), value)
+    original = document.root.children.get('hooks')
+    if original is None:
+        adapter.put(document, ('hooks',), adapter.parse('{}').root)
+    for event, groups in doc['hooks'].items():
+        previous = original.children.get(event) if original else None
+        # read() supplies ordinary decoded values for ownership checks. Use
+        # that same decoding only to find retained groups, never to emit their
+        # numbers: float conversion can round, underflow, or overflow them.
+        retained = [(json.loads(node.raw), node.raw) for node in previous.children] if previous else []
+        raw_groups = []
+        for group in groups:
+            raw = next((raw for value, raw in retained if value == group), None)
+            raw_groups.append(raw if raw is not None else json.dumps(group))
+        value = adapter.parse('{"groups":[' + ', '.join(raw_groups) + ']}').root.children['groups']
+        adapter.put(document, ('hooks', event), value)
     return adapter.dump(document).encode('utf-8')
 
 
