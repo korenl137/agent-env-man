@@ -362,3 +362,55 @@ class PayloadExclusions(unittest.TestCase):
             with self.assertRaisesRegex(Error, 'changed during inspection'):
                 fingerprint(self.source, preserve_symlinks=True, exclusions=(('', '**/._DAV'),))
         self.assertTrue(edited)
+
+    def test_skill_replacement_refuses_metadata_created_during_backup(self):
+        from agent_env_man import manager as module
+        self.document = {'version': 2, 'sources': {'repo': {'type': 'git', 'repository': str(self.repo)}},
+                         'skills': {'report': {'source': 'repo', 'subdir': 'skills/report',
+                                              'exclude': ['**/._DAV', 'scratch'],
+                                              'install': {'root': 'personal', 'mode': 'copy'}}}}
+        self.write()
+        self.run_cli('bootstrap', self.catalog, '--checkout-root', self.checkouts,
+                     '--root', f'personal={self.destination}')
+        self.run_cli('apply', '--item', 'report')
+        target = self.destination / 'report'
+        (target / '._DAV').mkdir()
+        (target / '._DAV/local').write_text('existing metadata')
+        original = (target / 'helper.py').read_text()
+        (self.repo / 'skills/report/helper.py').write_text('updated')
+        self.commit(self.repo); self.run_cli('update', 'report')
+        real_copy = module.copy_payload
+        def copy(source, destination, **policy):
+            real_copy(source, destination, **policy)
+            if source == target:
+                (target / 'scratch').mkdir()
+                (target / 'scratch/local').write_text('late metadata')
+        with patch.object(module, 'copy_payload', side_effect=copy):
+            error = self.run_cli('apply', '--item', 'report', code=1)
+        self.assertIn('Excluded entries changed', error)
+        self.assertEqual((target / 'helper.py').read_text(), original)
+        self.assertEqual((target / 'scratch/local').read_text(), 'late metadata')
+        self.assertEqual((target / '._DAV/local').read_text(), 'existing metadata')
+        self.assertIsNone(self.manager().state.data['pending'])
+        self.run_cli('apply', '--item', 'report')
+        self.assertEqual((target / 'helper.py').read_text(), 'updated')
+        self.assertEqual((target / 'scratch/local').read_text(), 'late metadata')
+        self.assertEqual((target / '._DAV/local').read_text(), 'existing metadata')
+
+    def test_apply_preview_refuses_removing_excluded_ancestor(self):
+        self.prepare()
+        cache = self.target / 'nested/._DAV'; cache.mkdir()
+        (cache / 'local').write_text('keep')
+        shutil.rmtree(self.source / 'nested')
+        error = self.run_cli('apply', '--item', 'cases', '--dry-run', code=1)
+        self.assertIn('Cannot preserve excluded entry', error)
+        self.assertEqual((cache / 'local').read_text(), 'keep')
+        self.assertIsNone(self.manager().state.data['pending'])
+
+    def test_collection_preview_refuses_removing_excluded_ancestor(self):
+        self.prepare()
+        shutil.rmtree(self.target / 'nested')
+        report = self.run_cli('publish', 'cases', '--from-copy', '--dry-run', code=1)
+        self.assertIn('Cannot preserve excluded entry', report[0]['error'])
+        self.assertEqual((self.source / 'nested/._DAV/metadata').read_text(), 'source metadata')
+        self.assertIsNone(self.manager().state.data['pending'])
