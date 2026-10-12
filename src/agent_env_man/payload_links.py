@@ -198,6 +198,17 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                 if identity(os.fstat(fd)) != identity(before):
                     raise Error(f'Payload changed during inspection: {logical}')
                 if out_fd is not None:
+                    if kind == 'f':
+                        # davfs can apply a stale zero length during metadata
+                        # updates on an open write handle. Close it first, then
+                        # reopen through the pinned parent and verify identity.
+                        copied = os.fstat(out_fd)
+                        os.close(out_fd)
+                        out_fd = None
+                        out_fd = os.open(out_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=out_parent)
+                        reopened = os.fstat(out_fd)
+                        if (copied.st_dev, copied.st_ino) != (reopened.st_dev, reopened.st_ino):
+                            raise Error(f'Copied payload changed before metadata update: {logical}')
                     os.fchmod(out_fd, stat.S_IMODE(before.st_mode))
                     os.utime(out_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
             finally:
