@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Official AEM skill guidance investigates actual differences when operations fail because of conflicts, using AEM reports, Git inspection, and direct comparisons as needed, then summarizes key differences and any comparison limits while preserving conflicting contents.
+
 ## [1.2.0-rc] &mdash; 2026-10-08
 
 First release candidate of 1.2.0; Git tag `v1.2.0-rc` corresponds to Python package version `1.2.0rc0`; based on `v1.2.0-beta`.
