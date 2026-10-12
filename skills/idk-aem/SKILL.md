@@ -139,6 +139,21 @@ It does not prepare a release or update the installation.
 ## Preserve contents during conflicts or removal
 
 Inspect reported targets and ownership with `aem status` before resolving a conflict.
+When an update, installation, collection, publication, or other operation fails because of a conflict, investigate and report the actual differences rather than stopping at the error message.
+Start with the failed operation's diagnostics and relevant AEM status, location, comparison, or dry-run reports; if they are insufficient or unavailable, use Git inspection and direct file or directory comparison as appropriate.
+Try other available comparison methods when one fails, without changing the conflicting contents or bypassing ownership checks.
+
+- For Git conflicts, distinguish staged, unstaged, and relevant untracked changes from committed local and incoming changes; use a common ancestor when available to explain divergent histories.
+  Identify the compared revisions and whether the remote observation is current or from the last fetch; obtain a current observation without advancing the checkout when needed and accessible.
+- For source/copy conflicts, compare the actual source and installed copy, including additions, deletions, and relevant type or link-target differences.
+  Use a saved baseline for attribution only when its contents are available; hashes alone do not explain what changed.
+- For settings conflicts, compare the affected fields across the shared source, editable stage, and actual application file as relevant to the failed operation, using available baseline values to distinguish each side's edits.
+
+Report the failed operation and reason, comparison paths or revisions and baseline, affected files or fields, and the key substantive differences in a concise summary.
+Do not include full diffs or create separate diff artifacts unless requested.
+When a comparison remains unavailable, report the methods attempted, the limitation, and any partial findings; do not infer missing contents or treat an unavailable remote as unchanged.
+Difference investigation does not authorize conflict resolution or replacement.
+
 After an interrupted replacement, use `aem recover` before retrying.
 Preserve local changes, state, and recovery backups; do not delete state, reset checkouts, or adopt/replace content merely to bypass a diagnostic.
 Use explicit item selections for intentional adoption, replacement, or reattachment, checking the relevant help when needed.
