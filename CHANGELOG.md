@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Catalog payload exclusions at global, source, and item scope, with anchored glob matching for skills, directories, and instruction bundles.
+Inspection, copying, status, detach, and reverse collection share the saved policy; replacement preserves excluded local entries without reading their contents and retains recoverable ownership boundaries.
+
 ## [1.2.0-rc] &mdash; 2026-10-08
 
 First release candidate of 1.2.0; Git tag `v1.2.0-rc` corresponds to Python package version `1.2.0rc0`; based on `v1.2.0-beta`.

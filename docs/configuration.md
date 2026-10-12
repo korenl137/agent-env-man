@@ -27,7 +27,7 @@ CLI path arguments have their own resolution rules described in [Commands](comma
 
 ## Catalog
 
-The only top-level fields are `version`, `sources`, `skills`, `directories`, `instructions`, `settings`, `hooks`, and `updates`.
+The only top-level fields are `version`, `sources`, `skills`, `directories`, `instructions`, `settings`, `hooks`, `updates`, and `payload`.
 All tables are optional; an instruction-only catalog needs no skills table.
 Skill, directory, instruction, setting and personal hook names share a namespace; source names have a separate namespace.
 A source declaration is not an installable item by itself.
@@ -60,13 +60,66 @@ root = "agent"
 trigger = []
 ```
 
+### Payload exclusions
+
+Exclusions belong in the catalog and apply to skill, directory, and instruction bundle trees.
+They do not exclude explicitly declared instruction entry links, application setting files, or personal hook scripts.
+Omitting all exclusion declarations preserves the existing payload behavior.
+
+```toml
+[payload.defaults]
+exclude = ["**/._DAV", "**/@eaDir"]
+
+[sources.projects]
+type = "external"
+exclude = ["**/__pycache__"]
+
+[directories.example]
+source = "projects"
+subdir = "example"
+exclude = ["scratch"]
+
+[directories.example.install]
+mode = "copy"
+```
+
+Effective exclusions combine `payload.defaults.exclude`, `sources.NAME.exclude`, and the item's `exclude` array.
+Lists add exclusions; there is no replacement or re-inclusion syntax.
+Global and item patterns are relative to each item's payload root.
+Source patterns are relative to the source root, including the item's `subdir`.
+For example, source pattern `example/cache` excludes `cache` from the item above, whereas item pattern `cache` is relative to that item directly.
+
+Patterns use `/` and are anchored to their declared root; matching is case-sensitive on every platform.
+`*`, `?`, and character classes match within one component; a whole `**` component matches zero or more components.
+`scratch` matches only the root entry; `**/scratch` matches that name at any depth.
+A matched directory excludes its entire subtree without opening or inspecting its contents.
+Absolute paths, drive prefixes, backslashes, empty components, `.` or `..`, negation, and partial `**` components are rejected.
+Excluding a declared source subtree, a skill's required `SKILL.md`, or an instruction bundle's required entry is an error.
+
+The same effective policy governs fingerprints, copying, status, detach materialization, and reverse copy collection previews and writes.
+Links still expose the original source tree, including excluded entries; exclusions affect AEM's inspection and copy operations rather than the linked filesystem view.
+The existing automatic omission of top-level `.git` for source-root payloads remains independent of configured exclusions; nested `.git` paths remain included unless explicitly excluded.
+Git ignore rules do not automatically become payload exclusions.
+Exclusions also do not change repository-wide Git publication scope: a requested commit still includes every nonignored change in the selected checkout.
+
+Excluded entries already in an installed copy remain local and are preserved during replacement.
+Reverse collection preserves the source's excluded entries and does not collect the copy's excluded entries.
+AEM moves these entries opaquely through temporary storage beside the directory being replaced, without reading their contents or following links.
+If an included ancestor would disappear or become a file or link, the operation stops rather than deleting or relocating the excluded entry.
+`--replace` does not override that preservation boundary.
+
+Ownership and recovery records retain the effective exclusion policy, so detach and recovery remain usable without the current catalog or source.
+A changed exclusion policy is reported as `configuration-changed`; apply it before reverse collection.
+Apply still checks local edits against the saved policy or requires a copy already matching the desired included contents; changing exclusions does not authorize overwriting unrelated edits.
+Nested or differently filtered overlapping copy collection with exclusions requires separate selections.
+
 ### `sources.NAME`
 
 Every source requires an explicit `type`, either `"git"` or `"external"`.
-Git sources accept only `type`, required `repository`, and optional `branch`.
+Git sources accept only `type`, required `repository`, and optional `branch` and `exclude`.
 `repository` is a Git URL, SSH repository location, or absolute local repository path.
 When `branch` is absent, bootstrap discovers and records the remote default branch.
-External sources accept only `type`; their device-local paths belong in machine `external_paths.NAME`.
+External sources accept `type` and optional `exclude`; their device-local paths belong in machine `external_paths.NAME`.
 External sources support directories, instruction bundles, staged settings and personal hooks; skills still require Git sources.
 AEM neither fetches external folders nor administers the service that synchronizes them.
 
@@ -81,6 +134,7 @@ TOML duplicate source names are invalid, including Git/external name collisions.
 | Field | Type | Requirement/default |
 | --- | --- | --- |
 | `source` | String | Required name of a Git source in `sources`. |
+| `exclude` | Array of strings | Additional [payload exclusions](#payload-exclusions); defaults to `[]`. |
 | `subdir` | String | Directory containing the fixed entry file `SKILL.md`; defaults to `"."`. |
 | `install` | Table | Optional installation settings below. |
 | `update` | Table | Optional policy selection and overrides; see below. |
@@ -92,7 +146,7 @@ With `install.root` omitted, selected agents supply their skill destinations.
 Without selected agents, machine `roots.skills` is required; bootstrap supplies its default.
 An explicit root overrides agent destinations; agents sharing a target share one ownership record.
 Skill names identify installation ownership and directory names, independently of the name inside `SKILL.md`.
-Root skills link directly to the repository root; copy and detach exclude only its top-level `.git` entry.
+Root skills link directly to the repository root; copy and detach automatically exclude its top-level `.git` entry and honor configured payload exclusions.
 Git-ignored regular files, including runtime caches, may coexist with prepared sources and are part of the directory payload.
 Directory links expose them, and copy/detach preserve them; AEM does not guess which ignored files are disposable or delete them.
 Tracked changes and nonignored untracked files still block bootstrap, apply, and update.
@@ -106,6 +160,7 @@ General directories use Git or external sources and require no entry document, s
 | Field | Type | Requirement/default |
 | --- | --- | --- |
 | `source` | String | Required name in `sources`; Git or external. |
+| `exclude` | Array of strings | Additional [payload exclusions](#payload-exclusions); defaults to `[]`. |
 | `subdir` | String | Source directory; defaults to `"."`. |
 | `preserve_symlinks` | Boolean | `false`; require opaque symbolic link preservation for this directory only. Execution is supported on POSIX. |
 | `install` | Table | Optional installation settings below. |
@@ -162,7 +217,7 @@ Remove those links and reconcile local edits before applying the disabled policy
 Detach and recovery retain the saved policy and logical source location, even without a readable catalog.
 Git subdirectories must exist as tracked trees; an empty directory requires a tracked placeholder file because Git does not track empty directories.
 An external directory may be empty.
-Source-root copy and detach omit only the top-level `.git` entry; ignored regular files remain part of the payload.
+Source-root copy and detach automatically omit the top-level `.git` entry; Git-ignored regular files remain part of the payload unless explicitly excluded.
 Existing link/copy conflict, transaction, backup, detach, and recovery contracts apply.
 Ordinary publication does not collect copy edits; use explicit `publish NAME --from-copy` to collect an installed, managed directory copy.
 Collection compares the last common baseline, preserves conflicting source edits, and retains backups; see [publication](commands.md#publish).
@@ -174,6 +229,7 @@ External transport remains outside AEM; copy publication only hands content to t
 | Field | Type | Requirement/default |
 | --- | --- | --- |
 | `source` | String | Required name of a Git or external source in `sources`; a used external source requires a machine path binding. |
+| `exclude` | Array of strings | Additional [payload exclusions](#payload-exclusions); defaults to `[]`. |
 | `subdir` | String | Bundle directory under the source; defaults to `"."`. |
 | `entry` | String | Required relative path to a regular entry document inside the selected bundle directory. |
 | `install` | Table | Optional `bundle` and `entry` tables below. |

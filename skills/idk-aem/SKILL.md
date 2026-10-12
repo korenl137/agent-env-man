@@ -82,6 +82,8 @@ Editing through an active link changes the source immediately.
 For copies, edit the source, then preview and apply to refresh the installation.
 For requested publication of installed-copy edits, consult publish help for `--from-copy` eligibility and preview collection before proceeding.
 Collection compares source and copy against their saved baseline and preserves active links' required paths; reconcile reported conflicts rather than bypassing them.
+Catalog payload exclusions skip matching entries during inspection and copying, preserve excluded destination entries, and do not filter repository-wide Git commits.
+Apply changed exclusion policies before collection; consult the local configuration guide for the global/source/item scopes and path rules.
 Detached content, entry links, hooks, and actual settings are not collected by this option.
 
 When publication is requested, inspect all changes in the reported repository, then review and publish:

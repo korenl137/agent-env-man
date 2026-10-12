@@ -517,7 +517,10 @@ If both sides changed differently, collection fails before source writes.
 Identical content refreshes the common baseline without rewriting the source.
 Identical overlapping collections are grouped; differing collections into overlapping source content fail before any write in that source group.
 Unselected copies are not collected or given a new baseline.
-Root payloads omit only their top-level `.git`; ignored regular contents remain included.
+Root payloads automatically omit their top-level `.git`; Git-ignored regular contents remain included unless removed by [catalog payload exclusions](configuration.md#payload-exclusions).
+Collection preserves excluded source entries, and apply preserves excluded entries in the installed copy.
+Exclusions do not change the repository-wide scope of a Git commit.
+Apply changed exclusion policies before collection; nested or differently filtered overlapping collection with exclusions requires separate selections.
 Collection and dry run check affected active links using saved ownership, including items removed from the catalog.
 The resulting source must retain each linked file or directory's kind, each linked skill's regular `SKILL.md`, and each linked instruction bundle's regular entry file.
 Violations stop the source group before source writes, baseline changes, or Git remote inspection; reconcile the copy or detach the affected item before retrying.
@@ -570,6 +573,8 @@ aem apply [--agent AGENT] [--item ID ...] [--git-timeout TIMEOUT]
 An implicitly selected bundle does not gain replacement permission.
 Dry run validates and shows planned actions without changing targets or ownership.
 Prepared checkouts must be clean even though this command does not fetch.
+[Catalog payload exclusions](configuration.md#payload-exclusions) skip inspection and copying of matching entries while preserving existing excluded entries in installed copies.
+Replacing an included ancestor of an excluded entry with a file, link, or absence is refused, including with `--replace`.
 General directories may opt into POSIX nested symbolic links through [directory configuration](configuration.md#directoriesname); apply preserves raw link text and never copies referent contents.
 
 ## sync

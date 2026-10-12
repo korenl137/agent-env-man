@@ -39,12 +39,19 @@ def options(value):
         relative = value.relative
     if not isinstance(enabled, bool):
         raise Error('Invalid saved preserve_symlinks policy')
+    from .payload_policy import rules
+    exclusions = rules(value.get('exclusions', ()) if isinstance(value, dict) else value.exclusions)
+    result = {'exclusions': exclusions} if exclusions else {}
+    if isinstance(value, dict) and value.get('exclude_prefix'):
+        prefix = value['exclude_prefix']
+        rules([(prefix, 'placeholder')])
+        result['exclude_prefix'] = prefix
     if not enabled:
-        return {}
+        return result
     require_posix()
     if not isinstance(relative, str) or PurePosixPath(relative).is_absolute() or '..' in relative.split('/'):
         raise Error('Invalid logical payload location')
-    return {'preserve_symlinks': True, 'source_relative': relative}
+    return {**result, 'preserve_symlinks': True, 'source_relative': relative}
 
 
 def require_posix():
@@ -113,7 +120,7 @@ def chmod_directory(path, mode):
         os.fchmod(fd, mode)
 
 
-def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True):
+def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix=""):
     """Hash and optionally copy one opaque-link tree; also return preview entries.
 
     Regular node encoding is identical to storage.fingerprint. O_NOFOLLOW and
@@ -121,15 +128,22 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
     referents. Changes during traversal abort rather than committing a mixture.
     """
     require_posix()
+    from .payload_policy import excluded
     path = Path(path)
     digest = hashlib.sha256()
     entries = {}
+    guarded = {}
 
     def identity(info):
+        if exclusions and stat.S_ISDIR(info.st_mode):
+            # Excluded children may appear or change while included entries are
+            # read. Guard directory identity and the included name set instead.
+            return info.st_dev, info.st_ino, info.st_mode
         return info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
     def visit(parent, name, relative, out_parent, out_name):
         before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        guarded[relative] = identity(before)
         kind = ('l' if stat.S_ISLNK(before.st_mode) else 'd' if stat.S_ISDIR(before.st_mode)
                 else 'f' if stat.S_ISREG(before.st_mode) else None)
         logical = str(PurePosixPath(source_relative) / relative.lstrip('/'))
@@ -162,10 +176,15 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                         out_fd = os.open(out_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                          0o600, dir_fd=out_parent)
                 if kind == 'd':
-                    for child in sorted(os.listdir(fd)):
-                        if exclude_git and not relative and child == '.git':
-                            continue
+                    children = [child for child in sorted(os.listdir(fd))
+                                if not (exclude_git and not relative and child == '.git')
+                                and not excluded(f'{relative}/{child}', exclusions, exclude_prefix)]
+                    for child in children:
                         visit(fd, child, f'{relative}/{child}', out_fd, child)
+                    if exclusions and children != [child for child in sorted(os.listdir(fd))
+                            if not (exclude_git and not relative and child == '.git')
+                            and not excluded(f'{relative}/{child}', exclusions, exclude_prefix)]:
+                        raise Error(f'Payload changed during inspection: {logical}')
                 else:
                     content = hashlib.sha256()
                     while block := os.read(fd, 1024 * 1024):
@@ -189,6 +208,22 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             raise Error(f'Payload changed during inspection: {logical}')
         entries[relative.lstrip('/') or '.'] = (kind, executable, target if kind == 'l' else file_hash)
 
+    def verify(parent, name, relative, seen):
+        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if guarded.get(relative) != identity(info):
+            raise Error(f'Payload changed during inspection: {relative or source_relative}')
+        seen.add(relative)
+        if stat.S_ISDIR(info.st_mode):
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                if identity(os.fstat(fd)) != identity(info):
+                    raise Error(f'Payload changed during inspection: {relative or source_relative}')
+                for child in sorted(os.listdir(fd)):
+                    if not (exclude_git and not relative and child == '.git') and not excluded(f'{relative}/{child}', exclusions, exclude_prefix):
+                        verify(fd, child, f'{relative}/{child}', seen)
+            finally:
+                os.close(fd)
+
     with directory_fd(path.parent) as parent:
         if destination is None:
             visit(parent, path.name, '', None, None)
@@ -196,4 +231,11 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             destination = Path(destination)
             with directory_fd(destination.parent) as out:
                 visit(parent, path.name, '', out, destination.name)
+        if exclusions:
+            # Directory timestamps cannot identify excluded-only changes. Recheck
+            # all included identities without downloading file contents again.
+            seen = set()
+            verify(parent, path.name, '', seen)
+            if seen != guarded.keys():
+                raise Error(f'Payload changed during inspection: {source_relative}')
     return digest.hexdigest(), entries

@@ -219,12 +219,14 @@ class Git:
             if str(source.path / record["relative"]) != record["source"]:
                 raise Error(f"{key}: source path moved; detach before reconfiguration")
             relative = record["relative"]
+            from .payload_links import options
+            exclusions = options(record).get("exclusions", ())
             if record.get("kind") == "skill":
-                self.skill_descriptor(source, relative, revision)
+                self.skill_descriptor(source, relative, revision, exclusions=exclusions)
             if record.get("kind") == "instruction":
-                self.instruction_descriptor(source, relative, record["entry"], revision)
+                self.instruction_descriptor(source, relative, record["entry"], revision, exclusions=exclusions)
             if record.get("kind") == "directory":
-                self.directory_descriptor(source, relative, revision, preserve_symlinks=record.get("preserve_symlinks", False))
+                self.directory_descriptor(source, relative, revision, preserve_symlinks=record.get("preserve_symlinks", False), exclusions=exclusions)
             if relative == "." and record.get("kind") in ("skill", "directory", "instruction"):
                 mode = "040000"
             else:
@@ -234,12 +236,24 @@ class Git:
             if mode not in allowed:
                 raise Error(f"{key}: incoming commit removes or changes the kind of a live link source; detach first")
             if record["directory"] and record.get("kind") not in ("skill", "directory"):
-                pathspec = () if relative == "." else (relative,)
-                tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
-                if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
+                if any(entry.split(" ", 1)[0] not in ("100644", "100755")
+                       for entry in self.payload_tree(source, relative, revision, exclusions)):
                     raise Error(f"{key}: incoming linked directory contains a symlink or submodule")
 
-    def directory_descriptor(self, source, relative, revision="HEAD", *, preserve_symlinks=False):
+    def payload_tree(self, source, relative, revision, exclusions=()):
+        """Inspect included Git entries with the same logical exclusion anchors."""
+        from .payload_policy import excluded
+        pathspec = () if relative == '.' else (relative,)
+        tree = self.run(source.path, 'ls-tree', '-rz', revision, '--', *pathspec, raw=True).stdout
+        for entry in tree.split('\0'):
+            if not entry:
+                continue
+            path = entry.split('\t', 1)[1]
+            local = path if relative == '.' else path[len(relative) + 1:]
+            if not excluded(local, exclusions):
+                yield entry
+
+    def directory_descriptor(self, source, relative, revision="HEAD", *, preserve_symlinks=False, exclusions=()):
         """Validate Git kinds and opaque link text before advancing live sources."""
         from .payload_links import validate_link, require_posix, directory_fd
         if preserve_symlinks:
@@ -248,11 +262,7 @@ class Git:
             listing = self.run(source.path, "ls-tree", "-z", revision, "--", relative).stdout
             if not listing or listing.split(" ", 1)[0] != "040000":
                 raise Error(f"{source.name}: directory must be a tracked Git tree: {relative}")
-        pathspec = () if relative == "." else (relative,)
-        tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec, raw=True).stdout
-        for entry in tree.split("\0"):
-            if not entry:
-                continue
+        for entry in self.payload_tree(source, relative, revision, exclusions):
             metadata, path = entry.split("\t", 1)
             mode, _, oid = metadata.split(" ")
             if mode in ("100644", "100755"):
@@ -274,18 +284,17 @@ class Git:
                 if actual != target:
                     raise Error(f"{source.name}: Git symlink text differs from checkout: {path}")
 
-    def instruction_descriptor(self, source, relative, entry, revision="HEAD"):
+    def instruction_descriptor(self, source, relative, entry, revision="HEAD", *, exclusions=()):
         """Validate the entry and complete regular-file tree before publishing Git content."""
         descriptor = entry if relative == "." else relative + "/" + entry
         listing = self.run(source.path, "ls-tree", "-z", revision, "--", descriptor).stdout
         if not listing or listing.split(" ", 1)[0] not in ("100644", "100755"):
             raise Error(f"{source.name}: instruction needs a tracked regular entry: {descriptor}")
-        pathspec = () if relative == "." else (relative,)
-        tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
-        if any(e.split(" ", 1)[0] not in ("100644", "100755") for e in tree.split("\0") if e):
+        if any(e.split(" ", 1)[0] not in ("100644", "100755")
+               for e in self.payload_tree(source, relative, revision, exclusions)):
             raise Error(f"{source.name}: instruction bundle contains a Git symlink or submodule")
 
-    def skill_descriptor(self, source: Source, relative: str, revision: str = "HEAD"):
+    def skill_descriptor(self, source: Source, relative: str, revision: str = "HEAD", *, exclusions=()):
         """Require a tracked descriptor and a skill tree of regular Git files.
 
         Inspect Git modes too: Windows can check out Git symlinks as ordinary
@@ -295,9 +304,8 @@ class Git:
         listing = self.run(source.path, "ls-tree", "-z", revision, "--", descriptor).stdout
         if not listing or listing.split(" ", 1)[0] not in ("100644", "100755"):
             raise Error(f"{source.name}: skill needs a tracked regular {descriptor} at {revision}")
-        pathspec = () if relative == "." else (relative,)
-        tree = self.run(source.path, "ls-tree", "-rz", revision, "--", *pathspec).stdout
-        if any(entry.split(" ", 1)[0] not in ("100644", "100755") for entry in tree.split("\0") if entry):
+        if any(entry.split(" ", 1)[0] not in ("100644", "100755")
+               for entry in self.payload_tree(source, relative, revision, exclusions)):
             raise Error(f"{source.name}: skill contains a Git symlink or submodule")
 
     def update(self, source: Source, records: dict, source_state: dict, *, validate_candidate=None):
