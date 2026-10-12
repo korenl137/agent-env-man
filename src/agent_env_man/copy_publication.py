@@ -11,7 +11,7 @@ import uuid
 
 from .model import Error, Item, overlaps, relative
 from .payload_links import options as payload_options, scan, replace as replace_link_entry, chmod_directory, remove as remove_link_entry
-from .payload_policy import excluded, child_options, saved as saved_policy, retention, park, restore_retained, validate_retention
+from .payload_policy import excluded, child_options, saved as saved_policy, preservation_paths, retention, park, restore_retained, validate_retention
 from .storage import atomic_write, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path
 
 
@@ -80,6 +80,8 @@ def plan(manager, names):
             baseline = record['hash']
             conflict = source_hash != baseline and copy_hash != baseline and source_hash != copy_hash
             changed = copy_hash != baseline and copy_hash != source_hash
+            if changed and not conflict:
+                preservation_paths(item.source, item.target, payload_options(item))
             left = tree(item.source, exclude_git=record.get('exclude_git', False), **payload_options(item))
             right = tree(item.target, exclude_git=record.get('exclude_git', False), **payload_options(item))
             compare = ['git', 'difftool', '--no-index', '--', str(item.source), str(item.target)]

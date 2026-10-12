@@ -114,14 +114,19 @@ def checked_parent(root, relative):
     return path
 
 
-def retention(root, stage, policy):
+def preservation_paths(root, incoming, policy):
+    """Validate excluded ancestors against the incoming tree, including previews."""
     paths = retained_paths(root, policy) if policy.get('exclusions') else []
+    for rel in paths:
+        checked_parent(incoming, rel)
+    return paths
+
+
+def retention(root, stage, policy):
+    paths = preservation_paths(root, stage, policy)
     if not paths:
         return None
-    if stage.is_symlink() or not stage.is_dir():
-        raise Error('Cannot replace a directory containing excluded entries with a link or file')
     for rel in paths:
-        checked_parent(stage, rel)
         if os.path.lexists(stage / rel):
             raise Error(f'Excluded staging path unexpectedly exists: {rel}')
     vault = root.with_name('.aem-retained-' + uuid.uuid4().hex)
@@ -151,6 +156,11 @@ def validate_retention(root, value, policy):
 
 def park(root, value, policy):
     """Move unowned entries into same-filesystem storage, retaining their identity."""
+    # Included-content hashes deliberately ignore metadata. A new excluded entry
+    # since preflight must therefore stop replacement even if no vault was planned.
+    planned = value['paths'] if value else []
+    if policy.get('exclusions') and set(retained_paths(root, policy)) - set(planned):
+        raise Error('Excluded entries changed before replacement; retry after inspection')
     if not value:
         return
     vault, paths = validate_retention(root, value, policy)
@@ -166,6 +176,8 @@ def park(root, value, policy):
             raise Error(f'Excluded entry disappeared before preservation: {rel}')
         from .payload_links import replace
         (replace if policy.get('preserve_symlinks') else os.replace)(root / rel, slot)
+    if retained_paths(root, policy):
+        raise Error('Excluded entries changed during preservation; retry after inspection')
 
 
 def restore_retained(root, value, policy):

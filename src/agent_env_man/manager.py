@@ -13,7 +13,7 @@ from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
 from .payload_links import require_supported, unsupported_reason, options as payload_options, replace as replace_link_entry, remove as remove_link_entry
-from .payload_policy import saved as saved_policy, retention, park, restore_retained
+from .payload_policy import saved as saved_policy, preservation_paths, retention, park, restore_retained
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path, link_matches
 
 
@@ -631,6 +631,8 @@ class Manager:
                 safe = not present or (adopt and desired)
             if not safe and not replace:
                 raise Error(f"{item.key}: existing or locally modified copy; use explicit --adopt or --replace")
+            if not desired:
+                preservation_paths(item.target, item.source, payload_options(item))
             return Plan(item, before, record, not desired)
         raise Error(f"Unsupported installation mode: {item.mode}")
 
@@ -819,9 +821,9 @@ class Manager:
                 allowed = (before, after) if official_removal else (after, {'kind': 'missing'})
             if observation(backup, **policy) != before or current not in allowed:
                 raise Error("Recovery stopped: target or backup changed; preserve both and resolve manually")
-            park(target, retained, policy)
             if isolated_skill:
                 if current != before:
+                    park(target, retained, policy)
                     # Restore through a target-local stage, retaining the backup
                     # so another interruption remains recoverable across devices.
                     restore = target.with_name('.aem-restore-' + uuid.uuid4().hex)
@@ -842,6 +844,7 @@ class Manager:
                 if current != before:
                     target.symlink_to(os.readlink(backup), target_is_directory=True)
             else:
+                park(target, retained, policy)
                 if exists(target):
                     (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)
                 (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(backup, target)

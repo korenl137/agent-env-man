@@ -61,6 +61,16 @@ Verify both a direct wheel and a wheel rebuilt from the sdist as required by the
 
 ## Coverage measurement
 
+For a mounted POSIX filesystem, verify exclusions using disposable source and target directories on that filesystem:
+
+```bash
+PYTHONPATH=src python scripts/verify_payload_mount.py --root /path/to/mount
+```
+
+The verifier removes only its own temporary test directory and keeps machine state in a separate local temporary directory.
+It checks copy installation, excluded metadata preservation, status, reverse collection, preservation refusals in previews, and detach through fresh CLI processes.
+Record the actual filesystem and mount used; a successful check on a mount's parent directory does not establish remote-filesystem behavior.
+
 Run coverage separately from ordinary tests, from the repository root in the activated development environment.
 The configuration measures statements and branches in `src/` and `scripts/`, including the build hook and standalone installer.
 Python subprocesses are also measured; combine their data before generating reports.

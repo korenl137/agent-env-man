@@ -106,6 +106,8 @@ Excluded entries already in an installed copy remain local and are preserved dur
 Reverse collection preserves the source's excluded entries and does not collect the copy's excluded entries.
 AEM moves these entries opaquely through temporary storage beside the directory being replaced, without reading their contents or following links.
 If an included ancestor would disappear or become a file or link, the operation stops rather than deleting or relocating the excluded entry.
+Apply and reverse collection previews check this boundary before reporting a planned replacement.
+If new excluded entries appear after preservation preflight, replacement stops so they remain available for inspection and retry.
 `--replace` does not override that preservation boundary.
 
 Ownership and recovery records retain the effective exclusion policy, so detach and recovery remain usable without the current catalog or source.

@@ -225,7 +225,7 @@ class PayloadExclusions(unittest.TestCase):
         self.prepare()
         shutil.rmtree(self.target / 'nested')
         report = self.run_cli('publish', 'cases', '--from-copy', code=1)
-        self.assertIn('Cannot replace a directory containing excluded entries', report[0]['error'])
+        self.assertIn('Cannot preserve excluded entry', report[0]['error'])
         self.assertEqual((self.source / 'nested/doc.md').read_text(), 'original')
         self.assertEqual((self.source / 'nested/._DAV/metadata').read_text(), 'source metadata')
         self.assertIsNone(self.manager().state.data['pending'])
