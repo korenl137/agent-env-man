@@ -43,8 +43,8 @@ The incoming-revision guard protects active link source paths, even if the lates
 Allow Git-ignored runtime files in checkouts while continuing to reject tracked changes and nonignored untracked files.
 All content and catalog fast-forwards must refuse to overwrite ignored local files when mutating the Git checkout.
 Never delete caches or weaken local-file preservation to make an update succeed.
-Ignored regular files and directories remain part of directory payloads for hashing, copying, and detach.
-Check the entire installed-copy tree for local modifications, and reject nested links unless the general directory explicitly enables POSIX `preserve_symlinks`.
+Git-ignored regular files and directories remain part of directory payloads for hashing, copying, and detach unless explicitly excluded by catalog payload policy.
+Check the included installed-copy tree for local modifications, and reject included nested links unless the general directory explicitly enables POSIX `preserve_symlinks`.
 Special files remain unsupported.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.
 Apply relative-link policy at the logical location in the source root, including during temporary staging, backup, detach, and reverse collection.
@@ -216,7 +216,7 @@ Ordinary publication never collects installed-copy edits.
 Explicit `--from-copy` requires owned, non-detached skill, directory, or instruction bundle copies for every selected name and collects only their payloads; Git publication still selects whole checkouts.
 Use the existing ownership hash as the last common baseline, updating it after successful collection or agreement; source observation/update alone never advances it.
 Source-only changes leave stale copies untouched; competing source/copy changes or differing overlapping exports stop the group before writing.
-Root collection excludes only top-level `.git`, retaining ignored regular payloads and executable bits without copying Git administration.
+Root collection automatically excludes top-level `.git` and honors catalog payload exclusions, retaining other Git-ignored regular payloads and executable bits without copying Git administration.
 Before source mutation, project collected copies onto affected saved active link sources and preserve their file/directory kinds and required skill/instruction entries, including orphaned ownership.
 Apply the same checks to previews and recheck before committing source writes; detached links impose no requirements, and content wording remains outside AEM's validation.
 Journal source replacements before mutation, retain backups outside the source root, and validate all recovery observations before restoring; never claim tree-wide visibility atomicity to external readers.
@@ -284,7 +284,7 @@ Stop later stages on failure without claiming cross-repository rollback; preserv
 - Reject overlapping target trees and require detach before changing an existing item's path or mode.
 - A directory item owns its entire subtree, so extra local files are meaningful modifications.
 - Repository-root skills are valid and use direct links, not an extra content layer.
-  Exclude only their top-level `.git` administration entry from content fingerprints, copies, and detach materialization.
+  Automatically exclude their top-level `.git` administration entry from content fingerprints, copies, and detach materialization; honor explicit catalog exclusions at every depth.
 - Never duplicate a repository database or worktree pointer into an unmanaged skill.
 
 Git identity checks still validate the managed checkout's origin and expected branch before applying or updating.
@@ -294,6 +294,22 @@ Omitted directory installation roots normalize to `home`; bootstrap records the 
 Their single ownership key is `NAME:directory`; agent filters include them as common items.
 Directory policies reuse skill policy composition and clocks, supporting local external checks/sync without Git transport.
 Active directory link guards include orphaned consumers of shared checkouts.
+
+### Payload exclusion preservation
+
+Combine catalog-wide and item-root patterns with source-root patterns, retaining their logical anchors through subtree staging and recovery.
+Do not follow, open, or recurse into excluded entries during inspection.
+With exclusions enabled, POSIX directory scans guard inode, mode, and the included child name set rather than timestamps changed by excluded children; included file race checks remain intact.
+Required descriptors and skill/instruction entries cannot be excluded.
+
+Excluded existing destination entries are unowned and must survive apply and reverse collection.
+Preflight their relative locations against the incoming tree, then journal opaque same-filesystem moves through a target-adjacent retention directory before replacing included contents.
+Rollback restores both included contents and retained entries, including after interrupted moves or failed state commits.
+Never delete a retention directory containing entries to resolve an error.
+Refuse missing or redirected incoming ancestors and ambiguous duplicate recovery locations.
+Save exclusion rules and subtree prefixes with each affected ownership and recovery record; absent rules preserve existing hashing and copy behavior.
+A policy change requires apply before collection, and collections with nested or differently filtered overlapping excluded boundaries require separate selections.
+Exclusion policies do not filter repository-wide Git commits.
 
 ### Replacement transactions
 

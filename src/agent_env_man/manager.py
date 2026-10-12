@@ -13,6 +13,7 @@ from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
 from .payload_links import require_supported, unsupported_reason, options as payload_options, replace as replace_link_entry, remove as remove_link_entry
+from .payload_policy import saved as saved_policy, preservation_paths, retention, park, restore_retained
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path, link_matches
 
 
@@ -116,7 +117,7 @@ class Manager:
                         if defer_payloads and not created:
                             continue
                         try:
-                            git.skill_descriptor(replace(prepared, name=skill_name), item.relative)
+                            git.skill_descriptor(replace(prepared, name=skill_name), item.relative, exclusions=item.exclusions)
                         except Error as exc:
                             if created:
                                 raise
@@ -125,7 +126,7 @@ class Manager:
                     elif item.kind == "directory":
                         if defer_payloads and not created:
                             continue
-                        git.directory_descriptor(prepared, item.relative, preserve_symlinks=item.preserve_symlinks)
+                        git.directory_descriptor(prepared, item.relative, preserve_symlinks=item.preserve_symlinks, exclusions=item.exclusions)
                     elif item.kind == "setting":
                         if defer_payloads and not created:
                             continue
@@ -143,7 +144,7 @@ class Manager:
                             git.tracked_payload(prepared, member_item.relative)
                             source_script(local_path, member_item.relative)
                     else:
-                        git.instruction_descriptor(prepared, item.relative, item.entry)
+                        git.instruction_descriptor(prepared, item.relative, item.entry, exclusions=item.exclusions)
                     payload = local_path / item.relative
                     if item.kind == "skill" and not (payload / "SKILL.md").is_file():
                         raise Error(f"{skill_name}: skill path must contain SKILL.md")
@@ -591,6 +592,7 @@ class Manager:
                   "directory": item.source.is_dir(), "detached": False, "kind": item.kind,
                   "exclude_git": item.kind in ("skill", "directory", "instruction", "instruction-hook") and item.relative == ".",
                   "entry": item.entry, "agent": item.agent, "agents": list(item.agents or (item.agent,))}
+        record.update(saved_policy(payload_options(item)))
         if item.link_target is not None:
             record["link_target"] = str(item.link_target)
         if item.kind == "directory":
@@ -624,11 +626,13 @@ class Manager:
             regular = before["kind"] in ("file", "directory")
             desired = regular and before["hash"] == payload_hash
             if old:
-                safe = not present or (regular and before["hash"] in (old["hash"], payload_hash))
+                safe = not present or (regular and (before["hash"] == payload_hash or observation(item.target, **payload_options(old)).get("hash") == old["hash"]))
             else:
                 safe = not present or (adopt and desired)
             if not safe and not replace:
                 raise Error(f"{item.key}: existing or locally modified copy; use explicit --adopt or --replace")
+            if not desired:
+                preservation_paths(item.target, item.source, payload_options(item))
             return Plan(item, before, record, not desired)
         raise Error(f"Unsupported installation mode: {item.mode}")
 
@@ -706,27 +710,30 @@ class Manager:
                 if signature(item.source) != plan.record['official_hash']:
                     raise Error(f'{item.key}: official skill source changed during staging')
             after = observation(stage, **policy)
+            retained = retention(item.target, stage, policy) if not plan.delete else None
             if isolated_skill and exists(item.target):
                 # Copy before journaling/removal so cross-filesystem backups are
                 # complete and verified while the original is still usable.
                 if item.target.is_symlink():
                     backup.symlink_to(os.readlink(item.target), target_is_directory=True)
                 else:
-                    copy_payload(item.target, backup)
+                    copy_payload(item.target, backup, **policy)
                 if observation(backup, **policy) != plan.before or observation(item.target, **policy) != plan.before:
                     raise Error(f'{item.key}: target changed during backup')
             # Persist recovery paths before moving the old target. No journal is
             # needed for pure ownership adoption, which only writes state once.
             self.state.data["pending"] = {"key": item.key, "target": str(item.target), "stage": str(stage),
                                           "backup": str(backup), "before": plan.before, "after": after}
-            if policy:
-                self.state.data["pending"].update(preserve_symlinks=True, relative=plan.record["relative"])
+            self.state.data["pending"].update(saved_policy(policy))
+            if retained:
+                self.state.data["pending"]["retained"] = retained
             if isolated_skill:
                 self.state.data["pending"]["operation"] = "skill-replacement"
             self.state.save()
+            park(item.target, retained, policy)
             if exists(item.target):
                 if isolated_skill:
-                    (remove_link_entry if policy else remove)(item.target)
+                    (remove_link_entry if policy.get("preserve_symlinks") else remove)(item.target)
                 elif plan.delete:
                     # Copy link identity, not its payload: state and skills may
                     # live on different filesystems, where rename cannot work.
@@ -735,9 +742,10 @@ class Manager:
                         raise Error(f'{item.key}: link changed during removal')
                     item.target.unlink()
                 else:
-                    (replace_link_entry if policy else os.replace)(item.target, backup)
+                    (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(item.target, backup)
             if not plan.delete:
-                (replace_link_entry if policy else os.replace)(stage, item.target)
+                (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(stage, item.target)
+            restore_retained(item.target, retained, policy)
             if observation(item.target, **policy) != after:
                 raise Error(f"{item.key}: installed target changed before commit")
             old_records = dict(self.state.data["items"])
@@ -756,7 +764,7 @@ class Manager:
             raise
         finally:
             if exists(stage) and not self.state.data.get("pending"):
-                (remove_link_entry if policy else remove)(stage)
+                (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
 
     def recover(self):
         pending = self.state.data.get("pending")
@@ -802,6 +810,10 @@ class Manager:
         before, after = pending["before"], pending["after"]
         if exists(stage) and observation(stage, **policy) != after:
             raise Error("Recovery stopped: staged content changed")
+        retained = pending.get("retained")
+        if retained:
+            from .payload_policy import validate_retention
+            validate_retention(target, retained, policy)
         if exists(backup):
             if isolated_skill:
                 allowed = (before, after, {'kind': 'missing'})
@@ -811,6 +823,7 @@ class Manager:
                 raise Error("Recovery stopped: target or backup changed; preserve both and resolve manually")
             if isolated_skill:
                 if current != before:
+                    park(target, retained, policy)
                     # Restore through a target-local stage, retaining the backup
                     # so another interruption remains recoverable across devices.
                     restore = target.with_name('.aem-restore-' + uuid.uuid4().hex)
@@ -818,32 +831,34 @@ class Manager:
                         if backup.is_symlink():
                             restore.symlink_to(os.readlink(backup), target_is_directory=True)
                         else:
-                            copy_payload(backup, restore)
+                            copy_payload(backup, restore, **policy)
                         if observation(restore, **policy) != before or observation(target, **policy) != current:
                             raise Error('Recovery stopped: contents changed during restoration')
                         if exists(target):
-                            (remove_link_entry if policy else remove)(target)
-                        (replace_link_entry if policy else os.replace)(restore, target)
+                            (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)
+                        (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(restore, target)
                     finally:
                         if exists(restore):
-                            (remove_link_entry if policy else remove)(restore)
+                            (remove_link_entry if policy.get("preserve_symlinks") else remove)(restore)
             elif official_removal:
                 if current != before:
                     target.symlink_to(os.readlink(backup), target_is_directory=True)
             else:
+                park(target, retained, policy)
                 if exists(target):
-                    (remove_link_entry if policy else remove)(target)
-                (replace_link_entry if policy else os.replace)(backup, target)
+                    (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)
+                (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(backup, target)
         elif current == before:
             pass  # Crash before the first rename, or recovery already restored it.
         elif before == {"kind": "missing"} and current == after:
-            (remove_link_entry if policy else remove)(target)
+            (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)
         else:
             raise Error("Recovery stopped: cannot safely restore the recorded target")
+        restore_retained(target, retained, policy)
         if exists(stage):
             if observation(stage, **policy) != after:
                 raise Error("Recovery stopped: staged content changed")
-            (remove_link_entry if policy else remove)(stage)
+            (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
         self.state.data["pending"] = None
         self.state.save()
 
@@ -869,11 +884,11 @@ class Manager:
                 revisions[name] = git.run(source.path, "rev-parse", "HEAD").stdout
                 for item in [i for i in items if i.source_name == name]:
                     if item.kind == "skill":
-                        git.skill_descriptor(source, item.relative)
+                        git.skill_descriptor(source, item.relative, exclusions=item.exclusions)
                     elif item.kind == "directory":
-                        git.directory_descriptor(source, item.relative, preserve_symlinks=item.preserve_symlinks)
+                        git.directory_descriptor(source, item.relative, preserve_symlinks=item.preserve_symlinks, exclusions=item.exclusions)
                     elif item.kind in ("instruction", "instruction-hook"):
-                        git.instruction_descriptor(source, item.relative, item.entry)
+                        git.instruction_descriptor(source, item.relative, item.entry, exclusions=item.exclusions)
                     else:
                         git.tracked_payload(source, item.relative)
         def explicit(item):
@@ -1196,9 +1211,9 @@ class Manager:
         """Do not drop an installed link policy while either payload still needs it."""
         old = self.state.data['items'].get(item.key, {})
         if old.get('preserve_symlinks') and not item.preserve_symlinks and not old.get('detached'):
-            fingerprint(item.source, exclude_git=item.relative == '.')
+            fingerprint(item.source, exclude_git=item.relative == '.', exclusions=item.exclusions)
             if old.get('mode') == 'copy' and exists(item.target):
-                fingerprint(item.target)
+                fingerprint(item.target, exclusions=item.exclusions)
 
     def validate_consumers_revision(self, git, source, revision, members):
         """Validate declared consumers before advancing their shared checkout."""
@@ -1216,10 +1231,10 @@ class Manager:
             # Explicit named-source updates may have no declared consumers.
             if name in self.config.catalog():
                 for item in self.config.declarations(member):
-                    git.skill_descriptor(replace(source, name=name), item.relative, revision)
+                    git.skill_descriptor(replace(source, name=name), item.relative, revision, exclusions=item.exclusions)
             if name in self.config._directories:
                 for item in self.config.declarations(member):
-                    git.directory_descriptor(source, item.relative, revision, preserve_symlinks=item.preserve_symlinks)
+                    git.directory_descriptor(source, item.relative, revision, preserve_symlinks=item.preserve_symlinks, exclusions=item.exclusions)
                     self.check_directory_policy(item)
             if name not in self.config._settings:
                 continue
@@ -1243,6 +1258,8 @@ class Manager:
         if old is None:
             return "unmanaged-existing" if current["kind"] != "missing" else "not-installed", None
         if old["target"] != str(item.target) or old["mode"] != item.mode or old["source"] != str(item.source) or old.get("link_target", old["source"]) != str(item.link_destination):
+            return "configuration-changed", None
+        if old.get("exclusions", []) != saved_policy(payload_options(item)).get("exclusions", []):
             return "configuration-changed", None
         if current["kind"] == "missing":
             return "missing", None

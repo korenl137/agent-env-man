@@ -59,6 +59,18 @@ The verifier rejects editable installations and environments containing developm
 It also exercises TOML and JSON settings reception, stage editing, application, export, local Git publication, conflict preservation, and detach through the installed CLI.
 Verify both a direct wheel and a wheel rebuilt from the sdist as required by the installed-documentation contract in [Documentation authoring](documentation-authoring.md#installed-documentation).
 
+## Mounted filesystem checks
+
+For a mounted POSIX filesystem, verify exclusions using disposable source and target directories on that filesystem:
+
+```bash
+PYTHONPATH=src python scripts/verify_payload_mount.py --root /path/to/mount
+```
+
+The verifier removes only its own temporary test directory and keeps machine state in a separate local temporary directory.
+It checks copy installation, excluded metadata preservation, status, reverse collection, preservation refusals in previews, and detach through fresh CLI processes.
+Record the actual filesystem and mount used; a successful check on a mount's parent directory does not establish remote-filesystem behavior.
+
 ## Coverage measurement
 
 Run coverage separately from ordinary tests, from the repository root in the activated development environment.

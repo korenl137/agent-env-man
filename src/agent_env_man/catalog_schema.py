@@ -9,9 +9,9 @@ from .model import Config, Error, identifier
 from .updates import TRIGGERS, policy_fields
 
 
-TOP_LEVEL = {"version", "sources", "skills", "directories", "instructions", "settings", "hooks", "updates"}
-SKILL_FIELDS = {"source", "subdir", "install", "update"}
-INSTRUCTION_FIELDS = {"source", "subdir", "entry", "install"}
+TOP_LEVEL = {"version", "sources", "skills", "directories", "instructions", "settings", "hooks", "updates", "payload"}
+SKILL_FIELDS = {"source", "subdir", "install", "update", "exclude"}
+INSTRUCTION_FIELDS = {"source", "subdir", "entry", "install", "exclude"}
 
 
 def table(value, allowed, location):
@@ -48,6 +48,10 @@ def validate(document):
                     "see docs/removed-interfaces.md. Detach direct-declaration or relocated installations "
                     "before reconfiguring; existing checkouts and saved state are preserved.")
     table(document, TOP_LEVEL, "Catalog")
+    from .payload_policy import patterns, effective, excluded, match
+    payload = table(document.get("payload", {}), {"defaults"}, "payload")
+    defaults = table(payload.get("defaults", {}), {"exclude"}, "payload.defaults")
+    patterns(defaults.get("exclude", []), "payload.defaults.exclude")
     sources = document.get("sources", {})
     if not isinstance(sources, dict):
         raise Error("Catalog sources must be a TOML table")
@@ -55,11 +59,12 @@ def validate(document):
         identifier(name)
         if not isinstance(data, dict) or data.get("type") not in ("git", "external"):
             raise Error(f"Source {name}: type must be git or external")
+        patterns(data.get("exclude", []), f"sources.{name}.exclude")
         if data["type"] == "git":
-            table(data, {"type", "repository", "branch"}, f"Source {name}")
+            table(data, {"type", "repository", "branch", "exclude"}, f"Source {name}")
             Config._validate_repository(data, f"Source {name}")
         else:
-            table(data, {"type"}, f"Source {name}")
+            table(data, {"type", "exclude"}, f"Source {name}")
     for kind in ("skills", "directories", "instructions"):
         entries = document.get(kind, {})
         if not isinstance(entries, dict):
@@ -67,6 +72,7 @@ def validate(document):
         for name, data in entries.items():
             identifier(name)
             table(data, INSTRUCTION_FIELDS if kind == "instructions" else SKILL_FIELDS | ({"preserve_symlinks"} if kind == "directories" else set()), f"{kind}.{name}")
+            patterns(data.get("exclude", []), f"{kind}.{name}.exclude")
             if kind == "directories":
                 enabled = data.get("preserve_symlinks", False)
                 if not isinstance(enabled, bool):
@@ -74,6 +80,18 @@ def validate(document):
             source = data.get("source")
             if not isinstance(source, str) or source not in sources:
                 raise Error(f"{kind}.{name}: source must name a declared source")
+            policy = effective(defaults.get('exclude', []), sources[source].get('exclude', []),
+                               data.get('exclude', []), data.get('subdir', '.'))
+            required = 'SKILL.md' if kind == 'skills' else data.get('entry') if kind == 'instructions' else None
+            if kind == 'instructions':
+                from .model import relative
+                relative(required)
+            subdir = data.get('subdir', '.')
+            if subdir != '.' and any(match('/'.join(subdir.split('/')[:i]), p)
+                for p in sources[source].get('exclude', []) for i in range(1, len(subdir.split('/')) + 1)):
+                raise Error(f'{kind}.{name}: source exclusion hides the declared payload')
+            if required and excluded(required, policy):
+                raise Error(f'{kind}.{name}: exclusion hides required entry {required}')
             install = data.get("install", {})
             if kind in ("skills", "directories"):
                 if kind == "skills" and sources[source]["type"] != "git":
@@ -137,6 +155,8 @@ def normalize(document):
     """
     validate(document)
     sources = document.get("sources", {})
+    from .payload_policy import effective
+    defaults = document.get("payload", {}).get("defaults", {}).get("exclude", [])
     result = {"repositories": {name: dict(data) for name, data in sources.items() if data["type"] == "git"},
               "externals": {name: {} for name, data in sources.items() if data["type"] == "external"}}
     for kind in ("skills", "directories", "instructions"):
@@ -145,6 +165,9 @@ def normalize(document):
             source = data["source"]
             field = "repo" if sources[source]["type"] == "git" else "external"
             entry = {field: source, **{k: data[k] for k in ("subdir", "entry") if k in data}}
+            exclusions = effective(defaults, sources[source].get('exclude', []), data.get('exclude', []), data.get('subdir', '.'))
+            if exclusions:
+                entry['exclusions'] = exclusions
             install = data.get("install", {})
             if kind in ("skills", "directories"):
                 entry.update(install)

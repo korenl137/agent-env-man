@@ -37,16 +37,17 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600):
             os.unlink(temporary)
 
 
-def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".") -> str:
+def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".", exclusions=(), exclude_prefix="") -> str:
     """Hash regular payloads, including empty directories and executable bits.
 
     The default rejects nested links and special files. Opted-in POSIX directory
     links retain opaque identity under a separately supplied logical location;
     ordinary node hashes remain compatible with existing ownership.
     """
+    from .payload_policy import excluded
     if preserve_symlinks:
         from .payload_links import scan
-        return scan(path, source_relative=source_relative, exclude_git=exclude_git)[0]
+        return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix)[0]
     digest = hashlib.sha256()
 
     def visit(current, relative):
@@ -62,7 +63,8 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
             for child in sorted(current.iterdir(), key=lambda p: p.name):
                 if exclude_git and not relative and child.name == ".git":
                     continue
-                visit(child, f"{relative}/{child.name}")
+                if not excluded(f"{relative}/{child.name}", exclusions, exclude_prefix):
+                    visit(child, f"{relative}/{child.name}")
         else:
             file_hash = hashlib.sha256()
             with current.open("rb") as stream:
@@ -92,12 +94,16 @@ def copy_payload(source: Path, destination: Path, *, exclude_git: bool = False, 
         from .payload_links import scan
         scan(source, destination=destination, exclude_git=exclude_git, **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
         return
-    fingerprint(source, exclude_git=exclude_git)
+    from .payload_policy import excluded
+    fingerprint(source, exclude_git=exclude_git, **policy)
     if source.is_dir():
         # A repository-root skill can be installed directly, but detaching or
         # copying it must not clone Git administration data or a worktree link.
         def ignored(directory, names):
-            return {".git"} if exclude_git and Path(directory) == source else set()
+            prefix = Path(directory).relative_to(source).as_posix()
+            prefix = '' if prefix == '.' else prefix
+            return {name for name in names if (exclude_git and not prefix and name == '.git')
+                    or excluded('/'.join(p for p in (prefix, name) if p), policy.get('exclusions', ()), policy.get('exclude_prefix', ''))}
         shutil.copytree(source, destination, symlinks=True, ignore=ignored)
     else:
         shutil.copy2(source, destination)
