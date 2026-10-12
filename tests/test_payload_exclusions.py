@@ -414,3 +414,23 @@ class PayloadExclusions(unittest.TestCase):
         self.assertIn('Cannot preserve excluded entry', report[0]['error'])
         self.assertEqual((self.source / 'nested/._DAV/metadata').read_text(), 'source metadata')
         self.assertIsNone(self.manager().state.data['pending'])
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX descriptor metadata')
+    def test_copy_closes_write_handle_before_metadata_updates(self):
+        import fcntl
+        self.prepare(links=True)
+        (self.source / 'nested/doc.md').write_text('updated')
+        real_chmod = payload_links.os.fchmod
+        affected = False
+        def chmod(fd, mode):
+            nonlocal affected
+            # Model the mounted davfs behavior: metadata updates on an open
+            # write handle reset a newly copied file to its stale zero size.
+            if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY:
+                affected = True
+                os.ftruncate(fd, 0)
+            real_chmod(fd, mode)
+        with patch.object(payload_links.os, 'fchmod', side_effect=chmod):
+            self.run_cli('apply', '--item', 'cases')
+        self.assertFalse(affected)
+        self.assertEqual((self.target / 'nested/doc.md').read_text(), 'updated')
