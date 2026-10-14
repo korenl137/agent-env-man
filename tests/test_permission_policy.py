@@ -7,7 +7,8 @@ import subprocess
 import sys
 import os
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from agent_env_man.catalog_schema import normalize
 from agent_env_man.model import Error
@@ -36,7 +37,12 @@ class PermissionPolicy(unittest.TestCase):
             (self.external_root / 'first.md').chmod(0o755)
 
     def setter(self, function):
-        return patch.object(permissions.os, 'fchmod' if os.name != 'nt' else 'chmod', side_effect=function)
+        if os.name == 'nt':
+            # Payload denial must not also deny chmod for journals and state files.
+            native = SimpleNamespace(**vars(os))
+            native.chmod = Mock(side_effect=function)
+            return patch.object(permissions, 'os', native)
+        return patch.object(permissions.os, 'fchmod', side_effect=function)
 
     def test_hierarchy_and_invalid_values(self):
         self.document['payload'] = {'defaults': {'permissions': 'best-effort'}}
