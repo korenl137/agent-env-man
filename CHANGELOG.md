@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Hierarchical catalog permission preservation levels for payloads, with existing strict behavior by default and opt-in best-effort copying.
+Best-effort reports native mode differences, separately protects content and later permission edits, and shares saved policy across status, detach, reverse collection, and recovery.
+
 ### Fixed
 
 - Copy installation and link detach distinguish a changed source from a staged copy mismatch, with destination content and executable-permission guidance for mismatches.

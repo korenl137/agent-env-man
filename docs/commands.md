@@ -9,6 +9,24 @@ Command-specific options follow their command, for example `aem --json catalog p
 Options require their full spelling; abbreviated long options are rejected.
 Every command accepts `-h` or `--help`.
 
+## Permission preservation reports
+
+Catalog [permission levels](configuration.md#permission-preservation) apply to payload copying in `apply`, link materialization in `detach`, and explicit `publish --from-copy` collection.
+For best-effort payloads, apply and detach results include `permissions = "best-effort"` and `permission_differences`.
+Each difference identifies the payload-relative `path` (`.` for the root), integer native mode `requested`, observed `actual`, and an optional permission-setter `error`.
+Modes are POSIX permission bits or the Windows writable flag; these fields do not describe ACLs or effective access rights.
+An empty array means no observed native mode difference or setter failure, not complete metadata preservation.
+
+`apply --dry-run` and link `detach --dry-run` report `permission_check = "pending-copy"` when copying would be needed; it does not probe or promise permission support.
+After installation, `status` exposes differences recorded by the last apply or successful collection, including in saved-state fallback when the catalog is unavailable.
+Content can be `current` despite reported permission differences; later user changes to native permissions are still `modified-locally` or `conflict`.
+An unchanged apply retains previous setter failures alongside observed differences.
+
+Collection reports include `permission_differences` for completed best-effort staging when preservation was incomplete.
+Status retains these as `collection_permission_differences`, describing the source destination; ordinary `permission_differences` describe source versus installed-copy modes.
+Preview cannot determine setter failures because it does not stage or write payloads.
+Best-effort differences alone do not change a successful command's exit code; content verification, races, ownership conflicts, recovery failures, and ordinary I/O errors remain fatal.
+
 ## Output formats
 
 Ordinary commands print concise summaries by default, including when stdout is redirected.

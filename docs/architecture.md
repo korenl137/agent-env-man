@@ -311,6 +311,19 @@ Save exclusion rules and subtree prefixes with each affected ownership and recov
 A policy change requires apply before collection, and collections with nested or differently filtered overlapping excluded boundaries require separate selections.
 Exclusion policies do not filter repository-wide Git commits.
 
+### Permission preservation policy
+
+Resolve the scalar permission level from item, source, catalog defaults, then strict; keep the existing strict hashing and copy path compatible.
+Best-effort content equality excludes native permission modes, but transaction observations independently include their digest.
+Record source observations and actual installed observations so inability to reproduce source modes never becomes an endless content conflict, while later local mode edits remain protected.
+Permission snapshots use non-following descriptors on POSIX, preserve opaque link identity, and honor exclusion boundaries without rereading file contents.
+Only unsupported or denied permission setters are optional; timestamps, content writes, race guards, and structural validation retain their failure boundaries.
+
+Save permission policy with ownership and journals, interpreting absent fields as strict.
+Use the previous ownership policy to validate targets during transitions; changing policy never adopts an unrelated local edit.
+Best-effort reverse collection preserves existing source modes where possible and never exports permission-only edits or installation-induced differences.
+Journal actual staged observations rather than assuming source and destination modes agree; recovery refuses later permission changes just as it refuses later content edits.
+
 ### Replacement transactions
 
 Link and copy have different contracts.
