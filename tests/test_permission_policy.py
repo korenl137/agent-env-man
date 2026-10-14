@@ -2,6 +2,7 @@
 
 import errno
 import json
+import shutil
 import subprocess
 import sys
 import os
@@ -231,6 +232,98 @@ class PermissionPolicy(unittest.TestCase):
         self.run_cli('recover')
         self.assertEqual((self.external_root / 'first.md').read_text(), 'External case\n')
         self.assertEqual((self.target / 'first.md').read_text(), 'collected')
+
+    def check_link_retarget_collection(self, *, nested):
+        self.require_links(); self.prepare(links=True)
+        (self.external_root / 'second.md').write_text('Second case\n', encoding='utf-8')
+        relative = 'links/alias' if nested else 'alias'
+        source_link = self.external_root / relative
+        source_link.parent.mkdir(parents=True, exist_ok=True)
+        prefix = '../' if nested else ''
+        source_link.symlink_to(prefix + 'first.md')
+        self.run_cli('apply', '--item', 'cases')
+        copy_link = self.target / relative
+        copy_link.unlink(); copy_link.symlink_to(prefix + 'second.md')
+        preview = self.run_cli('publish', 'cases', '--from-copy', '--dry-run')[0]['collection'][0]
+        self.assertTrue(preview['changed'])
+        self.assertIn(relative, preview['changes'])
+        self.run_cli('publish', 'cases', '--from-copy')
+        self.assertEqual(os.readlink(source_link), prefix + 'second.md')
+        self.assertEqual(self.run_cli('status')['items'][0]['status'], 'current')
+        self.assertIsNone(self.manager().state.data['pending'])
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX opaque links')
+    def test_collection_retargets_top_level_link(self):
+        self.check_link_retarget_collection(nested=False)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX opaque links')
+    def test_collection_retargets_nested_link(self):
+        self.check_link_retarget_collection(nested=True)
+
+    def check_type_replacement_collection(self, *, nested, incoming_directory):
+        self.prepare()
+        relative = 'outer/entry' if nested else 'entry'
+        source_entry = self.external_root / relative
+        source_entry.parent.mkdir(parents=True, exist_ok=True)
+        if nested:
+            source_entry.parent.chmod(0o755)
+        if incoming_directory:
+            source_entry.write_text('Old file\n', encoding='utf-8')
+            source_entry.chmod(0o644)
+        else:
+            source_entry.mkdir(); source_entry.chmod(0o711)
+            (source_entry / 'old.txt').write_text('Old directory\n', encoding='utf-8')
+        self.run_cli('apply', '--item', 'cases')
+        copy_entry = self.target / relative
+        if incoming_directory:
+            copy_entry.unlink(); copy_entry.mkdir()
+            (copy_entry / 'new.txt').write_text('New directory\n', encoding='utf-8')
+            (copy_entry / 'new.txt').chmod(0o640)
+            copy_entry.chmod(0o750)
+        else:
+            shutil.rmtree(copy_entry)
+            copy_entry.write_text('New file\n', encoding='utf-8')
+            copy_entry.chmod(0o640)
+        if nested:
+            copy_entry.parent.chmod(0o700)
+
+        def make_stages_accessible():
+            # A failed regression can leave a directory with a file's 0644 mode.
+            # Restore traversal only in disposable staging trees for fixture cleanup.
+            for scratch in self.root.glob('.aem-collection-*'):
+                for directory, _, _ in os.walk(scratch):
+                    os.chmod(directory, os.stat(directory).st_mode | 0o700)
+        self.addCleanup(make_stages_accessible)
+
+        self.run_cli('publish', 'cases', '--from-copy')
+        if incoming_directory:
+            self.assertTrue(source_entry.is_dir())
+            self.assertEqual((source_entry / 'new.txt').read_text(encoding='utf-8'), 'New directory\n')
+            if os.name != 'nt':
+                self.assertEqual(source_entry.stat().st_mode & 0o777, 0o750)
+                self.assertEqual((source_entry / 'new.txt').stat().st_mode & 0o777, 0o640)
+        else:
+            self.assertTrue(source_entry.is_file())
+            self.assertEqual(source_entry.read_text(encoding='utf-8'), 'New file\n')
+            if os.name != 'nt':
+                self.assertEqual(source_entry.stat().st_mode & 0o777, 0o640)
+        if nested and os.name != 'nt':
+            self.assertEqual(source_entry.parent.stat().st_mode & 0o777, 0o755)
+        self.assertEqual((self.external_root / 'first.md').read_text(encoding='utf-8'), 'External case\n')
+        self.assertEqual(self.run_cli('status')['items'][0]['status'], 'current')
+        self.assertIsNone(self.manager().state.data['pending'])
+
+    def test_collection_replaces_top_level_file_with_directory(self):
+        self.check_type_replacement_collection(nested=False, incoming_directory=True)
+
+    def test_collection_replaces_nested_file_with_directory(self):
+        self.check_type_replacement_collection(nested=True, incoming_directory=True)
+
+    def test_collection_replaces_top_level_directory_with_file(self):
+        self.check_type_replacement_collection(nested=False, incoming_directory=False)
+
+    def test_collection_replaces_nested_directory_with_file(self):
+        self.check_type_replacement_collection(nested=True, incoming_directory=False)
 
     @unittest.skipIf(os.name == 'nt', 'POSIX symlinks and exclusions')
     def test_exclusions_and_opaque_links_share_permission_policy(self):
