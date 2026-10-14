@@ -321,7 +321,8 @@ Only unsupported or denied permission setters are optional; timestamps, content 
 
 Save permission policy with ownership and journals, interpreting absent fields as strict.
 Use the previous ownership policy to validate targets during transitions; changing policy never adopts an unrelated local edit.
-Best-effort reverse collection preserves existing source modes where possible and never exports permission-only edits or installation-induced differences.
+Best-effort reverse collection preserves existing source modes only for matching node types and never exports permission-only edits or installation-induced differences.
+New entries and replacements of a different type use incoming modes; opaque link targets remain part of payload equality.
 Journal actual staged observations rather than assuming source and destination modes agree; recovery refuses later permission changes just as it refuses later content edits.
 
 ### Replacement transactions

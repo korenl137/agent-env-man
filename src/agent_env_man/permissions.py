@@ -21,12 +21,15 @@ def mode(info):
     return info.st_mode & stat.S_IWRITE if os.name == "nt" else stat.S_IMODE(info.st_mode)
 
 
-def snapshot(path, **policy):
-    """Observe native modes without following links or including exclusions."""
+def snapshot(path, *, node_types=None, **policy):
+    """Observe native modes without following links or including exclusions.
+
+    If supplied, node_types records "d"/"f" for the same included paths.
+    """
     result = {}
     if os.name != "nt":
         from .payload_links import scan
-        scan(path, modes=result, modes_only=True, allow_symlinks=policy.get("preserve_symlinks", False),
+        scan(path, modes=result, node_types=node_types, modes_only=True, allow_symlinks=policy.get("preserve_symlinks", False),
              **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
         return result
     from .payload_policy import excluded
@@ -39,6 +42,8 @@ def snapshot(path, **policy):
         if not (stat.S_ISDIR(before.st_mode) or stat.S_ISREG(before.st_mode)):
             raise Error(f"Special files are unsupported: {current}")
         result[relative or "."] = mode(before)
+        if node_types is not None:
+            node_types[relative or "."] = "d" if stat.S_ISDIR(before.st_mode) else "f"
         if stat.S_ISDIR(before.st_mode):
             for child in sorted(current.iterdir()):
                 name = "/".join(p for p in (relative, child.name) if p)

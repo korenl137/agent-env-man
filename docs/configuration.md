@@ -162,7 +162,8 @@ Changing the effective level is reported as `configuration-changed`; apply the n
 
 Link installation does not alter source permissions.
 Its effective level is saved for later detach materialization; detach and recovery use saved policies even without a readable catalog.
-In best-effort reverse collection, existing source entries retain their native modes where possible, and newly created entries attempt the copy's modes.
+In best-effort reverse collection, existing source entries of the same type retain their native modes where possible.
+New entries and entries replacing a different type attempt the copy's modes.
 Permission-only edits are not exported; collection of content edits records any differences without treating installation-induced mode differences as content changes.
 Overlapping collections with different permission levels require separate selections.
 See [permission reports](commands.md#permission-preservation-reports) and [maintenance](maintenance.md#copy-verification-failures).

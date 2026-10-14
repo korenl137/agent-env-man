@@ -246,20 +246,31 @@ def collect(manager, source, plans):
                 target, incoming = item.source / name, item.target / name
                 policy = child_options(payload_options(item), name)
                 before, after = observation(target, **policy), observation(incoming, **policy)
-                if before == after or (item.permissions == 'best-effort' and before.get('kind') == after.get('kind') and before.get('hash') == after.get('hash')):
+                if before == after or (item.permissions == 'best-effort'
+                        and before.get('kind') == after.get('kind')
+                        and before.get('hash') == after.get('hash')
+                        and before.get('to') == after.get('to')):
                     continue
                 index = str(len(entries))
                 stage, backup = scratch / 'stages' / index, scratch / 'backups' / index
                 if exists(incoming):
                     if item.permissions == "best-effort":
                         from .permissions import snapshot, differences
-                        destination_modes = snapshot(target, **policy) if exists(target) else {}
+                        source_types, incoming_types = {}, {}
+                        incoming_modes = snapshot(incoming, node_types=incoming_types, **policy)
+                        source_modes = snapshot(target, node_types=source_types, **policy) if exists(target) else {}
+                        # Replaced node types use incoming modes; a file's mode
+                        # can make a new directory inaccessible, and a directory's
+                        # mode can make a replacement file executable.
+                        destination_modes = {path: mode for path, mode in source_modes.items()
+                                             if source_types[path] == incoming_types.get(path)}
                         failures = []
                         copy_payload(incoming, stage, destination_modes=destination_modes, permission_failures=failures, **policy)
                         staged = observation(stage, **policy)
-                        if staged.get("kind") != after.get("kind") or staged.get("hash") != after.get("hash"):
+                        if (staged.get("kind") != after.get("kind") or staged.get("hash") != after.get("hash")
+                                or staged.get("to") != after.get("to")):
                             raise Error(f'{item.key}: copy changed while staging')
-                        requested = {**snapshot(incoming, **policy), **destination_modes}
+                        requested = {**incoming_modes, **destination_modes}
                         changes = differences(requested, snapshot(stage, **policy), failures)
                         plan.report.setdefault("permission_differences", []).extend(
                             {**change, "path": name if change["path"] == "." else name + "/" + change["path"]}

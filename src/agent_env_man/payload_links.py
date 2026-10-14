@@ -124,7 +124,7 @@ def chmod_directory(path, mode):
         os.fchmod(fd, mode)
 
 
-def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, permission_failures=None, destination_modes=None, modes_only=False):
+def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):
     """Hash and optionally copy one opaque-link tree; also return preview entries.
 
     Regular node encoding is identical to storage.fingerprint. O_NOFOLLOW and
@@ -159,6 +159,8 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
         logical_path = relative.lstrip('/') or '.'
         if modes is not None and kind != 'l':
             modes[logical_path] = stat.S_IMODE(before.st_mode)
+        if node_types is not None and kind != 'l':
+            node_types[logical_path] = kind
         digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b'\0')
         target = None
         file_hash = None
