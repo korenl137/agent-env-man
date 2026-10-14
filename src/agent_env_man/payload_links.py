@@ -127,11 +127,63 @@ def chmod_directory(path, mode):
 
 
 def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):
+    """Retry one timestamp-only race, exposing only a complete matching capture.
+
+    The first traversal still rejects identity, mode, size and structural edits.
+    When only timestamps drift, finish collecting its contents before making a
+    fresh strict traversal. Matching both captures prevents a same-size edit
+    from being adopted merely because the second traversal was stable.
+    """
+    policy = dict(source_relative=source_relative, exclude_git=exclude_git,
+                  destination=destination, allow_symlinks=allow_symlinks,
+                  exclusions=exclusions, exclude_prefix=exclude_prefix,
+                  permissions=permissions, destination_modes=destination_modes,
+                  modes_only=modes_only)
+    first = None
+    for attempt in range(2):
+        state = {'defer_timestamps': attempt == 0, 'timestamp_changed': False}
+        captured_modes = {} if modes is not None else None
+        captured_types = {} if node_types is not None else None
+        failures = [] if permission_failures is not None else None
+        result = _scan(path, modes=captured_modes, node_types=captured_types,
+                       permission_failures=failures, state=state, **policy)
+        if first is not None or state['timestamp_changed']:
+            identities = {name: value[:4] if len(value) == 6 else value
+                          for name, value in state['guarded'].items()}
+            if first is not None and (result != first[0] or identities != first[1]):
+                raise Error(f'Payload changed during timestamp reinspection: {source_relative}')
+        if not state['timestamp_changed']:
+            if modes is not None:
+                modes.update(captured_modes)
+            if node_types is not None:
+                node_types.update(captured_types)
+            if permission_failures is not None:
+                permission_failures.extend(failures)
+            return result
+        first = result, identities
+        if destination is not None:
+            # Each attempt creates its own destination exclusively. Never reuse
+            # a partially trusted copy or delete a replacement of that entry.
+            destination = Path(destination)
+            with directory_fd(destination.parent) as parent:
+                info = os.stat(destination.name, dir_fd=parent, follow_symlinks=False)
+                if (info.st_dev, info.st_ino) != state['destination_identity']:
+                    raise Error(f'Copied payload changed before timestamp reinspection: {destination}')
+                if stat.S_ISDIR(info.st_mode):
+                    if not shutil.rmtree.avoids_symlink_attacks:
+                        raise Error('Safe directory removal is unavailable on this platform')
+                    shutil.rmtree(destination.name, dir_fd=parent)
+                else:
+                    os.unlink(destination.name, dir_fd=parent)
+
+
+def _scan(path, *, state, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):
     """Hash and optionally copy one opaque-link tree; also return preview entries.
 
     Regular node encoding is identical to storage.fingerprint. O_NOFOLLOW and
     descriptor-relative recursion prevent check/open races from reading link
-    referents. Changes during traversal abort rather than committing a mixture.
+    referents. Non-timestamp changes abort; the caller compares complete captures
+    before accepting a deferred timestamp change.
     """
     require_posix()
     from .permissions import validate, apply as apply_permissions
@@ -141,12 +193,23 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
     digest = hashlib.sha256()
     entries = {}
     guarded = {}
+    state['guarded'] = guarded
     def identity(info):
         if exclusions and stat.S_ISDIR(info.st_mode):
             # Excluded children may appear or change while included entries are
             # read. Guard directory identity and the included name set instead.
             return info.st_dev, info.st_ino, info.st_mode
         return info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+    def check(before, after, logical, *, opening=False):
+        if before == after:
+            return
+        if (state['defer_timestamps'] and before is not None and len(before) == 6
+                and len(after) == 6 and before[:4] == after[:4]):
+            state['timestamp_changed'] = True
+            return
+        when = 'while opening' if opening else 'during inspection'
+        raise Error(f'Payload changed {when}: {logical}')
 
     def visit(parent, name, relative, out_parent, out_name, *, leaf=False):
         before = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -173,13 +236,15 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             validate_link(target, logical)
             if out_parent is not None:
                 os.symlink(target, out_name, dir_fd=out_parent)
+                if not relative:
+                    created = os.stat(out_name, dir_fd=out_parent, follow_symlinks=False)
+                    state['destination_identity'] = created.st_dev, created.st_ino
         else:
             flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if kind == 'd' else os.O_NONBLOCK)
             fd = os.open(name, flags, dir_fd=parent)
             out_fd = None
             try:
-                if identity(os.fstat(fd)) != identity(before):
-                    raise Error(f'Payload changed while opening: {logical}')
+                check(identity(before), identity(os.fstat(fd)), logical, opening=True)
                 if out_parent is not None:
                     if kind == 'd':
                         os.mkdir(out_name, mode=0o700, dir_fd=out_parent)
@@ -187,6 +252,9 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                     else:
                         out_fd = os.open(out_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                          0o600, dir_fd=out_parent)
+                    if not relative:
+                        created = os.fstat(out_fd)
+                        state['destination_identity'] = created.st_dev, created.st_ino
                 if kind == 'd':
                     with os.scandir(fd) as listing:
                         children = [child for child in sorted(listing, key=lambda entry: entry.name)
@@ -222,8 +290,7 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                             while remaining:
                                 remaining = remaining[os.write(out_fd, remaining):]
                     file_hash = content.digest()
-                if identity(os.fstat(fd)) != identity(before):
-                    raise Error(f'Payload changed during inspection: {logical}')
+                check(identity(before), identity(os.fstat(fd)), logical)
                 if out_fd is not None:
                     if kind == 'f':
                         # davfs can apply a stale zero length during metadata
@@ -246,20 +313,17 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                 if out_fd is not None:
                     os.close(out_fd)
                 os.close(fd)
-        if identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(before):
-            raise Error(f'Payload changed during inspection: {logical}')
+        check(identity(before), identity(os.stat(name, dir_fd=parent, follow_symlinks=False)), logical)
         entries[relative.lstrip('/') or '.'] = (kind, executable, target if kind == 'l' else file_hash)
 
     def verify(parent, name, relative, seen):
         info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        if guarded.get(relative) != identity(info):
-            raise Error(f'Payload changed during inspection: {relative or source_relative}')
+        check(guarded.get(relative), identity(info), relative or source_relative)
         seen.add(relative)
         if stat.S_ISDIR(info.st_mode):
             fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
             try:
-                if identity(os.fstat(fd)) != identity(info):
-                    raise Error(f'Payload changed during inspection: {relative or source_relative}')
+                check(identity(info), identity(os.fstat(fd)), relative or source_relative)
                 pending = []
                 try:
                     with os.scandir(fd) as listing:
@@ -285,8 +349,9 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
 
     def verify_leaf(parent, name, relative):
         info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        if stat.S_ISDIR(info.st_mode) or guarded.get(relative) != identity(info):
+        if stat.S_ISDIR(info.st_mode):
             raise Error(f'Payload changed during inspection: {relative}')
+        check(guarded.get(relative), identity(info), relative)
         return relative
 
     with PayloadReads() as pool, directory_fd(path.parent) as parent:
@@ -296,9 +361,9 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             destination = Path(destination)
             with directory_fd(destination.parent) as out:
                 visit(parent, path.name, '', out, destination.name)
-        if exclusions:
-            # Directory timestamps cannot identify excluded-only changes. Recheck
-            # all included identities without downloading file contents again.
+        if exclusions or state['timestamp_changed'] or not state['defer_timestamps']:
+            # Exclusions and deferred timestamps cannot prove the included name
+            # set stayed fixed. Recheck every included identity before retrying.
             seen = set()
             verify(parent, path.name, '', seen)
             if seen != guarded.keys():

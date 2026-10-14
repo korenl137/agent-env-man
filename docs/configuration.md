@@ -154,6 +154,10 @@ On Windows, native permission observation covers the writable/read-only flag sup
 Best-effort copying retains timestamp application; timestamp failures, content I/O errors, unsupported payload types, and source or target changes remain fatal.
 It does not ensure that copied scripts can execute or reproduce the source's access restrictions.
 
+Guarded POSIX inspection automatically rechecks a change confined to `mtime` or `ctime` once, including for strict payloads with `preserve_symlinks`.
+It succeeds only if a fresh stable inspection matches the first content and identity capture, including native modes and included paths; persistent instability or actual changes still fail.
+This adds no permission level or catalog option and does not make timestamp-setting failures optional.
+
 AEM records both source permissions and the actual installed permissions in best-effort ownership.
 A changed source mode makes a managed copy stale; a later local mode edit remains a protected local modification.
 Existing installations and records without this field retain strict behavior and their original hashes.

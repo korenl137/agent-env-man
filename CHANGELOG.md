@@ -19,6 +19,12 @@ Capture content hashes, change paths, and best-effort permission observations fr
 Installation and staging retain fresh concurrent-change checks; differing saved and current policies are inspected separately.
 - Batch Git operation-path queries, avoid unused publication diff reports, and validate shared checkout bindings once per source-map construction while rechecking paths on later access.
 
+### Fixed
+
+- Reinspect guarded POSIX payloads once when only modification or metadata-change timestamps drift during inspection or copying.
+Accept only a stable matching content, identity, structure, and permission capture; retain refusal for actual changes, continuing instability, and timestamp-setting failures.
+Copy retries recreate their temporary destination and expose only the successful attempt's permission report.
+
 ## [1.2.0-rc.2] &mdash; 2026-10-14
 
 ### Added
