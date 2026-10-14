@@ -174,6 +174,110 @@ class TimestampReinspection(unittest.TestCase):
         self.assertEqual((destination / 'user').read_bytes(), b'keep')
         self.assertEqual(calls, [])
 
+    def test_copy_retry_cleans_read_only_directories(self):
+        nested = self.source / 'nested'
+        nested.mkdir()
+        (nested / 'child').write_bytes(b'nested content')
+        def writable_tree():
+            for directory, _, _ in os.walk(self.root):
+                Path(directory).chmod(0o700)
+        self.addCleanup(writable_tree)
+        policies = ({'permissions': 'best-effort'}, {'preserve_symlinks': True},
+                    {'permissions': 'best-effort', 'destination_modes': {'.': 0o555, 'nested': 0o555}})
+        for index, policy in enumerate(policies):
+            with self.subTest(policy=policy):
+                self.source.chmod(0o555 if index < 2 else 0o755)
+                nested.chmod(0o555 if index < 2 else 0o755)
+                destination = self.root / f'stage-{index}'
+                calls, changing = self.changing_read(self.touch)
+                with changing:
+                    copy_payload(self.source, destination, **policy)
+                self.assertEqual(len(calls), 4)
+                self.assertEqual((destination / 'nested' / 'child').read_bytes(), b'nested content')
+                self.assertEqual((destination / 'file').read_bytes(), b'original')
+                self.assertEqual(destination.stat().st_mode & 0o777, 0o555)
+                self.assertEqual((destination / 'nested').stat().st_mode & 0o777, 0o555)
+                self.assertFalse(list(self.root.glob('.aem-reinspection-*')))
+
+    def test_copy_retry_preserves_replacement_after_identity_check(self):
+        for kind in ('directory', 'file', 'link'):
+            with self.subTest(kind=kind):
+                destination = self.root / f'stage-{kind}'
+                replacement = self.root / f'user-{kind}'
+                if kind == 'directory':
+                    replacement.mkdir()
+                    (replacement / 'user-data').write_bytes(b'keep')
+                    source = self.source
+                elif kind == 'file':
+                    replacement.write_bytes(b'keep')
+                    source = self.leaf
+                else:
+                    replacement.symlink_to('user-referent')
+                    source = self.source / 'alias'
+                    source.symlink_to('file')
+                info = replacement.lstat()
+                expected = info.st_dev, info.st_ino
+                original_stat = os.stat
+                destination_stats = 0
+                def replacing(path, *args, **kwargs):
+                    nonlocal destination_stats
+                    result = original_stat(path, *args, **kwargs)
+                    if path == destination.name and kwargs.get('dir_fd') is not None:
+                        destination_stats += 1
+                        # Root links are also stat'ed immediately after creation.
+                        if destination_stats == (2 if kind == 'link' else 1):
+                            destination.rename(self.root / f'first-stage-{kind}')
+                            replacement.rename(destination)
+                    return result
+                if kind == 'link':
+                    original_readlink = os.readlink
+                    changed = False
+                    def readlink(path, *args, **kwargs):
+                        nonlocal changed
+                        target = original_readlink(path, *args, **kwargs)
+                        if path == 'alias' and not changed:
+                            changed = True
+                            info = source.lstat()
+                            os.utime(source, ns=(info.st_atime_ns, info.st_mtime_ns + 1000000000), follow_symlinks=False)
+                        return target
+                    changing = patch.object(payload_links.os, 'readlink', side_effect=readlink)
+                else:
+                    _, changing = self.changing_read(self.touch)
+                with changing, patch.object(payload_links.os, 'stat', side_effect=replacing):
+                    with self.assertRaisesRegex(Error, 'changed before timestamp reinspection') as caught:
+                        copy_payload(source, destination, preserve_symlinks=True)
+                preserved = [p for p in self.root.rglob('*')
+                             if (p.lstat().st_dev, p.lstat().st_ino) == expected]
+                self.assertEqual(len(preserved), 1)
+                self.assertIn(str(preserved[0]), str(caught.exception))
+                if kind == 'directory':
+                    self.assertEqual((preserved[0] / 'user-data').read_bytes(), b'keep')
+                elif kind == 'file':
+                    self.assertEqual(preserved[0].read_bytes(), b'keep')
+                else:
+                    self.assertEqual(os.readlink(preserved[0]), 'user-referent')
+
+    def test_copy_retry_preserves_destination_recreated_before_removal(self):
+        destination = self.root / 'stage'
+        original_rmtree = payload_links.shutil.rmtree
+        recreated = False
+        def recreate(path, *args, **kwargs):
+            nonlocal recreated
+            if not recreated:
+                recreated = True
+                if destination.exists():
+                    destination.rename(self.root / 'first-stage')
+                destination.mkdir()
+                (destination / 'user-data').write_bytes(b'keep')
+            return original_rmtree(path, *args, **kwargs)
+        calls, changing = self.changing_read(self.touch)
+        with changing, patch.object(payload_links.shutil, 'rmtree', side_effect=recreate):
+            with self.assertRaisesRegex(Error, 'preserved at'):
+                copy_payload(self.source, destination, **self.policy)
+        self.assertEqual((destination / 'user-data').read_bytes(), b'keep')
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(list(self.root.glob('.aem-reinspection-*')))
+
     def test_timestamp_setter_failure_remains_fatal_without_retry(self):
         destination = self.root / 'stage'
         utime = os.utime
@@ -222,6 +326,71 @@ class TimestampCommands(unittest.TestCase):
     write = directory_tests.Directories.write
     external = directory_tests.Directories.external
     manager = directory_tests.Directories.manager
+
+    def race_recreated_stage(self, leaf, find_stage):
+        read = os.read
+        rmtree = payload_links.shutil.rmtree
+        identity = leaf.stat().st_dev, leaf.stat().st_ino
+        raced = {}
+        def changing(fd, size):
+            block = read(fd, size)
+            info = os.fstat(fd)
+            stage = find_stage()
+            if block and not raced and stage is not None and (info.st_dev, info.st_ino) == identity:
+                raced['stage'] = stage
+                os.utime(leaf, ns=(info.st_atime_ns, info.st_mtime_ns + 1000000000))
+            return block
+        def recreate(path, *args, **kwargs):
+            if raced and not raced.get('recreated'):
+                stage = raced['stage']
+                if stage.exists():
+                    stage.rename(stage.with_name('first-stage'))
+                stage.mkdir()
+                (stage / 'user-data').write_bytes(b'keep')
+                raced['recreated'] = True
+            return rmtree(path, *args, **kwargs)
+        return raced, patch.object(payload_links.os, 'read', side_effect=changing), patch.object(payload_links.shutil, 'rmtree', side_effect=recreate)
+
+    def test_install_preserves_recreated_stage_after_copy_refusal(self):
+        self.document['directories']['cases']['permissions'] = 'best-effort'
+        self.external()
+        self.run_cli('apply', '--item', 'cases')
+        leaf = self.external_root / 'first.md'
+        leaf.write_bytes(b'incoming')
+        before = observation(self.target, permissions='best-effort')
+        records = deepcopy(self.manager().state.data['items'])
+        def stage():
+            return next(self.target.parent.glob('.aem-stage-*'), None)
+        raced, changing, recreate = self.race_recreated_stage(leaf, stage)
+        with changing, recreate:
+            error = self.run_cli('apply', '--item', 'cases', code=1)
+        self.assertIn('preserved at', error)
+        self.assertEqual((raced['stage'] / 'user-data').read_bytes(), b'keep')
+        self.assertEqual(observation(self.target, permissions='best-effort'), before)
+        self.assertEqual(self.manager().state.data['items'], records)
+        self.assertIsNone(self.manager().state.data['pending'])
+
+    def test_collection_preserves_recreated_child_after_copy_refusal(self):
+        self.document['directories']['cases']['permissions'] = 'best-effort'
+        self.external()
+        nested = self.external_root / 'nested'
+        nested.mkdir()
+        (nested / 'file').write_bytes(b'original')
+        self.run_cli('apply', '--item', 'cases')
+        leaf = self.target / 'nested' / 'file'
+        leaf.write_bytes(b'incoming')
+        before = observation(self.external_root, permissions='best-effort')
+        records = deepcopy(self.manager().state.data['items'])
+        def stage():
+            return next(self.external_root.parent.glob('.aem-collection-*/stages/0'), None)
+        raced, changing, recreate = self.race_recreated_stage(leaf, stage)
+        with changing, recreate:
+            report = self.run_cli('publish', 'cases', '--from-copy', code=1)
+        self.assertIn('preserved at', report[0]['error'])
+        self.assertEqual((raced['stage'] / 'user-data').read_bytes(), b'keep')
+        self.assertEqual(observation(self.external_root, permissions='best-effort'), before)
+        self.assertEqual(self.manager().state.data['items'], records)
+        self.assertIsNone(self.manager().state.data['pending'])
 
     def test_failed_copy_reinspection_preserves_installation_and_ownership(self):
         self.document['directories']['cases']['permissions'] = 'best-effort'
