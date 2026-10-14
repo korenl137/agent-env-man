@@ -46,6 +46,10 @@ Never delete caches or weaken local-file preservation to make an update succeed.
 Git-ignored regular files and directories remain part of directory payloads for hashing, copying, and detach unless explicitly excluded by catalog payload policy.
 Check the included installed-copy tree for local modifications, and reject included nested links unless the general directory explicitly enables POSIX `preserve_symlinks`.
 Special files remain unsupported.
+Payload inspection starts with synchronous leaf I/O and enables up to four readers after observing an operation taking at least two milliseconds, with at most eight outstanding tasks.
+This decision is scoped to one inspection and independent of filesystem or transport type; results combine in the existing deterministic traversal order.
+POSIX link-preserving scans retain pinned parent descriptors until all child tasks finish, including failure paths, and retain identity and included-name revalidation.
+Inspection continues to read included file contents on every call; it does not infer unchanged contents from timestamps or reuse a persistent cache.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.
 Apply relative-link policy at the logical location in the source root, including during temporary staging, backup, detach, and reverse collection.
 Use pinned non-following POSIX descriptors for enabled payload traversal and entry replacement; reject concurrent kind changes rather than following them.

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Inspect payload files with bounded parallel I/O when read latency warrants it, retaining synchronous I/O for fast filesystems while preserving existing fingerprints, link handling, exclusion rules, and transaction checks.
+Full content inspection remains enabled; no server-specific transport or persistent content cache is required.
+
 ## [1.2.0-rc.1] &mdash; 2026-10-13
 
 ### Added

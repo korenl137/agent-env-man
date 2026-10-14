@@ -1,6 +1,11 @@
 """Failed atomic writes preserve the destination and remove temporary files."""
 
 import os
+import hashlib
+import json
+import stat
+import time
+from threading import Barrier, Lock, Event
 from pathlib import Path
 import tempfile
 import unittest
@@ -34,3 +39,120 @@ class StorageSafety(unittest.TestCase):
             with self.assertRaisesRegex(Error, "Special files are unsupported"):
                 fingerprint(root)
             self.assertTrue(fifo.exists())
+
+
+class ParallelPayloadInspection(unittest.TestCase):
+    def test_parallel_reads_preserve_serial_hash_encoding(self):
+        with tempfile.TemporaryDirectory(prefix="aem-parallel-hash-") as directory:
+            root = Path(directory)
+            (root / "0-probe").write_bytes(b"probe")
+            (root / "a").mkdir()
+            (root / "a" / "empty").mkdir()
+            for name in ("a/one", "a/two", "a/three", "a/four", "a-", "z"):
+                (root / name).write_bytes(name.encode() * 100)
+            (root / "z").chmod(0o755)
+            digest = hashlib.sha256()
+
+            def serial(current, relative):
+                info = current.lstat()
+                kind = "d" if stat.S_ISDIR(info.st_mode) else "f"
+                executable = info.st_mode & 0o111 if os.name != "nt" else 0
+                digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0")
+                if kind == "d":
+                    for child in sorted(current.iterdir(), key=lambda p: p.name):
+                        serial(child, relative + "/" + child.name)
+                else:
+                    digest.update(hashlib.sha256(current.read_bytes()).digest())
+
+            serial(root, "")
+            expected = digest.hexdigest()
+            barrier = Barrier(4, timeout=5)
+            real_open = Path.open
+
+            class Reader:
+                def __init__(self, stream, synchronize, delay):
+                    self.stream, self.synchronize, self.delay = stream, synchronize, delay
+                def __enter__(self):
+                    self.stream.__enter__()
+                    return self
+                def __exit__(self, *args):
+                    return self.stream.__exit__(*args)
+                def read(self, size):
+                    if self.delay:
+                        self.delay = False
+                        time.sleep(0.005)
+                    if self.synchronize:
+                        self.synchronize = False
+                        barrier.wait()
+                    return self.stream.read(size)
+
+            def opened(path, *args, **kwargs):
+                return Reader(real_open(path, *args, **kwargs), path.parent.name == "a", path.name == "0-probe")
+
+            with patch.object(Path, "open", opened):
+                self.assertEqual(fingerprint(root), expected)
+            if os.name == "posix":
+                from agent_env_man import payload_links
+                identities = {(p.stat().st_dev, p.stat().st_ino) for p in (root / "a").iterdir() if p.is_file()}
+                barrier = Barrier(4, timeout=5)
+                seen = set()
+                lock = Lock()
+                real_read = payload_links.os.read
+                probe = (root / "0-probe").stat()
+                probe_identity = probe.st_dev, probe.st_ino
+
+                def read(fd, size):
+                    info = os.fstat(fd)
+                    identity = info.st_dev, info.st_ino
+                    with lock:
+                        synchronize = identity in identities and identity not in seen
+                        seen.add(identity)
+                    if identity == probe_identity:
+                        time.sleep(0.005)
+                    if synchronize:
+                        barrier.wait()
+                    return real_read(fd, size)
+
+                with patch.object(payload_links.os, "read", side_effect=read):
+                    self.assertEqual(fingerprint(root, preserve_symlinks=True), expected)
+
+    @unittest.skipUnless(os.name == "posix", "Pinned descriptor scan requires POSIX")
+    def test_failed_parallel_copy_keeps_parents_pinned_until_readers_finish(self):
+        from agent_env_man import payload_links
+        with tempfile.TemporaryDirectory(prefix="aem-parallel-failure-") as directory:
+            root = Path(directory) / "source"
+            root.mkdir()
+            for name in ("0-probe", "a", "b"):
+                (root / name).write_bytes(name.encode())
+            identity = {name: (root / name).stat().st_ino for name in ("0-probe", "a", "b")}
+            started, finished = Event(), Event()
+            violations = []
+            real_read, real_close = os.read, os.close
+
+            def read(fd, size):
+                inode = os.fstat(fd).st_ino
+                if inode == identity["0-probe"]:
+                    time.sleep(0.005)
+                if inode == identity["a"]:
+                    if not started.wait(5):
+                        raise AssertionError("Sibling reader was not scheduled")
+                    raise OSError("failed leaf read")
+                if inode == identity["b"]:
+                    started.set()
+                    time.sleep(0.02)
+                return real_read(fd, size)
+
+            def close(fd):
+                info = os.fstat(fd)
+                if stat.S_ISDIR(info.st_mode) and started.is_set() and not finished.is_set():
+                    violations.append(fd)
+                if info.st_ino == identity["b"]:
+                    finished.set()
+                return real_close(fd)
+
+            with patch.object(payload_links.os, "read", side_effect=read), patch.object(payload_links.os, "close", side_effect=close):
+                with self.assertRaisesRegex(OSError, "failed leaf read"):
+                    payload_links.scan(root, destination=Path(directory) / "copy")
+            self.assertTrue(started.is_set())
+            self.assertTrue(finished.is_set())
+            self.assertEqual(violations, [])
