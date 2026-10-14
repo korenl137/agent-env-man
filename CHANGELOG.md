@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Copy installation and link detach distinguish a changed source from a staged copy mismatch, with destination content and executable-permission guidance for mismatches.
+Failed verification still preserves the existing installation and ownership.
+
 ## [1.2.0-rc.1] &mdash; 2026-10-13
 
 ### Added

@@ -679,8 +679,12 @@ class Manager:
             if plan.materialize is not None:
                 exclude_git = plan.record.get("exclude_git", False)
                 copy_payload(plan.materialize, stage, exclude_git=exclude_git, **policy)
-                if fingerprint(stage, **policy) != plan.record["hash"] or fingerprint(plan.materialize, exclude_git=exclude_git, **policy) != plan.record["hash"]:
+                copied_hash = fingerprint(stage, **policy)
+                if fingerprint(plan.materialize, exclude_git=exclude_git, **policy) != plan.record["hash"]:
                     raise Error(f"{item.key}: linked contents changed during detach")
+                if copied_hash != plan.record["hash"]:
+                    raise Error(f"{item.key}: materialized copy differs from linked contents; "
+                                "check contents and executable permissions on the destination filesystem")
             elif plan.delete:
                 pass  # Removal stages absence; the backup and journal allow rollback.
             elif item.mode == "link":
@@ -694,8 +698,12 @@ class Manager:
                                 "or explicitly configure this item as copy") from exc
             elif item.mode == "copy":
                 copy_payload(item.source, stage, exclude_git=plan.record.get("exclude_git", False), **policy)
-                if fingerprint(stage, **policy) != plan.record["hash"] or self.payload(item) != plan.record["hash"]:
+                copied_hash = fingerprint(stage, **policy)
+                if self.payload(item) != plan.record["hash"]:
                     raise Error(f"{item.key}: source changed while copying")
+                if copied_hash != plan.record["hash"]:
+                    raise Error(f"{item.key}: copied payload differs from source; "
+                                "check contents and executable permissions on the destination filesystem")
             else:
                 fd = os.open(stage, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(fd, "wb") as stream:

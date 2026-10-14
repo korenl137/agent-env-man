@@ -15,6 +15,13 @@ aem detach report                  # Keep contents and release ownership.
 aem detach personal:bundle personal:entry
 ```
 
+### Copy verification failures
+
+Copy installation and link detach verify both the staged copy and the source before replacing the target.
+A source-change error means the source changed since inspection; retry after it becomes stable.
+A copied-payload or materialized-copy mismatch means the source still matched the inspected baseline but the staged copy did not; check copied contents and whether the destination filesystem preserves executable permission bits on POSIX files and directories.
+Verification failure leaves the existing target and ownership intact; `--replace` does not bypass this check.
+
 ### Backup locations
 
 | Target | Backup location |
