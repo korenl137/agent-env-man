@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,24 +27,66 @@ class Collection:
     copy_observation: dict
 
 
-def tree(path, *, exclude_git=False, **policy):
-    """Describe payload paths for previews, including removals and empty directories."""
-    if policy.get("preserve_symlinks"):
-        return scan(path, exclude_git=exclude_git, **{k:v for k,v in policy.items() if k != "preserve_symlinks"})[1]
-    result = {}
-    def visit(current):
-        if current.is_symlink() or is_reparse(current):
-            raise Error(f'Payload symlinks/junctions are unsupported: {current}')
-        relative = current.relative_to(path)
-        result[relative.as_posix()] = ('directory' if current.is_dir() else 'file',
-                                     current.stat().st_mode & 0o111 if os.name != 'nt' and policy.get('permissions', 'strict') == 'strict' else 0,
-                                     None if current.is_dir() else fingerprint(current, permissions=policy.get("permissions", "strict")))
-        if current.is_dir():
-            for child in sorted(current.iterdir()):
-                if not (exclude_git and current == path and child.name == '.git') and not excluded(child.relative_to(path).as_posix(), policy.get('exclusions', ()), policy.get('exclude_prefix', '')):
-                    visit(child)
-    visit(path)
-    return result
+def copy_inspection(path, *, exclude_git=False, entries=None, modes=None, **policy):
+    """Capture one copy's guard and included hash, preserving its .git boundary.
+
+    The guard historically includes a copy-local .git while its collection hash
+    does not. Without that entry the two hashes agree, so one traversal suffices;
+    when present retain both inspections rather than weakening the guard.
+    """
+    captured = {} if exclude_git else entries
+    observed = observation(path, entries=captured, modes=modes, **policy)
+    hashed = observed.get('hash')
+    if exclude_git:
+        if '.git' in captured:
+            hashed = fingerprint(path, exclude_git=True, **policy)
+        if entries is not None:
+            entries.update({name: value for name, value in captured.items()
+                            if name != '.git' and not name.startswith('.git/')})
+    return observed, hashed
+
+
+def child_observations(entries, modes, *, permissions='strict', details=None):
+    """Project top-level child observations from one verified parent traversal.
+
+    Each group's normalized preorder encoding is the same as inspecting that
+    child directly. Group once instead of filtering the whole tree per child.
+    These values prepare stages only; physical guards still precede replacement.
+    """
+    groups = {}
+    for path, value in entries.items():
+        if path == '.':
+            continue
+        name, _, suffix = path.partition('/')
+        groups.setdefault(name, ({}, {}))[0][suffix or '.'] = value
+    if permissions == 'best-effort':
+        for path, mode in modes.items():
+            name, _, suffix = path.partition('/')
+            if name in groups:
+                groups[name][1][suffix or '.'] = mode
+    if details is not None:
+        details.update(groups)
+    observations = {}
+    for name, (children, native_modes) in groups.items():
+        kind, _, value = children['.']
+        if kind == 'l':
+            observations[name] = {'kind': 'link', 'to': value}
+            continue
+        hashed = hashlib.sha256()
+        for relative in sorted(children, key=lambda p: () if p == '.' else tuple(p.split('/'))):
+            node, executable, value = children[relative]
+            hashed.update(json.dumps(['' if relative == '.' else '/' + relative, node, executable],
+                                     ensure_ascii=True).encode() + b'\0')
+            if node == 'l':
+                hashed.update(json.dumps(value, ensure_ascii=True).encode() + b'\0')
+            elif node == 'f':
+                hashed.update(value)
+        observed = {'kind': 'directory' if kind == 'd' else 'file', 'hash': hashed.hexdigest()}
+        if permissions == 'best-effort':
+            from .permissions import digest
+            observed['permissions_hash'] = digest(native_modes)
+        observations[name] = observed
+    return observations
 
 
 def plan(manager, names):
@@ -75,22 +118,23 @@ def plan(manager, names):
             saved_path(str(item.target))
             if not item.target.is_dir():
                 raise Error(f'{item.key}: installed copy directory is missing')
-            source_hash = manager.payload(item)
-            copy_hash = fingerprint(item.target, exclude_git=record.get('exclude_git', False), **payload_options(item))
+            left, right = {}, {}
+            source_observed = manager.source_observation(item, entries=left)
+            source_hash = source_observed['hash']
+            copy_observed, copy_hash = copy_inspection(item.target, exclude_git=record.get('exclude_git', False),
+                                                       entries=right, **payload_options(item))
+            if copy_observed['kind'] != 'directory':
+                raise Error(f'{item.key}: copy changed during inspection')
             if item.kind == 'skill' and not (item.target / 'SKILL.md').is_file():
                 raise Error(f'{item.key}: collected skill requires SKILL.md')
             if item.kind == 'instruction':
                 manager.locate_entry(item.target, item.target / item.entry)
             baseline = record['hash']
-            source_observed = manager.source_observation(item)
-            copy_observed = observation(item.target, **payload_options(item))
             source_changed = source_hash != baseline or (item.permissions == 'best-effort' and source_observed != record.get('source_observation'))
             conflict = source_changed and copy_hash != baseline and source_hash != copy_hash
             changed = copy_hash != baseline and copy_hash != source_hash
             if changed and not conflict:
                 preservation_paths(item.source, item.target, payload_options(item))
-            left = tree(item.source, exclude_git=record.get('exclude_git', False), **payload_options(item))
-            right = tree(item.target, exclude_git=record.get('exclude_git', False), **payload_options(item))
             compare = ['git', 'difftool', '--no-index', '--', str(item.source), str(item.target)]
             command = ("& " + ' '.join("'" + part.replace("'", "''") + "'" for part in compare)
                        if os.name == 'nt' else shlex.join(compare))
@@ -199,16 +243,29 @@ def guard_links(writes, records):
                             exclude_prefix=candidate.relative_to(write.item.target).as_posix() if candidate != write.item.target else '')
 
 
-def validate(manager, plans):
+def validate(manager, plans, *, capture=False):
     """Recheck source and copy observations before and after temporary staging."""
     manager.state.ready()
+    captured = {}
     for plan in plans:
-        if manager.payload(plan.item) != plan.source_hash or (plan.item.permissions == "best-effort" and manager.source_observation(plan.item) != plan.source_observation):
+        source_entries, copy_entries, source_modes, copy_modes = {}, {}, {}, {}
+        actual = manager.source_observation(plan.item, entries=source_entries if capture else None,
+                                            modes=source_modes if capture else None)
+        if actual.get('hash') != plan.source_hash or (plan.item.permissions == "best-effort" and actual != plan.source_observation):
             raise Error(f'{plan.item.key}: source changed during collection; retry after inspection')
         saved_path(str(plan.item.target))
-        if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash or (plan.item.permissions == 'best-effort' and observation(plan.item.target, **payload_options(plan.item)) != plan.copy_observation):
+        actual, hashed = copy_inspection(plan.item.target, exclude_git=plan.record.get('exclude_git', False),
+            entries=copy_entries if capture else None, modes=copy_modes if capture else None, **payload_options(plan.item))
+        if hashed != plan.copy_hash or (plan.item.permissions == 'best-effort' and actual != plan.copy_observation):
             raise Error(f'{plan.item.key}: copy changed during collection; retry after inspection')
+        if capture:
+            source_parts, copy_parts = {}, {}
+            captured[plan.item.key] = (
+                child_observations(source_entries, source_modes, permissions=plan.item.permissions, details=source_parts),
+                child_observations(copy_entries, copy_modes, permissions=plan.item.permissions, details=copy_parts),
+                source_parts, copy_parts)
     guard_links(selected_writes(plans), manager.state.data['items'])
+    return captured if capture else None
 
 
 def collect(manager, source, plans):
@@ -219,7 +276,7 @@ def collect(manager, source, plans):
     precedes mutations; baseline records commit only after both sides are checked.
     """
     writes = selected_writes(plans)
-    validate(manager, plans)
+    captured = validate(manager, plans, capture=True)
     state = manager.state
     entries, modes = [], []
     scratch = None
@@ -234,9 +291,8 @@ def collect(manager, source, plans):
             (scratch / 'backups').mkdir()
         for plan in writes:
             item = plan.item
-            names = {p.name for p in item.source.iterdir()} | {p.name for p in item.target.iterdir()}
-            if plan.record.get('exclude_git'):
-                names.discard('.git')
+            source_children, copy_children, source_parts, copy_parts = captured[item.key]
+            names = source_children.keys() | copy_children.keys()
             if item.permissions == 'strict':
                 modes.append({'target': str(item.source), 'before': stat.S_IMODE(item.source.stat().st_mode),
                               'after': stat.S_IMODE(item.target.stat().st_mode)})
@@ -245,7 +301,10 @@ def collect(manager, source, plans):
                     continue
                 target, incoming = item.source / name, item.target / name
                 policy = child_options(payload_options(item), name)
-                before, after = observation(target, **policy), observation(incoming, **policy)
+                source_modes, incoming_modes = {}, {}
+                source_entries, incoming_entries = {}, {}
+                before = source_children.get(name, {'kind': 'missing'})
+                after = copy_children.get(name, {'kind': 'missing'})
                 if before == after or (item.permissions == 'best-effort'
                         and before.get('kind') == after.get('kind')
                         and before.get('hash') == after.get('hash')
@@ -255,10 +314,13 @@ def collect(manager, source, plans):
                 stage, backup = scratch / 'stages' / index, scratch / 'backups' / index
                 if exists(incoming):
                     if item.permissions == "best-effort":
-                        from .permissions import snapshot, differences
-                        source_types, incoming_types = {}, {}
-                        incoming_modes = snapshot(incoming, node_types=incoming_types, **policy)
-                        source_modes = snapshot(target, node_types=source_types, **policy) if exists(target) else {}
+                        from .permissions import differences
+                        # Only changed children need per-node mode/type maps.
+                        # The maps are already captured by the fresh parent guard.
+                        source_entries, source_modes = source_parts.get(name, ({}, {}))
+                        incoming_entries, incoming_modes = copy_parts.get(name, ({}, {}))
+                        source_types = {path: value[0] for path, value in source_entries.items() if value[0] != 'l'}
+                        incoming_types = {path: value[0] for path, value in incoming_entries.items() if value[0] != 'l'}
                         # Replaced node types use incoming modes; a file's mode
                         # can make a new directory inaccessible, and a directory's
                         # mode can make a replacement file executable.
@@ -266,12 +328,13 @@ def collect(manager, source, plans):
                                              if source_types[path] == incoming_types.get(path)}
                         failures = []
                         copy_payload(incoming, stage, destination_modes=destination_modes, permission_failures=failures, **policy)
-                        staged = observation(stage, **policy)
+                        actual_modes = {}
+                        staged = observation(stage, modes=actual_modes, **policy)
                         if (staged.get("kind") != after.get("kind") or staged.get("hash") != after.get("hash")
                                 or staged.get("to") != after.get("to")):
                             raise Error(f'{item.key}: copy changed while staging')
                         requested = {**incoming_modes, **destination_modes}
-                        changes = differences(requested, snapshot(stage, **policy), failures)
+                        changes = differences(requested, actual_modes, failures)
                         plan.report.setdefault("permission_differences", []).extend(
                             {**change, "path": name if change["path"] == "." else name + "/" + change["path"]}
                             for change in changes)
@@ -309,16 +372,24 @@ def collect(manager, source, plans):
             if observation(Path(entry['target']), **payload_options(entry)) != entry['after']:
                 raise Error('Source changed before collection state commit')
         for plan in plans:
-            if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash or (plan.item.permissions == 'best-effort' and observation(plan.item.target, **payload_options(plan.item)) != plan.copy_observation):
+            source_modes, copy_modes = {}, {}
+            if plan.item.permissions == 'best-effort':
+                source_observed = manager.source_observation(plan.item, modes=source_modes)
+                current = source_observed['hash']
+            else:
+                current = manager.payload(plan.item)
+            copy_observed, hashed = copy_inspection(plan.item.target, exclude_git=plan.record.get('exclude_git', False),
+                                                    modes=copy_modes, **payload_options(plan.item))
+            if hashed != plan.copy_hash or (plan.item.permissions == 'best-effort' and copy_observed != plan.copy_observation):
                 raise Error(f'{plan.item.key}: copy changed before collection state commit')
-            current = manager.payload(plan.item)
             if plan.report['changed'] and current != plan.copy_hash:
                 raise Error(f'{plan.item.key}: source changed before collection state commit')
             if current == plan.copy_hash:
                 record = {**plan.record, 'hash': plan.copy_hash}
                 if plan.item.permissions == "best-effort" and plan.report['changed']:
-                    record['source_observation'] = manager.source_observation(plan.item)
-                    manager.permission_record(record, plan.item.source, plan.item.target, payload_options(plan.item))
+                    record['source_observation'] = source_observed
+                    manager.permission_record(record, plan.item.source, plan.item.target, payload_options(plan.item),
+                        observed=copy_observed, requested=source_modes, actual=copy_modes)
                     record["collection_permission_differences"] = plan.report.get("permission_differences", [])
                 state.data['items'][plan.item.key] = record
         state.data['pending'] = None

@@ -39,19 +39,24 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600):
             os.unlink(temporary)
 
 
-def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".", exclusions=(), exclude_prefix="", permissions="strict") -> str:
+def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".", exclusions=(), exclude_prefix="", permissions="strict", entries=None) -> str:
     """Hash regular payloads, including empty directories and executable bits.
 
     The default rejects nested links and special files. Opted-in POSIX directory
     links retain opaque identity under a separately supplied logical location;
     ordinary node hashes remain compatible with existing ownership.
+    Optional comparison entries retain node kinds, executable bits, opaque link
+    text, and file digests from these same reads without changing hash encoding.
     """
     from .payload_policy import excluded
     from .permissions import validate
     validate(permissions)
     if preserve_symlinks:
         from .payload_links import scan
-        return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix, permissions=permissions)[0]
+        hashed, captured = scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix, permissions=permissions)
+        if entries is not None:
+            entries.update(captured)
+        return hashed
     digest = hashlib.sha256()
 
     # Consume a bounded window in traversal order, including across recursive
@@ -78,21 +83,28 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
         return info, kind, json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0"
 
     def file_piece(current, relative):
-        _, kind, encoded = metadata(current, relative)
+        info, kind, encoded = metadata(current, relative)
         if kind != "f":
             raise Error(f"Payload changed during inspection: {current}")
         file_hash = hashlib.sha256()
         with current.open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 file_hash.update(block)
-        return encoded + file_hash.digest()
+        content = file_hash.digest()
+        if entries is not None:
+            executable = info.st_mode & 0o111 if os.name != "nt" and permissions == "strict" else 0
+            entries[relative.lstrip('/') or '.'] = (kind, executable, content)
+        return encoded + content
 
     def visit(current, relative, pool):
-        _, kind, encoded = metadata(current, relative)
+        info, kind, encoded = metadata(current, relative)
         if kind == "f":
             append(file_piece(current, relative))
             return
         append(encoded)
+        if entries is not None:
+            executable = info.st_mode & 0o111 if os.name != "nt" and permissions == "strict" else 0
+            entries[relative.lstrip('/') or '.'] = (kind, executable, None)
         with os.scandir(current) as listing:
             children = sorted(listing, key=lambda entry: entry.name)
         for child in children:
@@ -118,7 +130,7 @@ def link_matches(observed: dict, source: str) -> bool:
     return observed.get("kind") == "link" and same_destination(observed.get("to"), source)
 
 
-def observation(path: Path, *, modes=None, **policy) -> dict:
+def observation(path: Path, *, modes=None, entries=None, **policy) -> dict:
     if path.is_symlink():
         return {"kind": "link", "to": os.readlink(path)}
     if not exists(path):
@@ -131,12 +143,15 @@ def observation(path: Path, *, modes=None, **policy) -> dict:
         # The same guarded descriptors yield contents and modes. A separate
         # permission walk both costs another traversal and can observe a later
         # version of a file than the content hash did.
-        hashed, _ = scan(path, modes=captured, allow_symlinks=policy.get("preserve_symlinks", False),
+        hashed, tree = scan(path, modes=captured, allow_symlinks=policy.get("preserve_symlinks", False),
                          **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
         if modes is not None:
             modes.update(captured)
+        if entries is not None:
+            entries.update(tree)
         return {"kind": kind, "hash": hashed, "permissions_hash": digest(captured)}
-    result = {"kind": kind, "hash": fingerprint(path, **policy)}
+    options = {"entries": entries} if entries is not None else {}
+    result = {"kind": kind, "hash": fingerprint(path, **options, **policy)}
     if policy.get("permissions") == "best-effort":
         from .permissions import snapshot, digest
         captured = snapshot(path, **policy)

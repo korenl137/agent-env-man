@@ -54,8 +54,9 @@ Payload inspection starts with synchronous leaf I/O and enables up to four reade
 This decision is scoped to one inspection and independent of filesystem or transport type; results combine in the existing deterministic traversal order.
 Ordinary fingerprints consume a bounded window of results during traversal rather than retaining completed reads for the whole tree.
 POSIX link-preserving scans retain pinned parent descriptors until all child tasks finish, including failure paths, and retain identity and included-name revalidation.
-Inspection continues to read included file contents on every call; it does not infer unchanged contents from timestamps or reuse a persistent cache.
-Within one item's status judgment or installation planning step, reuse an observation only when the physical path and payload policy agree.
+Every new payload inspection reads included file contents; it does not infer unchanged contents from timestamps or reuse a persistent cache.
+Hashes and per-path comparison entries may be captured in the same traversal instead of downloading contents again for a change list.
+Within one item's status judgment, installation planning step, or shared-source preparation step, reuse an observation only when the physical path and payload policy agree.
 Saved and current policies remain separate during transitions; source and target guards are freshly read at installation, staging, backup, and commit boundaries.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.
 Apply relative-link policy at the logical location in the source root, including during temporary staging, backup, detach, and reverse collection.
@@ -90,6 +91,9 @@ Preserve named-source checkout paths; do not migrate or remove old direct-declar
 Validate every skill in a shared checkout before publishing it, and guard all active links from that checkout before advancing it.
 Full automation may defer skill payload checks in an existing checkout until delivery validates every declared skill against the incoming revision before fast-forwarding.
 Standalone bootstrap continues to validate local HEAD without updating existing checkouts.
+Derive shared consumer bindings with one physical check per unique checkout path in each source-map construction, and revalidate paths on the next access.
+Git operation markers may be located in one query; preserve linked-worktree paths and fall back to individual queries when newline-containing paths make the batch ambiguous.
+Publication remote preflight validates identity, idle state, and push destinations without generating unused status/diff/log reports; publication still refreshes changes after remote verification.
 
 #### Ownership and maintenance boundaries
 
@@ -225,6 +229,9 @@ Preserve staged changes and commits after failures, report each repository's out
 External synchronization and fork/PR workflows remain outside this command's scope.
 Ordinary publication never collects installed-copy edits.
 Explicit `--from-copy` requires owned, non-detached skill, directory, or instruction bundle copies for every selected name and collects only their payloads; Git publication still selects whole checkouts.
+Build collection hashes, observations, and changed-path reports from the same inspections.
+Collection staging may project child observations and mode/type maps from a freshly verified parent traversal; revalidate whole input trees after staging and physically check replaced children before mutation.
+When a root copy contains its own `.git`, keep its full transaction observation distinct from the `.git`-excluding collection hash.
 Use the existing ownership hash as the last common baseline, updating it after successful collection or agreement; source observation/update alone never advances it.
 Source-only changes leave stale copies untouched; competing source/copy changes or differing overlapping exports stop the group before writing.
 Root collection automatically excludes top-level `.git` and honors catalog payload exclusions, retaining other Git-ignored regular payloads and executable bits without copying Git administration.

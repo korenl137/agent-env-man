@@ -14,8 +14,10 @@ Terminal text commands enable it automatically; `--progress` and `--no-progress`
 
 ### Changed
 
-- Reduce repeated payload reads in status and installation planning, and capture best-effort content and permission observations in one POSIX traversal.
+- Reduce repeated payload reads in source preparation, status, installation planning, detach, reverse collection, and recovery cleanup.
+Capture content hashes, change paths, and best-effort permission observations from the same inspections.
 Installation and staging retain fresh concurrent-change checks; differing saved and current policies are inspected separately.
+- Batch Git operation-path queries, avoid unused publication diff reports, and validate shared checkout bindings once per source-map construction while rechecking paths on later access.
 
 ## [1.2.0-rc.2] &mdash; 2026-10-14
 

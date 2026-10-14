@@ -24,7 +24,7 @@ from unittest.mock import patch
 import tomlkit
 
 from agent_env_man.cli import main as cli_main
-from agent_env_man import manager, payload_links, permissions, storage
+from agent_env_man import copy_publication, manager, payload_links, permissions, storage
 
 
 def run(config, *args):
@@ -41,7 +41,16 @@ def count_inspections(config, args, source, target):
     fingerprint, scan, snapshot = storage.fingerprint, payload_links.scan, permissions.snapshot
 
     def location(path):
-        return 'source' if Path(path) == source else 'target' if Path(path) == target else 'other'
+        path = Path(path)
+        if path == source:
+            return 'source'
+        if path == target:
+            return 'target'
+        if source in path.parents:
+            return 'source-child'
+        if target in path.parents:
+            return 'target-child'
+        return 'other'
 
     def hashed(path, **policy):
         if not policy.get('preserve_symlinks'):
@@ -62,7 +71,9 @@ def count_inspections(config, args, source, target):
     with ExitStack() as stack:
         stack.enter_context(patch.object(storage, 'fingerprint', hashed))
         stack.enter_context(patch.object(manager, 'fingerprint', hashed))
+        stack.enter_context(patch.object(copy_publication, 'fingerprint', hashed))
         stack.enter_context(patch.object(payload_links, 'scan', scanned))
+        stack.enter_context(patch.object(copy_publication, 'scan', scanned))
         stack.enter_context(patch.object(permissions, 'snapshot', modes))
         run(config, *args)
     return dict(sorted(counts.items()))

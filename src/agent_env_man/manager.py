@@ -92,10 +92,19 @@ class Manager:
             step("Preparing source", name)
             temporary = None
             try:
+                inspected = {}
+                def inspect_payload(path, **policy):
+                    # Consumers of the same tree still validate their own kind
+                    # and required entries, but this preparation step reads one
+                    # identical-policy payload only once.
+                    key = (str(path), json.dumps(policy, sort_keys=True))
+                    if key not in inspected:
+                        inspected[key] = fingerprint(path, **policy)
+                    return inspected[key]
                 if not source.git:
                     for _, member in members:
                         for item in self.config.declarations(member):
-                            self.payload(item)
+                            self.payload(item, inspector=inspect_payload)
                     report.extend({"source": n, "status": "external-ready", "path": str(source.path)} for n, _ in selected)
                     continue
                 git = Git(timeout)
@@ -156,7 +165,7 @@ class Manager:
                         if cursor.is_symlink() or is_reparse(cursor):
                             raise Error(f"Skill source contains a symlink/junction: {cursor}")
                         cursor = cursor.parent
-                    fingerprint(payload, exclude_git=item.relative == ".", **payload_options(item))
+                    inspect_payload(payload, exclude_git=item.relative == ".", **payload_options(item))
                 revision = git.run(local_path, "rev-parse", "HEAD").stdout
                 if temporary:
                     if exists(source.path):
@@ -293,7 +302,7 @@ class Manager:
             owners[item.key] = item.target
 
     @operation('Inspecting source content', detail=lambda self, item: item.key)
-    def payload(self, item, *, observe=False, modes=None):
+    def payload(self, item, *, observe=False, modes=None, entries=None, inspector=None):
         if item.kind == "setting":
             from .settings import Settings
             Settings(self).source(item)
@@ -317,8 +326,10 @@ class Manager:
                 raise Error(f"{item.key}: instruction bundle needs a regular entry document: {item.entry}")
         if item.kind == "instruction-entry" and not item.source.is_file():
             raise Error(f"{item.key}: instruction entry must be a regular file")
-        inspect = observation if observe else fingerprint
+        inspect = inspector if inspector is not None else observation if observe else fingerprint
         options = {"modes": modes} if observe else {}
+        if entries is not None:
+            options['entries'] = entries
         result = inspect(item.source, exclude_git=item.kind in ("skill", "directory", "instruction", "instruction-hook") and item.relative == ".", **options, **payload_options(item))
         if observe and result["kind"] not in ("file", "directory"):
             raise Error(f"Payload changed during inspection: {item.source}")
@@ -586,8 +597,8 @@ class Manager:
                    "Follow those documents for applicability and reading order.")
         return profile(agent).context(context)
 
-    def source_observation(self, item, *, modes=None):
-        return self.payload(item, observe=True, modes=modes)
+    def source_observation(self, item, *, modes=None, entries=None):
+        return self.payload(item, observe=True, modes=modes, entries=entries)
 
     def source_matches(self, item, record, *, modes=None):
         if "source_observation" in record:
@@ -906,6 +917,17 @@ class Manager:
             raise Error('Recovery paths must be distinct siblings')
         current = observation(target, **policy)
         before, after = pending["before"], pending["after"]
+        if current == before and not exists(backup) and not pending.get("retained"):
+            # Before the first rename the original target is intact. Inspect the
+            # abandoned stage immediately before cleanup; no restoration work
+            # requires an earlier inspection of this same stage.
+            if exists(stage):
+                if observation(stage, **policy) != after:
+                    raise Error("Recovery stopped: staged content changed")
+                (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
+            self.state.data["pending"] = None
+            self.state.save()
+            return
         if exists(stage) and observation(stage, **policy) != after:
             raise Error("Recovery stopped: staged content changed")
         retained = pending.get("retained")
@@ -1133,9 +1155,11 @@ class Manager:
                 exclude_git = old.get("exclude_git", False)
                 if not isinstance(exclude_git, bool):
                     raise Error(f"{key}: invalid saved copy exclusion")
-                record["hash"] = fingerprint(content, exclude_git=exclude_git, **payload_options(old))
                 if old.get("permissions") == "best-effort":
                     record["source_observation"] = observation(content, exclude_git=exclude_git, **payload_options(old))
+                    record["hash"] = record["source_observation"]["hash"]
+                else:
+                    record["hash"] = fingerprint(content, exclude_git=exclude_git, **payload_options(old))
                 # Use the saved key as an opaque transaction identity. No old
                 # source declaration or install-mode interpreter is needed.
                 item = Item("", key, ".", content, target, "link", "skill")
