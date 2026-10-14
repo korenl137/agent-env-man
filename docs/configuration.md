@@ -156,6 +156,8 @@ It does not ensure that copied scripts can execute or reproduce the source's acc
 
 Guarded POSIX inspection automatically rechecks a change confined to `mtime` or `ctime` once, including for strict payloads with `preserve_symlinks`.
 It succeeds only if a fresh stable inspection matches the first content and identity capture, including native modes and included paths; persistent instability or actual changes still fail.
+Copy retries support read-only directories and retain the final requested modes.
+If another process replaces or recreates the temporary destination, AEM stops and reports where it preserved that content; retain that path and resolve the conflict before retrying.
 This adds no permission level or catalog option and does not make timestamp-setting failures optional.
 
 AEM records both source permissions and the actual installed permissions in best-effort ownership.

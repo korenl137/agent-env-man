@@ -12,9 +12,18 @@ import os
 from pathlib import Path, PurePosixPath
 import stat
 import shutil
+import uuid
 
 from .model import Error
 from .payload_io import PayloadReads
+
+
+class CopyCleanupError(Error):
+    """Stop enclosing stage cleanup so raced content remains recoverable."""
+
+    def __init__(self, message, preserved_path):
+        self.preserved_path = Path(preserved_path)
+        super().__init__(f'{message}; preserved at {self.preserved_path}')
 
 
 def unsupported_reason(value):
@@ -126,6 +135,86 @@ def chmod_directory(path, mode):
         os.fchmod(fd, mode)
 
 
+def _discard_copy(destination, expected_identity):
+    """Detach before deleting, retaining a raced replacement for recovery.
+
+    A stat followed by rmtree/unlink cannot protect the original name from a
+    replacement. Rename into an exclusive private directory, then check the
+    moved entry; a mismatch stays there and its location is reported. Removal
+    inside that directory cannot touch a recreated original destination.
+    """
+    destination = Path(destination)
+    with directory_fd(destination.parent) as parent:
+        try:
+            info = os.stat(destination.name, dir_fd=parent, follow_symlinks=False)
+        except OSError as exc:
+            raise CopyCleanupError(f'Cannot inspect copied payload before timestamp reinspection: {exc}', destination) from exc
+        if (info.st_dev, info.st_ino) != expected_identity:
+            raise CopyCleanupError('Copied payload changed before timestamp reinspection', destination)
+        if stat.S_ISDIR(info.st_mode) and not shutil.rmtree.avoids_symlink_attacks:
+            raise CopyCleanupError('Safe directory removal is unavailable on this platform', destination)
+        if stat.S_ISDIR(info.st_mode):
+            try:
+                root = os.open(destination.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                try:
+                    opened = os.fstat(root)
+                    if (opened.st_dev, opened.st_ino) != expected_identity:
+                        raise CopyCleanupError('Copied payload changed before timestamp reinspection', destination)
+                    # Moving a directory to another parent can require write access
+                    # to update its '..' entry. Change only the verified copy inode.
+                    os.fchmod(root, stat.S_IMODE(opened.st_mode) | 0o700)
+                finally:
+                    os.close(root)
+            except OSError as exc:
+                raise CopyCleanupError(f'Cannot prepare copied payload for timestamp reinspection: {exc}', destination) from exc
+        holding = '.aem-reinspection-' + uuid.uuid4().hex
+        os.mkdir(holding, mode=0o700, dir_fd=parent)
+        retained = destination.parent / holding / 'payload'
+        moved = False
+        try:
+            fd = os.open(holding, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                os.rename(destination.name, 'payload', src_dir_fd=parent, dst_dir_fd=fd)
+                moved = True
+                info = os.stat('payload', dir_fd=fd, follow_symlinks=False)
+                if (info.st_dev, info.st_ino) != expected_identity:
+                    raise CopyCleanupError('Copied payload changed before timestamp reinspection', retained)
+                if stat.S_ISDIR(info.st_mode):
+                    root = os.open('payload', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    try:
+                        _writable_copy_directories(root)
+                    finally:
+                        os.close(root)
+                    shutil.rmtree('payload', dir_fd=fd)
+                else:
+                    os.unlink('payload', dir_fd=fd)
+                moved = False
+            finally:
+                os.close(fd)
+        except CopyCleanupError:
+            raise
+        except Exception as exc:
+            raise CopyCleanupError(f'Cannot remove copied payload before timestamp reinspection: {exc}',
+                                   retained if moved else destination) from exc
+        finally:
+            if not moved:
+                os.rmdir(holding, dir_fd=parent)
+
+
+def _writable_copy_directories(fd):
+    """Restore owner access only inside the retired, verified temporary copy."""
+    info = os.fstat(fd)
+    os.fchmod(fd, stat.S_IMODE(info.st_mode) | 0o700)
+    with os.scandir(fd) as listing:
+        children = [entry.name for entry in listing if entry.is_dir(follow_symlinks=False)]
+    for name in children:
+        child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        try:
+            _writable_copy_directories(child)
+        finally:
+            os.close(child)
+
+
 def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):
     """Retry one timestamp-only race, exposing only a complete matching capture.
 
@@ -145,8 +234,13 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
         captured_modes = {} if modes is not None else None
         captured_types = {} if node_types is not None else None
         failures = [] if permission_failures is not None else None
-        result = _scan(path, modes=captured_modes, node_types=captured_types,
-                       permission_failures=failures, state=state, **policy)
+        try:
+            result = _scan(path, modes=captured_modes, node_types=captured_types,
+                           permission_failures=failures, state=state, **policy)
+        except FileExistsError as exc:
+            if attempt and destination is not None:
+                raise CopyCleanupError('Copy destination appeared before timestamp reinspection', destination) from exc
+            raise
         if first is not None or state['timestamp_changed']:
             identities = {name: value[:4] if len(value) == 6 else value
                           for name, value in state['guarded'].items()}
@@ -162,19 +256,7 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             return result
         first = result, identities
         if destination is not None:
-            # Each attempt creates its own destination exclusively. Never reuse
-            # a partially trusted copy or delete a replacement of that entry.
-            destination = Path(destination)
-            with directory_fd(destination.parent) as parent:
-                info = os.stat(destination.name, dir_fd=parent, follow_symlinks=False)
-                if (info.st_dev, info.st_ino) != state['destination_identity']:
-                    raise Error(f'Copied payload changed before timestamp reinspection: {destination}')
-                if stat.S_ISDIR(info.st_mode):
-                    if not shutil.rmtree.avoids_symlink_attacks:
-                        raise Error('Safe directory removal is unavailable on this platform')
-                    shutil.rmtree(destination.name, dir_fd=parent)
-                else:
-                    os.unlink(destination.name, dir_fd=parent)
+            _discard_copy(destination, state['destination_identity'])
 
 
 def _scan(path, *, state, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):

@@ -23,7 +23,7 @@ Installation and staging retain fresh concurrent-change checks; differing saved 
 
 - Reinspect guarded POSIX payloads once when only modification or metadata-change timestamps drift during inspection or copying.
 Accept only a stable matching content, identity, structure, and permission capture; retain refusal for actual changes, continuing instability, and timestamp-setting failures.
-Copy retries recreate their temporary destination and expose only the successful attempt's permission report.
+Copy retries retire and verify their temporary destination before removal, support read-only directories, preserve raced replacements for recovery, and expose only the successful attempt's permission report.
 
 ## [1.2.0-rc.2] &mdash; 2026-10-14
 

@@ -13,7 +13,7 @@ from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
 from .progress import operation, step
-from .payload_links import require_supported, unsupported_reason, options as payload_options, replace as replace_link_entry, remove as remove_link_entry
+from .payload_links import CopyCleanupError, require_supported, unsupported_reason, options as payload_options, replace as replace_link_entry, remove as remove_link_entry
 from .payload_policy import saved as saved_policy, preservation_paths, retention, park, restore_retained
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path, link_matches
 
@@ -754,6 +754,7 @@ class Manager:
             backup.parent.mkdir(parents=True, exist_ok=True)
             if backup.parent.resolve() != backup.parent:
                 raise Error('Official skill backup directory redirects')
+        preserve_stage = False
         try:
             staged_observation = None
             source_modes = stage_modes = None
@@ -866,12 +867,13 @@ class Manager:
                 # Reload the durable journal for recovery after a failed commit.
                 self.state.data["pending"] = State(self.config.state_dir, maintenance=self.state.maintenance).data["pending"]
                 raise
-        except Exception:
+        except Exception as exc:
+            preserve_stage = isinstance(exc, CopyCleanupError)
             if self.state.data.get("pending"):
                 self.recover()
             raise
         finally:
-            if exists(stage) and not self.state.data.get("pending"):
+            if exists(stage) and not self.state.data.get("pending") and not preserve_stage:
                 (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
 
     @operation('Recovering interrupted changes')
@@ -947,6 +949,7 @@ class Manager:
                     # Restore through a target-local stage, retaining the backup
                     # so another interruption remains recoverable across devices.
                     restore = target.with_name('.aem-restore-' + uuid.uuid4().hex)
+                    preserve_restore = False
                     try:
                         if backup.is_symlink():
                             restore.symlink_to(os.readlink(backup), target_is_directory=True)
@@ -957,8 +960,11 @@ class Manager:
                         if exists(target):
                             (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)
                         (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(restore, target)
+                    except CopyCleanupError:
+                        preserve_restore = True
+                        raise
                     finally:
-                        if exists(restore):
+                        if exists(restore) and not preserve_restore:
                             (remove_link_entry if policy.get("preserve_symlinks") else remove)(restore)
             elif official_removal:
                 if current != before:
