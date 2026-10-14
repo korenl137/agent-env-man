@@ -202,3 +202,49 @@ class ProgressCommands(unittest.TestCase):
         self.assertIn("[apply preview", result.stderr)
         self.assertNotIn("Installing target", result.stderr)
         self.assertIn("no items to install", result.stdout)
+
+    def test_publication_reports_push_before_subprocess_returns(self):
+        import subprocess
+        from test_skill_catalog import SkillCatalog
+        from test_git_catalog import GitCatalog
+        from test_self_publish import SelfPublication
+
+        for fixture_class in (SkillCatalog, GitCatalog, SelfPublication):
+            with self.subTest(workflow=fixture_class.__name__):
+                fixture = fixture_class()
+                fixture.setUp()
+                try:
+                    if fixture_class is SkillCatalog:
+                        fixture.bootstrap()
+                        command = ["publish", "report"]
+                    elif fixture_class is GitCatalog:
+                        fixture.boot()
+                        command = ["catalog", "publish"]
+                    else:
+                        command = ["self", "publish", "--checkout", str(fixture.checkout)]
+                    visible = Event()
+                    original_write = Progress._write
+                    original_communicate = subprocess.Popen.communicate
+
+                    def write(reporter, line):
+                        original_write(reporter, line)
+                        if "Publishing repository" in line:
+                            visible.set()
+
+                    def communicate(process, *args, **kwargs):
+                        if "push" in process.args:
+                            self.assertTrue(visible.wait(3), "Push had no publication phase before completion")
+                        return original_communicate(process, *args, **kwargs)
+
+                    config = getattr(fixture, "config", fixture.root / "unused-machine.toml")
+                    with patch.object(subprocess.Popen, "communicate", communicate), \
+                            patch.object(Progress, "_write", write), \
+                            patch("agent_env_man.progress.DELAY", 0.005), \
+                            patch("agent_env_man.progress.POLL_INTERVAL", 0.01):
+                        result = self.runner.invoke(cli, ["--config", str(config), "--json", "--progress", *command])
+                    self.assertEqual(result.exit_code, 0, result.output + repr(result.exception))
+                    report = json.loads(result.stdout)
+                    self.assertEqual((report[0] if isinstance(report, list) else report)["status"], "published")
+                    self.assertTrue(visible.is_set(), "Publication did not run a push")
+                finally:
+                    fixture.doCleanups()
