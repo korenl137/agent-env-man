@@ -11,7 +11,7 @@ import stat
 import uuid
 
 from .model import Error, Item, overlaps, relative
-from .payload_links import options as payload_options, scan, replace as replace_link_entry, chmod_directory, remove as remove_link_entry
+from .payload_links import CopyCleanupError, options as payload_options, scan, replace as replace_link_entry, chmod_directory, remove as remove_link_entry
 from .payload_policy import excluded, child_options, saved as saved_policy, preservation_paths, retention, park, restore_retained, validate_retention
 from .storage import atomic_write, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path
 
@@ -399,13 +399,13 @@ def collect(manager, source, plans):
             state.data['items'] = old_items
             state.data['pending'] = journal if scratch else None
             raise
-    except Exception:
+    except Exception as exc:
         if state.path.exists():
             state.data = json.loads(state.path.read_text(encoding='utf-8'))
         pending = state.data.get('pending')
         if pending and pending.get('operation') == 'copy-collection':
             recover(state)
-        elif scratch and exists(scratch):
+        elif scratch and exists(scratch) and not isinstance(exc, CopyCleanupError):
             (remove_link_entry if any(p.item.preserve_symlinks for p in plans) else remove)(scratch)
         raise
     return str(scratch) if scratch else None

@@ -58,6 +58,13 @@ Every new payload inspection reads included file contents; it does not infer unc
 Hashes and per-path comparison entries may be captured in the same traversal instead of downloading contents again for a change list.
 Within one item's status judgment, installation planning step, or shared-source preparation step, reuse an observation only when the physical path and payload policy agree.
 Saved and current policies remain separate during transitions; source and target guards are freshly read at installation, staging, backup, and commit boundaries.
+Guarded POSIX scans recheck a timestamp-only change once, retaining the first complete content and identity capture for comparison with a fresh strict traversal.
+Only matching contents, included paths, link text, inode identity, size, and native modes permit success; another timestamp race or a real change remains fatal.
+Publish mode/type maps and permission failures only from the successful attempt, after all sibling readers finish.
+Copy reinspection retires its newly created destination into an exclusive private directory, checks the moved inode identity, and deletes only a matching copy before recreating the destination.
+Owner access is restored through a verified copy-root descriptor before moving read-only directories; included copied directories are made writable through non-following descriptors for cleanup, without changing source modes or link referents.
+A raced replacement or cleanup failure aborts and reports a preserved path; installation, restoration, and collection callers retain the enclosing temporary storage instead of deleting that content.
+Preexisting destinations and timestamp-setter failures never qualify for retry.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.
 Apply relative-link policy at the logical location in the source root, including during temporary staging, backup, detach, and reverse collection.
 Use pinned non-following POSIX descriptors for enabled payload traversal and entry replacement; reject concurrent kind changes rather than following them.
