@@ -5,6 +5,7 @@ always the node's location inside its logical source root. Referents are opaque.
 """
 
 from contextlib import contextmanager
+from concurrent.futures import wait
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import stat
 import shutil
 
 from .model import Error
+from .payload_io import PayloadReads
 
 
 def unsupported_reason(value):
@@ -133,7 +135,6 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
     digest = hashlib.sha256()
     entries = {}
     guarded = {}
-
     def identity(info):
         if exclusions and stat.S_ISDIR(info.st_mode):
             # Excluded children may appear or change while included entries are
@@ -141,7 +142,7 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             return info.st_dev, info.st_ino, info.st_mode
         return info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
-    def visit(parent, name, relative, out_parent, out_name):
+    def visit(parent, name, relative, out_parent, out_name, *, leaf=False):
         before = os.stat(name, dir_fd=parent, follow_symlinks=False)
         guarded[relative] = identity(before)
         kind = ('l' if stat.S_ISLNK(before.st_mode) else 'd' if stat.S_ISDIR(before.st_mode)
@@ -149,8 +150,9 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
         logical = str(PurePosixPath(source_relative) / relative.lstrip('/'))
         if kind is None:
             raise Error(f'Special files are unsupported: {logical}')
+        if leaf and kind == 'd':
+            raise Error(f'Payload changed during inspection: {logical}')
         executable = before.st_mode & 0o111 if kind != 'l' else 0
-        digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b'\0')
         target = None
         file_hash = None
         if kind == 'l':
@@ -158,7 +160,6 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                 raise Error(f'Payload symlinks/junctions are unsupported: {logical}')
             target = os.readlink(name, dir_fd=parent)
             validate_link(target, logical)
-            digest.update(json.dumps(target, ensure_ascii=True).encode() + b'\0')
             if out_parent is not None:
                 os.symlink(target, out_name, dir_fd=out_parent)
         else:
@@ -176,12 +177,28 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                         out_fd = os.open(out_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                          0o600, dir_fd=out_parent)
                 if kind == 'd':
-                    children = [child for child in sorted(os.listdir(fd))
-                                if not (exclude_git and not relative and child == '.git')
-                                and not excluded(f'{relative}/{child}', exclusions, exclude_prefix)]
-                    for child in children:
-                        visit(fd, child, f'{relative}/{child}', out_fd, child)
-                    if exclusions and children != [child for child in sorted(os.listdir(fd))
+                    with os.scandir(fd) as listing:
+                        children = [child for child in sorted(listing, key=lambda entry: entry.name)
+                                    if not (exclude_git and not relative and child.name == '.git')
+                                    and not excluded(f'{relative}/{child.name}', exclusions, exclude_prefix)]
+                    names = [child.name for child in children]
+                    pending = []
+                    try:
+                        for child in children:
+                            if child.is_dir(follow_symlinks=False):
+                                visit(fd, child.name, f'{relative}/{child.name}', out_fd, child.name)
+                            else:
+                                pending.append(pool.submit(visit, fd, child.name, f'{relative}/{child.name}',
+                                                      out_fd, child.name, leaf=True))
+                                if len(pending) >= 8:
+                                    pending.pop(0).result()
+                        for future in pending:
+                            future.result()
+                    finally:
+                        # Parents stay pinned until all readers/copy writers have
+                        # finished, including when another child fails inspection.
+                        wait(pending)
+                    if exclusions and names != [child for child in sorted(os.listdir(fd))
                             if not (exclude_git and not relative and child == '.git')
                             and not excluded(f'{relative}/{child}', exclusions, exclude_prefix)]:
                         raise Error(f'Payload changed during inspection: {logical}')
@@ -194,7 +211,6 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                             while remaining:
                                 remaining = remaining[os.write(out_fd, remaining):]
                     file_hash = content.digest()
-                    digest.update(file_hash)
                 if identity(os.fstat(fd)) != identity(before):
                     raise Error(f'Payload changed during inspection: {logical}')
                 if out_fd is not None:
@@ -229,13 +245,36 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             try:
                 if identity(os.fstat(fd)) != identity(info):
                     raise Error(f'Payload changed during inspection: {relative or source_relative}')
-                for child in sorted(os.listdir(fd)):
-                    if not (exclude_git and not relative and child == '.git') and not excluded(f'{relative}/{child}', exclusions, exclude_prefix):
-                        verify(fd, child, f'{relative}/{child}', seen)
+                pending = []
+                try:
+                    with os.scandir(fd) as listing:
+                        children = sorted(listing, key=lambda entry: entry.name)
+                    for child in children:
+                        if exclude_git and not relative and child.name == '.git':
+                            continue
+                        child_relative = f'{relative}/{child.name}'
+                        if excluded(child_relative, exclusions, exclude_prefix):
+                            continue
+                        if child.is_dir(follow_symlinks=False):
+                            verify(fd, child.name, child_relative, seen)
+                        else:
+                            pending.append(pool.submit(verify_leaf, fd, child.name, child_relative))
+                            if len(pending) >= 8:
+                                seen.add(pending.pop(0).result())
+                    for future in pending:
+                        seen.add(future.result())
+                finally:
+                    wait(pending)
             finally:
                 os.close(fd)
 
-    with directory_fd(path.parent) as parent:
+    def verify_leaf(parent, name, relative):
+        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode) or guarded.get(relative) != identity(info):
+            raise Error(f'Payload changed during inspection: {relative}')
+        return relative
+
+    with PayloadReads() as pool, directory_fd(path.parent) as parent:
         if destination is None:
             visit(parent, path.name, '', None, None)
         else:
@@ -249,4 +288,14 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             verify(parent, path.name, '', seen)
             if seen != guarded.keys():
                 raise Error(f'Payload changed during inspection: {source_relative}')
+    # Reconstruct the unchanged preorder encoding after concurrent leaf I/O.
+    # Sorting path components puts each directory before its own descendants.
+    for relative in sorted(entries, key=lambda name: () if name == '.' else tuple(name.split('/'))):
+        kind, executable, value = entries[relative]
+        encoded_relative = '' if relative == '.' else '/' + relative
+        digest.update(json.dumps([encoded_relative, kind, executable], ensure_ascii=True).encode() + b'\0')
+        if kind == 'l':
+            digest.update(json.dumps(value, ensure_ascii=True).encode() + b'\0')
+        elif kind == 'f':
+            digest.update(value)
     return digest.hexdigest(), entries

@@ -1,5 +1,6 @@
 """Local bookkeeping, process locks, and conservative filesystem inspection."""
 
+from collections import deque
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import tempfile
 
 from .model import Error
 from .link_paths import same_destination
+from .payload_io import PayloadReads
 
 
 def exists(path: Path) -> bool:
@@ -50,7 +52,20 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
         return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix)[0]
     digest = hashlib.sha256()
 
-    def visit(current, relative):
+    # Consume a bounded window in traversal order, including across recursive
+    # directory visits, so completed reads do not accumulate for the whole tree.
+    pieces = deque()
+
+    def consume():
+        piece = pieces.popleft()
+        digest.update(piece if isinstance(piece, bytes) else piece.result())
+
+    def append(piece):
+        pieces.append(piece)
+        if len(pieces) >= 8:
+            consume()
+
+    def metadata(current, relative):
         info = current.lstat()
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
             raise Error(f"Payload symlinks/junctions are unsupported: {current}")
@@ -58,21 +73,41 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
         if kind is None:
             raise Error(f"Special files are unsupported: {current}")
         executable = info.st_mode & 0o111 if os.name != "nt" else 0
-        digest.update(json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0")
-        if kind == "d":
-            for child in sorted(current.iterdir(), key=lambda p: p.name):
-                if exclude_git and not relative and child.name == ".git":
-                    continue
-                if not excluded(f"{relative}/{child.name}", exclusions, exclude_prefix):
-                    visit(child, f"{relative}/{child.name}")
-        else:
-            file_hash = hashlib.sha256()
-            with current.open("rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    file_hash.update(block)
-            digest.update(file_hash.digest())
+        return info, kind, json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0"
 
-    visit(path, "")
+    def file_piece(current, relative):
+        _, kind, encoded = metadata(current, relative)
+        if kind != "f":
+            raise Error(f"Payload changed during inspection: {current}")
+        file_hash = hashlib.sha256()
+        with current.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                file_hash.update(block)
+        return encoded + file_hash.digest()
+
+    def visit(current, relative, pool):
+        _, kind, encoded = metadata(current, relative)
+        if kind == "f":
+            append(file_piece(current, relative))
+            return
+        append(encoded)
+        with os.scandir(current) as listing:
+            children = sorted(listing, key=lambda entry: entry.name)
+        for child in children:
+            if exclude_git and not relative and child.name == ".git":
+                continue
+            child_relative = f"{relative}/{child.name}"
+            if excluded(child_relative, exclusions, exclude_prefix):
+                continue
+            if child.is_dir(follow_symlinks=False):
+                visit(Path(child.path), child_relative, pool)
+            else:
+                append(pool.submit(file_piece, Path(child.path), child_relative))
+
+    with PayloadReads() as pool:
+        visit(path, "", pool)
+        while pieces:
+            consume()
     return digest.hexdigest()
 
 
