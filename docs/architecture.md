@@ -55,6 +55,8 @@ This decision is scoped to one inspection and independent of filesystem or trans
 Ordinary fingerprints consume a bounded window of results during traversal rather than retaining completed reads for the whole tree.
 POSIX link-preserving scans retain pinned parent descriptors until all child tasks finish, including failure paths, and retain identity and included-name revalidation.
 Inspection continues to read included file contents on every call; it does not infer unchanged contents from timestamps or reuse a persistent cache.
+Within one item's status judgment or installation planning step, reuse an observation only when the physical path and payload policy agree.
+Saved and current policies remain separate during transitions; source and target guards are freshly read at installation, staging, backup, and commit boundaries.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.
 Apply relative-link policy at the logical location in the source root, including during temporary staging, backup, detach, and reverse collection.
 Use pinned non-following POSIX descriptors for enabled payload traversal and entry replacement; reject concurrent kind changes rather than following them.
@@ -326,6 +328,8 @@ Resolve the scalar permission level from item, source, catalog defaults, then st
 Best-effort content equality excludes native permission modes, but transaction observations independently include their digest.
 Record source observations and actual installed observations so inability to reproduce source modes never becomes an endless content conflict, while later local mode edits remain protected.
 Permission snapshots use non-following descriptors on POSIX, preserve opaque link identity, and honor exclusion boundaries without rereading file contents.
+Best-effort observations capture content hashes and native modes in the same guarded POSIX traversal.
+Planning and staged-copy permission reports consume those captured modes; the later stage guard must still match the captured observation before replacement.
 Only unsupported or denied permission setters are optional; timestamps, content writes, race guards, and structural validation retain their failure boundaries.
 
 Save permission policy with ownership and journals, interpreting absent fields as strict.

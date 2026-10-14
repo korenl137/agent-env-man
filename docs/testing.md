@@ -71,6 +71,27 @@ The verifier removes only its own temporary test directory and keeps machine sta
 It checks copy installation, excluded metadata preservation, status, reverse collection, preservation refusals in previews, and detach through fresh CLI processes.
 Record the actual filesystem and mount used; a successful check on a mount's parent directory does not establish remote-filesystem behavior.
 
+## Payload inspection measurements
+
+Measure status, apply preview, unchanged apply, and explicit copy replacement with disposable configuration, state, and local targets:
+
+```bash
+PYTHONPATH=src python scripts/benchmark_payload_inspection.py --samples 7 --output /tmp/aem-local.json
+PYTHONPATH=src python scripts/benchmark_payload_inspection.py --source /path/to/mounted/source --preserve-symlinks --exclude '**/._DAV' --samples 7 --output /tmp/aem-mounted.json
+```
+
+Without `--source`, the runner creates 200 local files of 4 KiB each; `--files` changes that count.
+An existing source is read only, and replacement edits occur only in the runner's disposable installed copy.
+The source must remain stable and support both strict and best-effort inspection/copying; use exclusions appropriate to its unowned metadata and opt into opaque links only on supported POSIX filesystems.
+Existing machine configuration and installations are never consumed.
+
+Timed samples invoke the CLI in one Python process, reloading configuration and state each time but excluding interpreter startup.
+The JSON contains every sample, medians, and separately instrumented counts of content-tree inspections, permission-only scans, and copy scans for sources, targets, and temporary stages.
+Counts measure complete traversal calls rather than OS requests or transferred bytes.
+Setup and a warmup precede timing; these are repeated warm-cache measurements, not controlled cold-cache results.
+Compare the same source, policies, runner, and environment across revisions, and alternate baseline and candidate runs to check for environmental variation.
+Record filesystem type and whether only sources or also targets reside on the mount with the change's validation results.
+
 ## Coverage measurement
 
 Run coverage separately from ordinary tests, from the repository root in the activated development environment.

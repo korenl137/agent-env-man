@@ -118,15 +118,31 @@ def link_matches(observed: dict, source: str) -> bool:
     return observed.get("kind") == "link" and same_destination(observed.get("to"), source)
 
 
-def observation(path: Path, **policy) -> dict:
+def observation(path: Path, *, modes=None, **policy) -> dict:
     if path.is_symlink():
         return {"kind": "link", "to": os.readlink(path)}
     if not exists(path):
         return {"kind": "missing"}
-    result = {"kind": "directory" if path.is_dir() else "file", "hash": fingerprint(path, **policy)}
+    kind = "directory" if path.is_dir() else "file"
+    if policy.get("permissions") == "best-effort" and os.name != "nt":
+        from .payload_links import scan
+        from .permissions import digest
+        captured = {}
+        # The same guarded descriptors yield contents and modes. A separate
+        # permission walk both costs another traversal and can observe a later
+        # version of a file than the content hash did.
+        hashed, _ = scan(path, modes=captured, allow_symlinks=policy.get("preserve_symlinks", False),
+                         **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
+        if modes is not None:
+            modes.update(captured)
+        return {"kind": kind, "hash": hashed, "permissions_hash": digest(captured)}
+    result = {"kind": kind, "hash": fingerprint(path, **policy)}
     if policy.get("permissions") == "best-effort":
         from .permissions import snapshot, digest
-        result["permissions_hash"] = digest(snapshot(path, **policy))
+        captured = snapshot(path, **policy)
+        if modes is not None:
+            modes.update(captured)
+        result["permissions_hash"] = digest(captured)
     return result
 
 

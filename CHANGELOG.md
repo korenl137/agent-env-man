@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Optional live stderr progress for long-running foreground operations, showing phases, current targets, and elapsed time across content, repository, catalog, and settings work.
 Terminal text commands enable it automatically; `--progress` and `--no-progress` control it explicitly without changing stdout, JSON results, callback output, or transaction behavior.
 
+### Changed
+
+- Reduce repeated payload reads in status and installation planning, and capture best-effort content and permission observations in one POSIX traversal.
+Installation and staging retain fresh concurrent-change checks; differing saved and current policies are inspected separately.
+
 ## [1.2.0-rc.2] &mdash; 2026-10-14
 
 ### Added

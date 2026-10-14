@@ -293,7 +293,7 @@ class Manager:
             owners[item.key] = item.target
 
     @operation('Inspecting source content', detail=lambda self, item: item.key)
-    def payload(self, item):
+    def payload(self, item, *, observe=False, modes=None):
         if item.kind == "setting":
             from .settings import Settings
             Settings(self).source(item)
@@ -317,7 +317,12 @@ class Manager:
                 raise Error(f"{item.key}: instruction bundle needs a regular entry document: {item.entry}")
         if item.kind == "instruction-entry" and not item.source.is_file():
             raise Error(f"{item.key}: instruction entry must be a regular file")
-        return fingerprint(item.source, exclude_git=item.kind in ("skill", "directory", "instruction", "instruction-hook") and item.relative == ".", **payload_options(item))
+        inspect = observation if observe else fingerprint
+        options = {"modes": modes} if observe else {}
+        result = inspect(item.source, exclude_git=item.kind in ("skill", "directory", "instruction", "instruction-hook") and item.relative == ".", **options, **payload_options(item))
+        if observe and result["kind"] not in ("file", "directory"):
+            raise Error(f"Payload changed during inspection: {item.source}")
+        return result
 
     def locate(self, name, agent="codex", *, source=False, target=False, repo=False):
         """Locate saved content by default, or current catalog source content explicitly.
@@ -581,8 +586,14 @@ class Manager:
                    "Follow those documents for applicability and reading order.")
         return profile(agent).context(context)
 
-    def source_observation(self, item):
-        return observation(item.source, exclude_git=item.relative == ".", **payload_options(item))
+    def source_observation(self, item, *, modes=None):
+        return self.payload(item, observe=True, modes=modes)
+
+    def source_matches(self, item, record, *, modes=None):
+        if "source_observation" in record:
+            actual = self.source_observation(item, modes=modes)
+            return actual.get("hash") == record["hash"] and actual == record["source_observation"]
+        return self.payload(item) == record["hash"]
 
     def target_policy(self, item, old=None):
         policy = payload_options(item)
@@ -590,24 +601,30 @@ class Manager:
             policy["permissions"] = "best-effort"
         return policy
 
-    def recorded_target_matches(self, target, old):
-        actual = observation(target, **payload_options(old))
+    def recorded_target_matches(self, target, old, *, actual=None):
+        if actual is None:
+            actual = observation(target, **payload_options(old))
         return actual == old["installed_observation"] if "installed_observation" in old else actual.get("hash") == old.get("hash")
 
-    def permission_record(self, record, source, target, policy, failures=()):
+    def permission_record(self, record, source, target, policy, failures=(), *, observed=None, requested=None, actual=None):
         from .permissions import snapshot, differences
-        record["installed_observation"] = observation(target, **policy)
+        record["installed_observation"] = observation(target, **policy) if observed is None else observed
         if record["installed_observation"].get("hash") != record["hash"]:
             raise Error("Copied payload changed during permission inspection")
-        requested = snapshot(source, exclude_git=record.get("exclude_git", False), **policy)
-        actual = snapshot(target, **policy)
+        if requested is None:
+            requested = snapshot(source, exclude_git=record.get("exclude_git", False), **policy)
+        if actual is None:
+            actual = snapshot(target, **policy)
         record["permission_differences"] = differences(requested, actual, failures)
 
     @operation('Planning installation', detail=lambda self, item, **options: item.key)
     def plan(self, item, *, adopt=False, replace=False, reattach=False):
-        payload_hash = self.payload(item)
+        source_modes, target_modes = {}, {}
+        source_observed = self.source_observation(item, modes=source_modes) if item.permissions == "best-effort" else None
+        payload_hash = source_observed["hash"] if source_observed is not None else self.payload(item)
         old = self.state.data["items"].get(item.key)
-        before = observation(item.target, **self.target_policy(item, old))
+        before_policy = self.target_policy(item, old)
+        before = observation(item.target, modes=target_modes, **before_policy)
         if old and old.get("detached"):
             if not reattach:
                 raise Error(f"{item.key}: detached; use --reattach")
@@ -621,7 +638,7 @@ class Manager:
                   "entry": item.entry, "agent": item.agent, "agents": list(item.agents or (item.agent,))}
         record.update(saved_policy(payload_options(item)))
         if item.permissions == "best-effort":
-            record["source_observation"] = self.source_observation(item)
+            record["source_observation"] = source_observed
         if item.link_target is not None:
             record["link_target"] = str(item.link_target)
         if item.kind == "directory":
@@ -653,9 +670,15 @@ class Manager:
             return Plan(item, before, record, not correct)
         if item.mode == "copy":
             regular = before["kind"] in ("file", "directory")
-            desired = regular and fingerprint(item.target, **payload_options(item)) == payload_hash
+            # Share only observations of this planning step and identical policy.
+            # Transitions still inspect each policy; install retains fresh guards.
+            desired_hash = before.get("hash")
+            if regular and before_policy != payload_options(item):
+                desired_hash = fingerprint(item.target, **payload_options(item))
+            desired = regular and desired_hash == payload_hash
             if old:
-                matches_old = regular and self.recorded_target_matches(item.target, old)
+                matches_old = regular and self.recorded_target_matches(item.target, old,
+                    actual=before if before_policy == payload_options(old) else None)
                 modes_unchanged = before.get("permissions_hash") == old.get("installed_observation", {}).get("permissions_hash")
                 safe = not present or (regular and (matches_old or (desired and (old.get("permissions") != "best-effort" or modes_unchanged))))
                 if item.permissions == "best-effort":
@@ -668,7 +691,9 @@ class Manager:
             if not desired:
                 preservation_paths(item.target, item.source, payload_options(item))
             if desired and item.permissions == "best-effort":
-                self.permission_record(record, item.source, item.target, payload_options(item), [d for d in (old or {}).get("permission_differences", []) if "error" in d])
+                self.permission_record(record, item.source, item.target, payload_options(item),
+                    [d for d in (old or {}).get("permission_differences", []) if "error" in d],
+                    observed=before, requested=source_modes, actual=target_modes)
                 if old and "collection_permission_differences" in old:
                     record["collection_permission_differences"] = old["collection_permission_differences"]
             return Plan(item, before, record, not desired)
@@ -690,7 +715,7 @@ class Manager:
             from .official_skills import signature
             if (not plan.delete or item.source.exists()) and signature(item.source) != plan.record['official_hash']:
                 raise Error(f'{item.key}: official skill source changed after preflight')
-        if plan.materialize is None and item.kind != "setup" and (self.payload(item) != plan.record["hash"] or ("source_observation" in plan.record and self.source_observation(item) != plan.record["source_observation"])):
+        if plan.materialize is None and item.kind != "setup" and not self.source_matches(item, plan.record):
             raise Error(f"{item.key}: source changed after preflight")
         for peer in plan.peers:
             if self.payload(peer.item) != peer.record["hash"]:
@@ -719,11 +744,22 @@ class Manager:
             if backup.parent.resolve() != backup.parent:
                 raise Error('Official skill backup directory redirects')
         try:
+            staged_observation = None
+            source_modes = stage_modes = None
+            best_effort = copy_policy.get("permissions") == "best-effort"
             if plan.materialize is not None:
                 exclude_git = plan.record.get("exclude_git", False)
                 copy_payload(plan.materialize, stage, exclude_git=exclude_git, permission_failures=permission_failures, **copy_policy)
-                copied_hash = fingerprint(stage, **copy_policy)
-                if fingerprint(plan.materialize, exclude_git=exclude_git, **copy_policy) != plan.record["hash"] or ("source_observation" in plan.record and observation(plan.materialize, exclude_git=exclude_git, **copy_policy) != plan.record["source_observation"]):
+                if best_effort:
+                    source_modes, stage_modes = {}, {}
+                    staged_observation = observation(stage, modes=stage_modes, **copy_policy)
+                    copied_hash = staged_observation["hash"]
+                    original = observation(plan.materialize, exclude_git=exclude_git, modes=source_modes, **copy_policy)
+                    changed = original.get("hash") != plan.record["hash"] or original != plan.record["source_observation"]
+                else:
+                    copied_hash = fingerprint(stage, **copy_policy)
+                    changed = fingerprint(plan.materialize, exclude_git=exclude_git, **copy_policy) != plan.record["hash"]
+                if changed:
                     raise Error(f"{item.key}: linked contents changed during detach")
                 if copied_hash != plan.record["hash"]:
                     raise Error(f"{item.key}: materialized copy differs from linked contents; "
@@ -741,8 +777,13 @@ class Manager:
                                 "or explicitly configure this item as copy") from exc
             elif item.mode == "copy":
                 copy_payload(item.source, stage, exclude_git=plan.record.get("exclude_git", False), permission_failures=permission_failures, **copy_policy)
-                copied_hash = fingerprint(stage, **copy_policy)
-                if self.payload(item) != plan.record["hash"] or ("source_observation" in plan.record and self.source_observation(item) != plan.record["source_observation"]):
+                if best_effort:
+                    source_modes, stage_modes = {}, {}
+                    staged_observation = observation(stage, modes=stage_modes, **copy_policy)
+                    copied_hash = staged_observation["hash"]
+                else:
+                    copied_hash = fingerprint(stage, **copy_policy)
+                if not self.source_matches(item, plan.record, modes=source_modes):
                     raise Error(f"{item.key}: source changed while copying")
                 if copied_hash != plan.record["hash"]:
                     raise Error(f"{item.key}: copied payload differs from source; "
@@ -755,7 +796,8 @@ class Manager:
                     os.fsync(stream.fileno())
                 os.chmod(stage, stat.S_IMODE(item.target.stat().st_mode) if exists(item.target) else 0o600)
             if copy_policy.get("permissions") == "best-effort" and (item.mode == "copy" or plan.materialize is not None):
-                self.permission_record(plan.record, plan.materialize or item.source, stage, copy_policy, permission_failures)
+                self.permission_record(plan.record, plan.materialize or item.source, stage, copy_policy, permission_failures,
+                    observed=staged_observation, requested=source_modes, actual=stage_modes)
             if observation(item.target, **policy) != plan.before:
                 raise Error(f"{item.key}: target changed during staging")
             if plan.record.get('official_skill') and (not plan.delete or item.source.exists()):
@@ -763,6 +805,8 @@ class Manager:
                 if signature(item.source) != plan.record['official_hash']:
                     raise Error(f'{item.key}: official skill source changed during staging')
             after = observation(stage, **policy)
+            if staged_observation is not None and after != staged_observation:
+                raise Error("Copied payload changed during permission inspection")
             retained = retention(item.target, stage, policy) if not plan.delete else None
             if isolated_skill and exists(item.target):
                 # Copy before journaling/removal so cross-filesystem backups are
@@ -1330,11 +1374,12 @@ class Manager:
                 snapshot[key] = git.run(source.path, "show", f"{revision}:{entry}", strict_utf8=True).stdout
             Bundle.from_snapshot(snapshot, format=self.config._settings[name]["format"])
 
-    def item_status(self, item, old):
+    def item_status(self, item, old, *, target_observation=None):
         if old and old.get("detached"):
             return "detached", None
-        desired = self.payload(item)
-        current = observation(item.target, **payload_options(item))
+        source_observed = self.source_observation(item) if item.permissions == "best-effort" else None
+        desired = source_observed["hash"] if source_observed is not None else self.payload(item)
+        current = (target_observation or observation)(item.target, **payload_options(item))
         if old is None:
             return "unmanaged-existing" if current["kind"] != "missing" else "not-installed", None
         if old["target"] != str(item.target) or old["mode"] != item.mode or old["source"] != str(item.source) or old.get("link_target", old["source"]) != str(item.link_destination):
@@ -1365,7 +1410,6 @@ class Manager:
             actual = current["hash"]
             if old.get("permissions") == "best-effort":
                 local_changed = current.get("permissions_hash") != old.get("installed_observation", {}).get("permissions_hash")
-                source_observed = self.source_observation(item)
                 source_changed = source_observed != old.get("source_observation")
                 source_modes_changed = source_observed.get("permissions_hash") != old.get("source_observation", {}).get("permissions_hash")
                 if local_changed:
@@ -1426,6 +1470,20 @@ class Manager:
                         continue
                     item_entry = {"item": item.key, "target": str(item.target), "mode": item.mode}
                     old = self.state.data["items"].get(item.key)
+                    observations = {}
+                    def observe_target(path, **policy):
+                        # Only the two read-only judgments for this item share a
+                        # result. Different saved/current policies remain distinct.
+                        key = (str(path), json.dumps(policy, sort_keys=True))
+                        if key not in observations:
+                            try:
+                                observations[key] = observation(path, **policy)
+                            except (Error, OSError, ValueError) as exc:
+                                observations[key] = exc
+                        actual = observations[key]
+                        if isinstance(actual, Exception):
+                            raise actual
+                        return actual
                     if item.kind == "setting":
                         from .settings import Settings
                         try:
@@ -1435,7 +1493,7 @@ class Manager:
                         report["items"].append(item_entry)
                         continue
                     if old:
-                        item_entry["installation"] = self.installed_status(old)
+                        item_entry["installation"] = self.installed_status(old, target_observation=observe_target)
                         if old.get("permissions") == "best-effort":
                             item_entry.update(permissions="best-effort", permission_differences=old.get("permission_differences", []), collection_permission_differences=old.get("collection_permission_differences", []))
                     reason = unsupported_reason(item) or unsupported_reason(old or {})
@@ -1445,7 +1503,7 @@ class Manager:
                         report["items"].append(item_entry)
                         continue
                     try:
-                        status, note = self.item_status(item, old)
+                        status, note = self.item_status(item, old, target_observation=observe_target)
                         item_entry.update(status=status)
                         if note:
                             item_entry["note"] = note
@@ -1493,11 +1551,11 @@ class Manager:
         return report
 
     @operation('Checking installed content', detail=lambda self, record: record.get("source_name"))
-    def installed_status(self, record):
+    def installed_status(self, record, *, target_observation=None):
         """Inspect the last installed target even when its source is unavailable."""
         try:
             target = Path(record["target"])
-            actual = observation(target, **payload_options(record))
+            actual = (target_observation or observation)(target, **payload_options(record))
             if record.get("detached"):
                 return "unmanaged"
             if actual["kind"] == "missing":
