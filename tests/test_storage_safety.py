@@ -5,6 +5,8 @@ import hashlib
 import json
 import stat
 import time
+import tracemalloc
+from itertools import count
 from threading import Barrier, Lock, Event
 from pathlib import Path
 import tempfile
@@ -42,13 +44,37 @@ class StorageSafety(unittest.TestCase):
 
 
 class ParallelPayloadInspection(unittest.TestCase):
+    def test_fingerprint_memory_stays_bounded_across_many_directories(self):
+        with tempfile.TemporaryDirectory(prefix="aem-bounded-hash-") as directory:
+            root = Path(directory)
+            for index in range(300):
+                child = root / f"directory-{index:03}"
+                child.mkdir()
+                for number in range(20):
+                    (child / f"file-{number:02}").touch()
+            # Many small directories keep enumeration memory small. Only the
+            # fingerprint call is measured, excluding fixture construction.
+            for parallel in (False, True):
+                with self.subTest(parallel=parallel):
+                    timer = count(step=0.003).__next__ if parallel else lambda: 0
+                    with patch("agent_env_man.payload_io.perf_counter", new=timer):
+                        tracemalloc.start()
+                        try:
+                            fingerprint(root)
+                            _, peak = tracemalloc.get_traced_memory()
+                        finally:
+                            tracemalloc.stop()
+                    # Allow four simultaneous 1 MiB read buffers plus overhead,
+                    # but not thousands of retained futures and their results.
+                    self.assertLess(peak, 8 * 1024 * 1024)
+
     def test_parallel_reads_preserve_serial_hash_encoding(self):
         with tempfile.TemporaryDirectory(prefix="aem-parallel-hash-") as directory:
             root = Path(directory)
             (root / "0-probe").write_bytes(b"probe")
             (root / "a").mkdir()
             (root / "a" / "empty").mkdir()
-            for name in ("a/one", "a/two", "a/three", "a/four", "a-", "z"):
+            for name in ("a/one", "a/two", "a/three", "a/four", "a/five", "a/six", "a/seven", "a/eight", "a-", "z"):
                 (root / name).write_bytes(name.encode() * 100)
             (root / "z").chmod(0o755)
             digest = hashlib.sha256()
