@@ -17,6 +17,10 @@ For contribution setup and check selection, see [Contributing](https://github.co
 - Global options belong before the command; repeated policy options must preserve the distinction between omission and an explicit replacement list.
 - Machine callbacks must emit the JSON required by their agent or worker contracts regardless of ordinary output mode.
 - The standalone installer and external update worker remain standard-library-only because they run outside the installed package environment.
+- Core operations expose optional phase observations independently of Click; the CLI owns terminal detection, stderr rendering, throttling, and the reporter lifetime.
+  Progress samples the current operation while a blocking read or Git subprocess runs, without touching configuration/state or performing extra filesystem inspections.
+  Disabled progress creates no reporter thread; callbacks and internal workers always disable it.
+  Stop and join the reporter before final output or error handling, restore nested observation scopes, and keep stdout/exit codes and queued-work outcomes authoritative.
 - Captured background processes on Windows must not open console windows, including Git, uv, PowerShell profile discovery, and fresh-CLI worker continuations.
   Keep the worker lifetime pipe, process-group termination, captured output, and exit-code behavior intact when controlling console creation.
 

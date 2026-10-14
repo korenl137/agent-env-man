@@ -10,6 +10,7 @@ from urllib.request import url2pathname
 
 from .git_source import Git
 from .model import Error, Source
+from .progress import operation
 from .self_update import release_version, tag_version
 
 
@@ -97,6 +98,7 @@ def prepared(git, path):
     return source, report, tag_object
 
 
+@operation('Publishing prepared release')
 def publish(checkout=None, *, dry_run=False, timeout=30):
     """Return (report, failed), publishing only existing branch/tag refs atomically.
 

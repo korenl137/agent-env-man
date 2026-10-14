@@ -18,6 +18,7 @@ import tomlkit
 
 from .git_source import Git, now
 from .model import Config, Error, overlaps
+from .progress import operation
 from .storage import exists, is_reparse
 
 
@@ -53,6 +54,7 @@ def local_entry(config, git=None):
     return config.catalog_path
 
 
+@operation('Validating catalog')
 def validate(config, state):
     """Validate declarations and existing ownership without fetching content."""
     from .manager import Manager
@@ -134,6 +136,7 @@ def prepare(config, state, *, timeout=30):
             shutil.rmtree(temporary, onerror=writable_retry)
 
 
+@operation(lambda config, state, args: "Catalog " + args.catalog_command)
 def command(config, state, args):
     """Run a catalog operation; never install or update its declared content."""
     action = args.catalog_command

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Optional live stderr progress for long-running foreground operations, showing phases, current targets, and elapsed time across content, repository, catalog, and settings work.
+Terminal text commands enable it automatically; `--progress` and `--no-progress` control it explicitly without changing stdout, JSON results, callback output, or transaction behavior.
+
 ### Changed
 
 - Inspect payload files with bounded parallel I/O when read latency warrants it, retaining synchronous I/O for fast filesystems while preserving existing fingerprints, link handling, exclusion rules, and transaction checks.

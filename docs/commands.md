@@ -1,10 +1,10 @@
 # Command reference
 
 ```text
-aem [--config PATH] [--json | --verbose] COMMAND [ARGS]
+aem [--config PATH] [--json | --verbose] [--progress | --no-progress] COMMAND [ARGS]
 ```
 
-`--config`, `--json`, and `--verbose` are global options and must precede the command.
+`--config`, `--json`, `--verbose`, `--progress`, and `--no-progress` are global options and must precede the command.
 Command-specific options follow their command, for example `aem --json catalog publish --dry-run`.
 Options require their full spelling; abbreviated long options are rejected.
 Every command accepts `-h` or `--help`.
@@ -20,6 +20,25 @@ Use `--verbose` for detailed text, for example `aem --verbose status`; it cannot
 Text durations include units, and previews and last-fetch observations are distinguished from completed operations and current remote observations.
 Use `--json` for the existing JSON report schema, for example `aem --json status` or `aem --json catalog status`.
 Scripts that parse stdout must add `--json`; startup and agent-hook callbacks retain JSON automatically.
+
+### Live progress
+
+Ordinary operations show live progress on stderr when stderr is a terminal and `--json` is omitted.
+In automatic mode, fast operations remain quiet; after about one second, longer work reports its current phase, target identifier, and elapsed command time.
+Source inspection also identifies the source ordinal; updates are sampled at most once per second and repeated unchanged phases are reported at most once every five seconds.
+This is useful for repository download/update/publication, content inspection and installation, detach/recovery, catalog delivery, settings reception/collection/export, and integration setup/removal, including previews.
+It does not imply a percentage, estimated finish time, or completion of queued/background work.
+
+Use global `--progress` to request progress explicitly, including when output is redirected or `--json` is selected; use `--no-progress` to suppress it.
+Progress never changes the final stdout format or exit code, and informational stderr lines do not signify an error.
+Startup, instruction-location callbacks, and internal workers suppress progress even when explicitly requested.
+Progress reporting does not fetch, inspect additional files, or weaken transaction checks.
+
+```bash
+aem --progress update source:example
+aem --json --progress status > status.json
+aem --no-progress sync
+```
 
 ## Exit codes
 

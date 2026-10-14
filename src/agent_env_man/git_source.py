@@ -8,6 +8,7 @@ import subprocess
 import time
 
 from .model import Error, Source
+from .progress import operation
 
 
 def now() -> str:
@@ -20,6 +21,7 @@ class Git:
         self.timeout = timeout
         self.deadline = time.monotonic() + timeout
 
+    @operation(lambda self, path, *args, **options: {"clone": "Downloading repository", "fetch": "Fetching repository", "push": "Publishing repository"}.get(args[0] if args else "", "Checking repository"), detail=lambda self, path, *args, **options: Path(path).name if path is not None else None)
     def run(self, path: Path | None, *args: str, check: bool = True, strict_utf8: bool = False, raw: bool = False) -> subprocess.CompletedProcess:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
