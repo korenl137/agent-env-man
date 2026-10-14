@@ -39,7 +39,7 @@ def atomic_write(path: Path, data: bytes, mode: int = 0o600):
             os.unlink(temporary)
 
 
-def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".", exclusions=(), exclude_prefix="") -> str:
+def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=False, source_relative=".", exclusions=(), exclude_prefix="", permissions="strict") -> str:
     """Hash regular payloads, including empty directories and executable bits.
 
     The default rejects nested links and special files. Opted-in POSIX directory
@@ -47,9 +47,11 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
     ordinary node hashes remain compatible with existing ownership.
     """
     from .payload_policy import excluded
+    from .permissions import validate
+    validate(permissions)
     if preserve_symlinks:
         from .payload_links import scan
-        return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix)[0]
+        return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix, permissions=permissions)[0]
     digest = hashlib.sha256()
 
     # Consume a bounded window in traversal order, including across recursive
@@ -72,7 +74,7 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
         kind = "d" if stat.S_ISDIR(info.st_mode) else "f" if stat.S_ISREG(info.st_mode) else None
         if kind is None:
             raise Error(f"Special files are unsupported: {current}")
-        executable = info.st_mode & 0o111 if os.name != "nt" else 0
+        executable = info.st_mode & 0o111 if os.name != "nt" and permissions == "strict" else 0
         return info, kind, json.dumps([relative, kind, executable], ensure_ascii=True).encode() + b"\0"
 
     def file_piece(current, relative):
@@ -121,16 +123,45 @@ def observation(path: Path, **policy) -> dict:
         return {"kind": "link", "to": os.readlink(path)}
     if not exists(path):
         return {"kind": "missing"}
-    return {"kind": "directory" if path.is_dir() else "file", "hash": fingerprint(path, **policy)}
+    result = {"kind": "directory" if path.is_dir() else "file", "hash": fingerprint(path, **policy)}
+    if policy.get("permissions") == "best-effort":
+        from .permissions import snapshot, digest
+        result["permissions_hash"] = digest(snapshot(path, **policy))
+    return result
 
 
-def copy_payload(source: Path, destination: Path, *, exclude_git: bool = False, **policy):
-    if policy.get("preserve_symlinks"):
+def copy_payload(source: Path, destination: Path, *, exclude_git: bool = False, permission_failures=None, destination_modes=None, **policy):
+    if policy.get("preserve_symlinks") or (policy.get("permissions") == "best-effort" and os.name != "nt"):
         from .payload_links import scan
-        scan(source, destination=destination, exclude_git=exclude_git, **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
+        scan(source, destination=destination, exclude_git=exclude_git, allow_symlinks=policy.get("preserve_symlinks", False), permission_failures=permission_failures, destination_modes=destination_modes, **{k: v for k, v in policy.items() if k != "preserve_symlinks"})
         return
     from .payload_policy import excluded
     fingerprint(source, exclude_git=exclude_git, **policy)
+    if policy.get("permissions") == "best-effort":
+        from .permissions import apply as apply_permissions
+        def metadata(src, dst):
+            info = src.stat()
+            relative = src.relative_to(source).as_posix() if source.is_dir() else "."
+            wanted = (destination_modes or {}).get(relative, stat.S_IMODE(info.st_mode))
+            apply_permissions(dst, wanted, path=relative, failures=permission_failures)
+            os.utime(dst, ns=(info.st_atime_ns, info.st_mtime_ns))
+        def copy_file(src, dst):
+            shutil.copyfile(src, dst)
+            metadata(Path(src), Path(dst))
+            return dst
+        from .payload_policy import excluded
+        def visit(src, dst, relative=""):
+            if src.is_dir():
+                dst.mkdir()
+                for child in sorted(src.iterdir()):
+                    name = "/".join(p for p in (relative, child.name) if p)
+                    if not (exclude_git and not relative and child.name == ".git") and not excluded(name, policy.get("exclusions", ()), policy.get("exclude_prefix", "")):
+                        visit(child, dst / child.name, name)
+                metadata(src, dst)
+            else:
+                copy_file(src, dst)
+        visit(source, destination)
+        return
     if source.is_dir():
         # A repository-root skill can be installed directly, but detaching or
         # copying it must not clone Git administration data or a worktree link.

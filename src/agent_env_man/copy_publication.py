@@ -22,6 +22,8 @@ class Collection:
     source_hash: str
     copy_hash: str
     report: dict
+    source_observation: dict
+    copy_observation: dict
 
 
 def tree(path, *, exclude_git=False, **policy):
@@ -34,8 +36,8 @@ def tree(path, *, exclude_git=False, **policy):
             raise Error(f'Payload symlinks/junctions are unsupported: {current}')
         relative = current.relative_to(path)
         result[relative.as_posix()] = ('directory' if current.is_dir() else 'file',
-                                     current.stat().st_mode & 0o111 if os.name != 'nt' else 0,
-                                     None if current.is_dir() else fingerprint(current))
+                                     current.stat().st_mode & 0o111 if os.name != 'nt' and policy.get('permissions', 'strict') == 'strict' else 0,
+                                     None if current.is_dir() else fingerprint(current, permissions=policy.get("permissions", "strict")))
         if current.is_dir():
             for child in sorted(current.iterdir()):
                 if not (exclude_git and current == path and child.name == '.git') and not excluded(child.relative_to(path).as_posix(), policy.get('exclusions', ()), policy.get('exclude_prefix', '')):
@@ -66,6 +68,8 @@ def plan(manager, names):
                 raise Error(f'{item.key}: copy has no saved baseline')
             if record.get('exclude_git', False) != (item.relative == '.'):
                 raise Error(f'{item.key}: copy payload boundary changed; inspect status')
+            if record.get('permissions', 'strict') != item.permissions:
+                raise Error(f'{item.key}: permission policy changed; apply before collection')
             if record.get('exclusions', []) != saved_policy(payload_options(item)).get('exclusions', []):
                 raise Error(f'{item.key}: exclusion policy changed; apply before collection')
             saved_path(str(item.target))
@@ -78,7 +82,10 @@ def plan(manager, names):
             if item.kind == 'instruction':
                 manager.locate_entry(item.target, item.target / item.entry)
             baseline = record['hash']
-            conflict = source_hash != baseline and copy_hash != baseline and source_hash != copy_hash
+            source_observed = manager.source_observation(item)
+            copy_observed = observation(item.target, **payload_options(item))
+            source_changed = source_hash != baseline or (item.permissions == 'best-effort' and source_observed != record.get('source_observation'))
+            conflict = source_changed and copy_hash != baseline and source_hash != copy_hash
             changed = copy_hash != baseline and copy_hash != source_hash
             if changed and not conflict:
                 preservation_paths(item.source, item.target, payload_options(item))
@@ -89,11 +96,11 @@ def plan(manager, names):
                        if os.name == 'nt' else shlex.join(compare))
             report = {'item': item.key, 'source': str(item.source), 'copy': str(item.target),
                       'baseline_hash': baseline, 'source_hash': source_hash, 'copy_hash': copy_hash,
-                      'changed': changed, 'stale': copy_hash == baseline and source_hash != baseline,
+                      'changed': changed, 'stale': copy_hash == baseline and source_changed,
                       'conflict': conflict, 'changes': sorted(p for p in left.keys() | right.keys() if left.get(p) != right.get(p)),
                       'compare': compare,
                       'compare_command': command}
-            result.append(Collection(item, {**record, **({'preserve_symlinks': item.preserve_symlinks} if item.kind == 'directory' else {})}, source_hash, copy_hash, report))
+            result.append(Collection(item, {**record, **({'preserve_symlinks': item.preserve_symlinks} if item.kind == 'directory' else {})}, source_hash, copy_hash, report, source_observed, copy_observed))
     return result
 
 
@@ -104,6 +111,8 @@ def selected_writes(plans):
         for other in writes:
             if not overlaps(plan.item.source, other.item.source):
                 continue
+            if plan.item.permissions != other.item.permissions:
+                raise Error('Differently permissioned overlapping copy collection requires separate selections')
             if (plan.item.exclusions or other.item.exclusions) and (plan.item.source != other.item.source
                     or plan.item.exclusions != other.item.exclusions):
                 raise Error('Nested or differently filtered overlapping copy collection requires separate selections')
@@ -194,10 +203,10 @@ def validate(manager, plans):
     """Recheck source and copy observations before and after temporary staging."""
     manager.state.ready()
     for plan in plans:
-        if manager.payload(plan.item) != plan.source_hash:
+        if manager.payload(plan.item) != plan.source_hash or (plan.item.permissions == "best-effort" and manager.source_observation(plan.item) != plan.source_observation):
             raise Error(f'{plan.item.key}: source changed during collection; retry after inspection')
         saved_path(str(plan.item.target))
-        if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash:
+        if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash or (plan.item.permissions == 'best-effort' and observation(plan.item.target, **payload_options(plan.item)) != plan.copy_observation):
             raise Error(f'{plan.item.key}: copy changed during collection; retry after inspection')
     guard_links(selected_writes(plans), manager.state.data['items'])
 
@@ -228,20 +237,47 @@ def collect(manager, source, plans):
             names = {p.name for p in item.source.iterdir()} | {p.name for p in item.target.iterdir()}
             if plan.record.get('exclude_git'):
                 names.discard('.git')
-            modes.append({'target': str(item.source), 'before': stat.S_IMODE(item.source.stat().st_mode),
-                          'after': stat.S_IMODE(item.target.stat().st_mode)})
+            if item.permissions == 'strict':
+                modes.append({'target': str(item.source), 'before': stat.S_IMODE(item.source.stat().st_mode),
+                              'after': stat.S_IMODE(item.target.stat().st_mode)})
             for name in sorted(names):
                 if excluded(name, item.exclusions):
                     continue
                 target, incoming = item.source / name, item.target / name
                 policy = child_options(payload_options(item), name)
                 before, after = observation(target, **policy), observation(incoming, **policy)
-                if before == after:
+                if before == after or (item.permissions == 'best-effort'
+                        and before.get('kind') == after.get('kind')
+                        and before.get('hash') == after.get('hash')
+                        and before.get('to') == after.get('to')):
                     continue
                 index = str(len(entries))
                 stage, backup = scratch / 'stages' / index, scratch / 'backups' / index
                 if exists(incoming):
-                    copy_payload(incoming, stage, **policy)
+                    if item.permissions == "best-effort":
+                        from .permissions import snapshot, differences
+                        source_types, incoming_types = {}, {}
+                        incoming_modes = snapshot(incoming, node_types=incoming_types, **policy)
+                        source_modes = snapshot(target, node_types=source_types, **policy) if exists(target) else {}
+                        # Replaced node types use incoming modes; a file's mode
+                        # can make a new directory inaccessible, and a directory's
+                        # mode can make a replacement file executable.
+                        destination_modes = {path: mode for path, mode in source_modes.items()
+                                             if source_types[path] == incoming_types.get(path)}
+                        failures = []
+                        copy_payload(incoming, stage, destination_modes=destination_modes, permission_failures=failures, **policy)
+                        staged = observation(stage, **policy)
+                        if (staged.get("kind") != after.get("kind") or staged.get("hash") != after.get("hash")
+                                or staged.get("to") != after.get("to")):
+                            raise Error(f'{item.key}: copy changed while staging')
+                        requested = {**incoming_modes, **destination_modes}
+                        changes = differences(requested, snapshot(stage, **policy), failures)
+                        plan.report.setdefault("permission_differences", []).extend(
+                            {**change, "path": name if change["path"] == "." else name + "/" + change["path"]}
+                            for change in changes)
+                        after = staged
+                    else:
+                        copy_payload(incoming, stage, **policy)
                     if observation(stage, **policy) != after:
                         raise Error(f'{item.key}: copy changed while staging')
                 retained = retention(target, stage, policy)
@@ -273,13 +309,18 @@ def collect(manager, source, plans):
             if observation(Path(entry['target']), **payload_options(entry)) != entry['after']:
                 raise Error('Source changed before collection state commit')
         for plan in plans:
-            if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash:
+            if fingerprint(plan.item.target, exclude_git=plan.record.get('exclude_git', False), **payload_options(plan.item)) != plan.copy_hash or (plan.item.permissions == 'best-effort' and observation(plan.item.target, **payload_options(plan.item)) != plan.copy_observation):
                 raise Error(f'{plan.item.key}: copy changed before collection state commit')
             current = manager.payload(plan.item)
             if plan.report['changed'] and current != plan.copy_hash:
                 raise Error(f'{plan.item.key}: source changed before collection state commit')
             if current == plan.copy_hash:
-                state.data['items'][plan.item.key] = {**plan.record, 'hash': plan.copy_hash}
+                record = {**plan.record, 'hash': plan.copy_hash}
+                if plan.item.permissions == "best-effort" and plan.report['changed']:
+                    record['source_observation'] = manager.source_observation(plan.item)
+                    manager.permission_record(record, plan.item.source, plan.item.target, payload_options(plan.item))
+                    record["collection_permission_differences"] = plan.report.get("permission_differences", [])
+                state.data['items'][plan.item.key] = record
         state.data['pending'] = None
         try:
             state.save()
@@ -309,7 +350,7 @@ def recover(state):
         raise Error('Incomplete copy collection recovery journal')
     targets = []
     for index, entry in enumerate(journal['files']):
-        if not isinstance(entry, dict) or set(entry) - {'preserve_symlinks', 'relative', 'exclusions', 'exclude_prefix', 'retained'} != {'target', 'stage', 'backup', 'before', 'after'}:
+        if not isinstance(entry, dict) or set(entry) - {'preserve_symlinks', 'relative', 'exclusions', 'exclude_prefix', 'retained', 'permissions'} != {'target', 'stage', 'backup', 'before', 'after'}:
             raise Error('Invalid copy collection recovery entry')
         policy = payload_options(entry)
         target, stage, backup = [saved_path(entry[k]) for k in ('target', 'stage', 'backup')]
@@ -358,6 +399,8 @@ def recover(state):
             if exists(stage):
                 (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
             copy_payload(backup, stage, **policy)
+            if observation(stage, **policy) != entry["before"]:
+                raise Error("Recovery stopped: restored content or permissions differ from backup")
             (replace_link_entry if policy.get("preserve_symlinks") else os.replace)(stage, target)
         elif entry['before'] == {'kind': 'missing'} and exists(target):
             (remove_link_entry if policy.get("preserve_symlinks") else remove)(target)

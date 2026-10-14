@@ -142,6 +142,49 @@ class ParallelPayloadInspection(unittest.TestCase):
                 with patch.object(payload_links.os, "read", side_effect=read):
                     self.assertEqual(fingerprint(root, preserve_symlinks=True), expected)
 
+    @unittest.skipUnless(os.name == "posix", "Permission snapshots require POSIX")
+    def test_parallel_inspection_preserves_permission_policy_and_node_types(self):
+        from agent_env_man import payload_links, permissions
+        with tempfile.TemporaryDirectory(prefix="aem-parallel-permissions-") as directory:
+            root = Path(directory)
+            (root / "nested").mkdir()
+            for index in range(12):
+                (root / "nested" / f"file-{index:02}").write_bytes(str(index).encode())
+            executable = root / "nested" / "file-00"
+            executable.chmod(0o644)
+            (root / "alias").symlink_to("nested/file-00")
+            policy = {"permissions": "best-effort", "preserve_symlinks": True}
+            with patch("agent_env_man.payload_io.perf_counter", new=lambda: 0):
+                serial = fingerprint(root, **policy)
+                strict = fingerprint(root, preserve_symlinks=True)
+            expected_modes = {".": stat.S_IMODE(root.stat().st_mode),
+                              "nested": stat.S_IMODE((root / "nested").stat().st_mode)}
+            expected_types = {".": "d", "nested": "d"}
+            for child in (root / "nested").iterdir():
+                relative = child.relative_to(root).as_posix()
+                expected_modes[relative] = stat.S_IMODE(child.stat().st_mode)
+                expected_types[relative] = "f"
+            with patch("agent_env_man.payload_io.perf_counter", new=count(step=0.003).__next__):
+                self.assertEqual(fingerprint(root, **policy), serial)
+                self.assertEqual(fingerprint(root, preserve_symlinks=True), strict)
+                node_types = {}
+                with patch.object(payload_links.os, "read", side_effect=AssertionError("Snapshot read content")):
+                    self.assertEqual(permissions.snapshot(root, node_types=node_types, **policy), expected_modes)
+                self.assertEqual(node_types, expected_types)
+                executable.chmod(0o755)
+                self.assertEqual(fingerprint(root, **policy), serial)
+                self.assertNotEqual(fingerprint(root, preserve_symlinks=True), strict)
+                (root / "alias").unlink()
+                (root / "alias").symlink_to("nested/file-01")
+                self.assertNotEqual(fingerprint(root, **policy), serial)
+            # The ordinary (link-rejecting) parallel path obeys the same policy.
+            (root / "alias").unlink()
+            with patch("agent_env_man.payload_io.perf_counter", new=count(step=0.003).__next__):
+                before = fingerprint(root, permissions="best-effort")
+                executable.chmod(0o644)
+                self.assertEqual(fingerprint(root, permissions="best-effort"), before)
+                self.assertEqual(fingerprint(root, permissions="best-effort", preserve_symlinks=True), before)
+
     @unittest.skipUnless(os.name == "posix", "Pinned descriptor scan requires POSIX")
     def test_failed_parallel_copy_keeps_parents_pinned_until_readers_finish(self):
         from agent_env_man import payload_links

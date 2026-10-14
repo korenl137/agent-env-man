@@ -70,6 +70,7 @@ class Item:
     preserve_symlinks: bool = False
     link_target: Path | None = None
     exclusions: tuple[tuple[str, str], ...] = ()
+    permissions: str = "strict"
 
     @property
     def link_destination(self) -> Path:
@@ -450,7 +451,7 @@ class Config(MachineFile):
             return [Item(source.name, "directory", subdir, source.path / subdir,
                          self.target(data["root"], relative(data.get("destination", source.name))),
                          self.modes.get(source.name, data.get("mode", "link")), "directory",
-                         preserve_symlinks=data.get("preserve_symlinks", False), exclusions=data.get("exclusions", ()))]
+                         preserve_symlinks=data.get("preserve_symlinks", False), exclusions=data.get("exclusions", ()), permissions=data.get("permissions", "strict"))]
         if source.name in self._hooks:
             result = []
             data = self._hooks[source.name]
@@ -479,7 +480,7 @@ class Config(MachineFile):
                 entry_target = self.target(root, relative(data.get("entry_destination", adapter.entry_name)))
                 hook_target = self.target(root, relative(adapter.hook_name))
                 result.extend([
-                    Item(source.name, "bundle" + tail, subdir, payload, target, mode, "instruction", data["entry"], agent, exclusions=data.get("exclusions", ())),
+                    Item(source.name, "bundle" + tail, subdir, payload, target, mode, "instruction", data["entry"], agent, exclusions=data.get("exclusions", ()), permissions=data.get("permissions", "strict")),
                     Item(source.name, "entry" + tail, entry_relative, payload / data["entry"], entry_target,
                          "link", "instruction-entry", data["entry"], agent,
                          link_target=target / data["entry"] if mode == "copy" else None),
@@ -498,7 +499,7 @@ class Config(MachineFile):
             target = self.target(root, Path(source.name))
             by_target.setdefault(target, []).append(agent)
         return [Item(source.name, source.name + suffix(names[0]), relative_path, payload, target, mode, "skill",
-                     agent=names[0], agents=tuple(names), exclusions=data.get("exclusions", ())) for target, names in by_target.items()]
+                     agent=names[0], agents=tuple(names), exclusions=data.get("exclusions", ()), permissions=data.get("permissions", "strict")) for target, names in by_target.items()]
 
     def target(self, root: str | None, destination: Path) -> Path:
         # Instruction bundles default to per-configuration storage, like checkouts.

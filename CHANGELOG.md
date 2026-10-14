@@ -7,10 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Hierarchical catalog permission preservation levels for payloads, with existing strict behavior by default and opt-in best-effort copying.
+Best-effort reports native mode differences, separately protects content and later permission edits, and shares saved policy across status, detach, reverse collection, and recovery.
+
 ### Changed
 
 - Inspect payload files with bounded parallel I/O when read latency warrants it, retaining synchronous I/O for fast filesystems while preserving existing fingerprints, link handling, exclusion rules, and transaction checks.
 Full content inspection remains enabled; no server-specific transport or persistent content cache is required.
+
+### Fixed
+
+- Copy installation and link detach distinguish a changed source from a staged copy mismatch, with destination content and executable-permission guidance for mismatches.
+Failed verification still preserves the existing installation and ownership.
 
 ## [1.2.0-rc.1] &mdash; 2026-10-13
 

@@ -115,13 +115,66 @@ A changed exclusion policy is reported as `configuration-changed`; apply it befo
 Apply still checks local edits against the saved policy or requires a copy already matching the desired included contents; changing exclusions does not authorize overwriting unrelated edits.
 Nested or differently filtered overlapping copy collection with exclusions requires separate selections.
 
+### Permission preservation
+
+`permissions` selects `"strict"` or `"best-effort"` for skill, directory, and instruction bundle payloads.
+The item's value overrides its source's value, which overrides `payload.defaults.permissions`; omission at every level selects `"strict"`.
+Unlike exclusion lists, permission levels replace rather than accumulate.
+Application settings, generated instruction hooks, personal hook scripts, and instruction entry links do not inherit this option.
+
+```toml
+[payload.defaults]
+permissions = "strict"
+
+[sources.nas]
+type = "external"
+permissions = "best-effort"
+
+[directories.documents]
+source = "nas"
+subdir = "documents"
+[directories.documents.install]
+mode = "copy"
+
+[directories.scripts]
+source = "nas"
+subdir = "scripts"
+permissions = "strict"
+[directories.scripts.install]
+mode = "copy"
+```
+
+| Level | Permission handling | Verification |
+| --- | --- | --- |
+| `strict` | Retains existing copy and permission-error behavior. | Retains existing payload hashes, including POSIX executable bits on files and directories. |
+| `best-effort` | Attempts native permission-mode preservation, reports unsupported or denied setters and observed mode differences. | Requires identical contents, entry paths/types, empty directories, and opaque link targets, independently of native permission modes. |
+
+Neither level guarantees complete preservation of ownership, ACLs, extended attributes, or other platform-specific metadata.
+On Windows, native permission observation covers the writable/read-only flag supported by `chmod`, not ACL access rights.
+Best-effort copying retains timestamp application; timestamp failures, content I/O errors, unsupported payload types, and source or target changes remain fatal.
+It does not ensure that copied scripts can execute or reproduce the source's access restrictions.
+
+AEM records both source permissions and the actual installed permissions in best-effort ownership.
+A changed source mode makes a managed copy stale; a later local mode edit remains a protected local modification.
+Existing installations and records without this field retain strict behavior and their original hashes.
+Changing the effective level is reported as `configuration-changed`; apply the new level before reverse collection, using the previous ownership to protect local edits.
+`--replace` authorizes replacement of a conflicting target but never bypasses content or transaction checks.
+
+Link installation does not alter source permissions.
+Its effective level is saved for later detach materialization; detach and recovery use saved policies even without a readable catalog.
+In best-effort reverse collection, existing source entries of the same type retain their native modes where possible.
+New entries and entries replacing a different type attempt the copy's modes.
+Permission-only edits are not exported; collection of content edits records any differences without treating installation-induced mode differences as content changes.
+Overlapping collections with different permission levels require separate selections.
+See [permission reports](commands.md#permission-preservation-reports) and [maintenance](maintenance.md#copy-verification-failures).
+
 ### `sources.NAME`
 
 Every source requires an explicit `type`, either `"git"` or `"external"`.
-Git sources accept only `type`, required `repository`, and optional `branch` and `exclude`.
+Git sources accept only `type`, required `repository`, and optional `branch`, `exclude`, and `permissions`.
 `repository` is a Git URL, SSH repository location, or absolute local repository path.
 When `branch` is absent, bootstrap discovers and records the remote default branch.
-External sources accept `type` and optional `exclude`; their device-local paths belong in machine `external_paths.NAME`.
+External sources accept `type` and optional `exclude` and `permissions`; their device-local paths belong in machine `external_paths.NAME`.
 External sources support directories, instruction bundles, staged settings and personal hooks; skills still require Git sources.
 AEM neither fetches external folders nor administers the service that synchronizes them.
 

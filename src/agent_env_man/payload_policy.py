@@ -78,6 +78,8 @@ def child_options(policy, name):
 
 def saved(policy):
     result = {}
+    if policy.get("permissions") == "best-effort":
+        result["permissions"] = "best-effort"
     if policy.get('preserve_symlinks'):
         result.update(preserve_symlinks=True, relative=policy['source_relative'])
     if policy.get('exclusions'):

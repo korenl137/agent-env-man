@@ -10,8 +10,8 @@ from .updates import TRIGGERS, policy_fields
 
 
 TOP_LEVEL = {"version", "sources", "skills", "directories", "instructions", "settings", "hooks", "updates", "payload"}
-SKILL_FIELDS = {"source", "subdir", "install", "update", "exclude"}
-INSTRUCTION_FIELDS = {"source", "subdir", "entry", "install", "exclude"}
+SKILL_FIELDS = {"source", "subdir", "install", "update", "exclude", "permissions"}
+INSTRUCTION_FIELDS = {"source", "subdir", "entry", "install", "exclude", "permissions"}
 
 
 def table(value, allowed, location):
@@ -49,8 +49,10 @@ def validate(document):
                     "before reconfiguring; existing checkouts and saved state are preserved.")
     table(document, TOP_LEVEL, "Catalog")
     from .payload_policy import patterns, effective, excluded, match
+    from .permissions import validate as permission_policy
     payload = table(document.get("payload", {}), {"defaults"}, "payload")
-    defaults = table(payload.get("defaults", {}), {"exclude"}, "payload.defaults")
+    defaults = table(payload.get("defaults", {}), {"exclude", "permissions"}, "payload.defaults")
+    permission_policy(defaults.get("permissions", "strict"), "payload.defaults.permissions")
     patterns(defaults.get("exclude", []), "payload.defaults.exclude")
     sources = document.get("sources", {})
     if not isinstance(sources, dict):
@@ -60,11 +62,12 @@ def validate(document):
         if not isinstance(data, dict) or data.get("type") not in ("git", "external"):
             raise Error(f"Source {name}: type must be git or external")
         patterns(data.get("exclude", []), f"sources.{name}.exclude")
+        permission_policy(data.get("permissions", "strict"), f"sources.{name}.permissions")
         if data["type"] == "git":
-            table(data, {"type", "repository", "branch", "exclude"}, f"Source {name}")
+            table(data, {"type", "repository", "branch", "exclude", "permissions"}, f"Source {name}")
             Config._validate_repository(data, f"Source {name}")
         else:
-            table(data, {"type", "exclude"}, f"Source {name}")
+            table(data, {"type", "exclude", "permissions"}, f"Source {name}")
     for kind in ("skills", "directories", "instructions"):
         entries = document.get(kind, {})
         if not isinstance(entries, dict):
@@ -73,6 +76,7 @@ def validate(document):
             identifier(name)
             table(data, INSTRUCTION_FIELDS if kind == "instructions" else SKILL_FIELDS | ({"preserve_symlinks"} if kind == "directories" else set()), f"{kind}.{name}")
             patterns(data.get("exclude", []), f"{kind}.{name}.exclude")
+            permission_policy(data.get("permissions", "strict"), f"{kind}.{name}.permissions")
             if kind == "directories":
                 enabled = data.get("preserve_symlinks", False)
                 if not isinstance(enabled, bool):
@@ -165,6 +169,9 @@ def normalize(document):
             source = data["source"]
             field = "repo" if sources[source]["type"] == "git" else "external"
             entry = {field: source, **{k: data[k] for k in ("subdir", "entry") if k in data}}
+            permission_policy = data.get("permissions", sources[source].get("permissions", document.get("payload", {}).get("defaults", {}).get("permissions", "strict")))
+            if permission_policy != "strict":
+                entry["permissions"] = permission_policy
             exclusions = effective(defaults, sources[source].get('exclude', []), data.get('exclude', []), data.get('subdir', '.'))
             if exclusions:
                 entry['exclusions'] = exclusions

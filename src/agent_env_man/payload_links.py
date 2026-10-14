@@ -44,6 +44,10 @@ def options(value):
     from .payload_policy import rules
     exclusions = rules(value.get('exclusions', ()) if isinstance(value, dict) else value.exclusions)
     result = {'exclusions': exclusions} if exclusions else {}
+    from .permissions import validate
+    permission_policy = validate(value.get("permissions", "strict") if isinstance(value, dict) else value.permissions)
+    if permission_policy == "best-effort":
+        result["permissions"] = permission_policy
     if isinstance(value, dict) and value.get('exclude_prefix'):
         prefix = value['exclude_prefix']
         rules([(prefix, 'placeholder')])
@@ -122,7 +126,7 @@ def chmod_directory(path, mode):
         os.fchmod(fd, mode)
 
 
-def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix=""):
+def scan(path, *, source_relative='.', exclude_git=False, destination=None, allow_symlinks=True, exclusions=(), exclude_prefix="", permissions="strict", modes=None, node_types=None, permission_failures=None, destination_modes=None, modes_only=False):
     """Hash and optionally copy one opaque-link tree; also return preview entries.
 
     Regular node encoding is identical to storage.fingerprint. O_NOFOLLOW and
@@ -130,6 +134,8 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
     referents. Changes during traversal abort rather than committing a mixture.
     """
     require_posix()
+    from .permissions import validate, apply as apply_permissions
+    validate(permissions)
     from .payload_policy import excluded
     path = Path(path)
     digest = hashlib.sha256()
@@ -152,7 +158,12 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
             raise Error(f'Special files are unsupported: {logical}')
         if leaf and kind == 'd':
             raise Error(f'Payload changed during inspection: {logical}')
-        executable = before.st_mode & 0o111 if kind != 'l' else 0
+        executable = before.st_mode & 0o111 if kind != 'l' and permissions == 'strict' else 0
+        logical_path = relative.lstrip('/') or '.'
+        if modes is not None and kind != 'l':
+            modes[logical_path] = stat.S_IMODE(before.st_mode)
+        if node_types is not None and kind != 'l':
+            node_types[logical_path] = kind
         target = None
         file_hash = None
         if kind == 'l':
@@ -202,7 +213,7 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                             if not (exclude_git and not relative and child == '.git')
                             and not excluded(f'{relative}/{child}', exclusions, exclude_prefix)]:
                         raise Error(f'Payload changed during inspection: {logical}')
-                else:
+                elif not modes_only:
                     content = hashlib.sha256()
                     while block := os.read(fd, 1024 * 1024):
                         content.update(block)
@@ -225,7 +236,11 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
                         reopened = os.fstat(out_fd)
                         if (copied.st_dev, copied.st_ino) != (reopened.st_dev, reopened.st_ino):
                             raise Error(f'Copied payload changed before metadata update: {logical}')
-                    os.fchmod(out_fd, stat.S_IMODE(before.st_mode))
+                    wanted = (destination_modes or {}).get(logical_path, stat.S_IMODE(before.st_mode))
+                    if permissions == "best-effort":
+                        apply_permissions(out_fd, wanted, path=logical_path, failures=permission_failures)
+                    else:
+                        os.fchmod(out_fd, wanted)
                     os.utime(out_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
             finally:
                 if out_fd is not None:
@@ -296,6 +311,6 @@ def scan(path, *, source_relative='.', exclude_git=False, destination=None, allo
         digest.update(json.dumps([encoded_relative, kind, executable], ensure_ascii=True).encode() + b'\0')
         if kind == 'l':
             digest.update(json.dumps(value, ensure_ascii=True).encode() + b'\0')
-        elif kind == 'f':
+        elif kind == 'f' and not modes_only:
             digest.update(value)
     return digest.hexdigest(), entries
