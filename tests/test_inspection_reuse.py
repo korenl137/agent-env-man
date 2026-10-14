@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from agent_env_man import payload_links, permissions, storage
 from agent_env_man.model import Error
-from scripts.benchmark_payload_inspection import count_inspections
+from inspection_support import count_inspections
 import test_directories as directory_tests
 
 

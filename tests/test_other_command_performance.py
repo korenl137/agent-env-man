@@ -6,7 +6,7 @@ import shutil
 import unittest
 
 from agent_env_man import copy_publication, storage
-from scripts.benchmark_payload_inspection import count_inspections
+from inspection_support import count_inspections
 import test_directories as directory_tests
 
 
