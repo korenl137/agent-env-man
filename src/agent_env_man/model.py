@@ -409,6 +409,7 @@ class Config(MachineFile):
     def sources(self) -> dict[str, Source]:
         """Derive checkout paths; the inventory never needs device-local bindings."""
         result = {}
+        checked_paths, local_repositories = set(), {}
         declarations = {**self.catalog(), **self._directories, **self._instructions, **self._settings, **self._hooks}
         for name, data in declarations.items():
             if "external" in data:
@@ -418,10 +419,17 @@ class Config(MachineFile):
             settings = self._repositories[shared] if shared else data
             repository = settings["repository"]
             if Path(repository).expanduser().is_absolute():
-                repository = str(absolute(repository))
+                if repository not in local_repositories:
+                    local_repositories[repository] = str(absolute(repository))
+                repository = local_repositories[repository]
             path = self.checkout_root / ".aem-repositories" / shared if shared else self.checkout_root / name
-            if path.resolve() != path:
-                raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
+            # Shared consumers repeat the same physical binding. Validate each
+            # unique path once in this mapping construction, then recheck it on
+            # the next property access rather than retaining filesystem state.
+            if path not in checked_paths:
+                if path.resolve() != path:
+                    raise Error(f"Managed checkout path must not redirect through a symlink: {path}")
+                checked_paths.add(path)
             result[name] = Source(name, path, repository, settings.get("branch"))
         return result
 

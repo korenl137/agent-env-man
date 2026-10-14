@@ -104,8 +104,15 @@ class Git:
 
     def idle(self, source: Source):
         """Reject incomplete Git operations without requiring a clean worktree."""
-        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
-            name = self.run(source.path, "rev-parse", "--git-path", marker).stdout
+        markers = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+        paths = self.run(source.path, "rev-parse", *(argument for marker in markers
+                        for argument in ("--git-path", marker))).stdout.splitlines()
+        if len(paths) != len(markers):
+            # Linked-worktree administration paths can contain literal newlines.
+            # Git has no NUL delimiter here; retain the individual-path protocol
+            # when a batch cannot be decoded unambiguously.
+            paths = [self.run(source.path, "rev-parse", "--git-path", marker).stdout for marker in markers]
+        for marker, name in zip(markers, paths):
             location = Path(name)
             if not location.is_absolute():
                 location = source.path / location
@@ -137,7 +144,14 @@ class Git:
         a populated remote are errors, never evidence of an empty repository.
         This check also runs before settings export can change the checkout.
         """
-        self.publication(source)
+        # Identity, idle state and push destination suffice here. Changes are
+        # inspected by callers and refreshed by publish after remote verification;
+        # generating another status/diff/log report at this point wastes scans.
+        self.validate(source)
+        self.idle(source)
+        destinations = self.run(source.path, "remote", "get-url", "--push", "--all", "origin").stdout.splitlines()
+        if destinations != [source.git]:
+            raise Error(f"{source.name}: origin push destination differs from the registered Git URL")
         self.run(source.path, "check-ref-format", "refs/heads/" + source.branch)
         listing = self.run(source.path, "ls-remote", "--refs", "origin").stdout
         if not listing:
