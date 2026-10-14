@@ -48,6 +48,7 @@ Check the included installed-copy tree for local modifications, and reject inclu
 Special files remain unsupported.
 Payload inspection starts with synchronous leaf I/O and enables up to four readers after observing an operation taking at least two milliseconds, with at most eight outstanding tasks.
 This decision is scoped to one inspection and independent of filesystem or transport type; results combine in the existing deterministic traversal order.
+Ordinary fingerprints consume a bounded window of results during traversal rather than retaining completed reads for the whole tree.
 POSIX link-preserving scans retain pinned parent descriptors until all child tasks finish, including failure paths, and retain identity and included-name revalidation.
 Inspection continues to read included file contents on every call; it does not infer unchanged contents from timestamps or reuse a persistent cache.
 Link-enabled payloads hash link identity and raw target text without accessing referents; regular-node hash encoding stays unchanged.

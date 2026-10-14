@@ -1,5 +1,6 @@
 """Local bookkeeping, process locks, and conservative filesystem inspection."""
 
+from collections import deque
 import hashlib
 import json
 import os
@@ -51,9 +52,18 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
         return scan(path, source_relative=source_relative, exclude_git=exclude_git, exclusions=exclusions, exclude_prefix=exclude_prefix)[0]
     digest = hashlib.sha256()
 
-    # Bound outstanding reads as well as worker count. Hash contributions are
-    # combined in traversal order, independently of I/O completion order.
-    pieces = []
+    # Consume a bounded window in traversal order, including across recursive
+    # directory visits, so completed reads do not accumulate for the whole tree.
+    pieces = deque()
+
+    def consume():
+        piece = pieces.popleft()
+        digest.update(piece if isinstance(piece, bytes) else piece.result())
+
+    def append(piece):
+        pieces.append(piece)
+        if len(pieces) >= 8:
+            consume()
 
     def metadata(current, relative):
         info = current.lstat()
@@ -78,9 +88,9 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
     def visit(current, relative, pool):
         _, kind, encoded = metadata(current, relative)
         if kind == "f":
-            pieces.append(file_piece(current, relative))
+            append(file_piece(current, relative))
             return
-        pieces.append(encoded)
+        append(encoded)
         with os.scandir(current) as listing:
             children = sorted(listing, key=lambda entry: entry.name)
         for child in children:
@@ -92,12 +102,12 @@ def fingerprint(path: Path, *, exclude_git: bool = False, preserve_symlinks=Fals
             if child.is_dir(follow_symlinks=False):
                 visit(Path(child.path), child_relative, pool)
             else:
-                pieces.append(pool.submit(file_piece, Path(child.path), child_relative))
+                append(pool.submit(file_piece, Path(child.path), child_relative))
 
     with PayloadReads() as pool:
         visit(path, "", pool)
-        for piece in pieces:
-            digest.update(piece if isinstance(piece, bytes) else piece.result())
+        while pieces:
+            consume()
     return digest.hexdigest()
 
 
