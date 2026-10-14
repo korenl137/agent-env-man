@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import subprocess
 import time
+import sys
 
 import click
 
@@ -16,6 +17,7 @@ from .manager import Manager
 from .model import Config, Error, MachineFile, identifier
 from .output import human_report
 from .reports import describe_report
+from .progress import Progress, step, finish
 from .storage import State, lock
 
 
@@ -92,6 +94,7 @@ class Runtime:
     config_path: Path
     json_output: bool = False
     verbose: bool = False
+    progress: bool | None = None
 
     def emit(self, report, *, machine=False, failed=False):
         if machine and isinstance(report, str):
@@ -110,7 +113,34 @@ class Runtime:
         click.echo(human_report(report, command=" ".join(reversed(commands)),
                                 verbose=self.verbose, planned=planned, failed=failed))
 
-    def run(self, operation, *, maintenance=False, missing_ok=False, preview=False,
+    def progress_scope(self, *, callback=None):
+        context = click.get_current_context(silent=True)
+        commands = []
+        preview = False
+        while context is not None and context.parent is not None:
+            commands.append(context.info_name)
+            preview |= bool(context.params.get("dry_run"))
+            context = context.parent
+        command = " ".join(reversed(commands)) or "operation"
+        if preview:
+            command += " preview"
+        internal = callback is not None or any(name.startswith("_") for name in commands)
+        enabled = False
+        if not internal:
+            if self.progress is not None:
+                enabled = self.progress
+            elif not self.json_output:
+                try:
+                    enabled = sys.stderr.isatty()
+                except (OSError, ValueError):
+                    pass
+        return Progress(command, sys.stderr, enabled=enabled, immediate=self.progress is True)
+
+    def run(self, operation, **options):
+        with self.progress_scope(callback=options.get("callback")):
+            return self._run(operation, **options)
+
+    def _run(self, operation, *, maintenance=False, missing_ok=False, preview=False,
             status_fallback=False, callback=None, agent=None, output=None):
         """Run an operation returning (report, failed) under the required locks.
 
@@ -122,6 +152,7 @@ class Runtime:
         as plain directory paths for shell integration; errors retain stderr.
         """
         try:
+            step("Reading machine configuration")
             config = MachineFile(self.config_path, missing_ok=missing_ok)
             try:
                 tool_lock = self_update.installation_lock(self_update.validate(config.doc.get("self_update", {})))
@@ -134,6 +165,7 @@ class Runtime:
             def remaining():
                 return max(0, deadline - time.monotonic()) if deadline is not None else 0
 
+            step("Acquiring operation locks")
             with (lock(tool_lock, timeout=remaining(), shared=True) if tool_lock and not preview else nullcontext()), ExitStack() as locks:
                 snapshot = None
                 if not preview:
@@ -148,6 +180,7 @@ class Runtime:
                         snapshot = {path: path.read_bytes() if path.exists() else None
                                     for path in (self.config_path, config.state_dir / 'state.json')}
                 # Re-read after acquiring the lock or capturing the snapshot.
+                step("Loading catalog and saved state")
                 saved_error = None
                 if maintenance:
                     config = MachineFile(self.config_path, missing_ok=missing_ok)
@@ -162,6 +195,7 @@ class Runtime:
                         config = MachineFile(self.config_path)
                         state = State(config.state_dir, maintenance=True)
                         saved_error = exc
+                step("Running operation")
                 report, failed = operation(Session(Manager(config, state), saved_error))
                 if snapshot is not None:
                     state.ready()
@@ -171,10 +205,13 @@ class Runtime:
                 if output is None:
                     if callback is None:
                         report = describe_report(report, config, state)
+                    finish(failed)
                     self.emit(report, machine=callback is not None, failed=failed)
                 else:
+                    finish(failed)
                     output(report)
         except OPERATION_ERRORS as exc:
+            finish(True)
             if callback == "agent-hook":
                 adapter = profile(agent)
                 failure = adapter.failure(f"AEM instruction root lookup failed: {exc}")

@@ -8,10 +8,20 @@ import subprocess
 import time
 
 from .model import Error, Source
+from .progress import operation
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def progress_label(arguments):
+    # Publication prefixes push with configuration overrides; their values
+    # are not Git subcommands.
+    while arguments[:1] == ("-c",):
+        arguments = arguments[2:]
+    return {"clone": "Downloading repository", "fetch": "Fetching repository",
+            "push": "Publishing repository"}.get(arguments[0] if arguments else "", "Checking repository")
 
 
 class Git:
@@ -20,6 +30,7 @@ class Git:
         self.timeout = timeout
         self.deadline = time.monotonic() + timeout
 
+    @operation(lambda self, path, *args, **options: progress_label(args), detail=lambda self, path, *args, **options: Path(path).name if path is not None else None)
     def run(self, path: Path | None, *args: str, check: bool = True, strict_utf8: bool = False, raw: bool = False) -> subprocess.CompletedProcess:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:

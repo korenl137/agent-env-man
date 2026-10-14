@@ -13,6 +13,7 @@ import tomlkit
 from .agents import profile
 from .manager import Manager, Plan
 from .model import Config, Error, Item, absolute, overlaps
+from .progress import operation
 from .storage import exists, is_reparse, observation, link_matches
 from .settings import Settings, shares_hook_file
 
@@ -272,6 +273,7 @@ def machine_plan(config, document):
                 observation(config.path), record, not exists(config.path) or content != config.path.read_bytes(), content)
 
 
+@operation('Connecting selected integrations')
 def setup(manager, args):
     """Preflight all integrations, then use the existing per-target journal.
 
@@ -429,6 +431,7 @@ def setup(manager, args):
             'next': 'Run bootstrap CATALOG, then apply; restart selected shells and review agent hook trust.'}
 
 
+@operation('Removing selected integrations')
 def remove_integrations(manager, args):
     """Remove only requested saved integrations without rebuilding remaining ones.
 

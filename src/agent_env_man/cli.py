@@ -18,17 +18,18 @@ from .model import default_config
               help="Machine-local TOML file.")
 @click.option("--json", "json_output", is_flag=True, help="Emit JSON instead of readable text.")
 @click.option("--verbose", is_flag=True, help="Show detailed text reports; cannot be combined with --json.")
+@click.option("--progress/--no-progress", default=None, help="Show live progress on stderr; default: terminal text output only.")
 @click.pass_context
-def cli(ctx, config, json_output, verbose):
+def cli(ctx, config, json_output, verbose, progress):
     """Install skills and personal instruction bundles from an independent catalog.
 
-    Global --config, --json and --verbose options precede COMMAND.
+    Global --config, --json, --verbose and progress options precede COMMAND.
     """
     # Parsing and help must remain side-effect free. Configuration/state reads
     # and locks belong to the selected command's Runtime.run boundary.
     if json_output and verbose:
         raise click.UsageError("--json and --verbose are mutually exclusive")
-    ctx.obj = Runtime(config, json_output, verbose)
+    ctx.obj = Runtime(config, json_output, verbose, progress)
 
 
 for command in (docs, delivery.bootstrap, delivery.update, delivery.publish,

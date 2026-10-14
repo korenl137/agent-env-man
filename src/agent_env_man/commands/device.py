@@ -120,10 +120,13 @@ def self_publish_command(runtime, checkout, timeout, dry_run):
     verify the remote. No machine configuration or setup is required.
     """
     from ..self_publish import publish
-    report, failed = publish(checkout, dry_run=dry_run, timeout=timeout)
-    runtime.emit(report)
-    if failed:
-        raise click.exceptions.Exit(1)
+    with runtime.progress_scope():
+        report, failed = publish(checkout, dry_run=dry_run, timeout=timeout)
+        from ..progress import finish
+        finish(failed)
+        runtime.emit(report)
+        if failed:
+            raise click.exceptions.Exit(1)
 
 
 @click.command(name="automation")

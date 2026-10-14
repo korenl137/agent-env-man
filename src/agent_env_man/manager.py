@@ -12,6 +12,7 @@ import uuid
 from .agents import profile, suffix
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
+from .progress import operation, step
 from .payload_links import require_supported, unsupported_reason, options as payload_options, replace as replace_link_entry, remove as remove_link_entry
 from .payload_policy import saved as saved_policy, preservation_paths, retention, park, restore_retained
 from .storage import State, copy_payload, exists, fingerprint, is_reparse, observation, remove, saved_path, link_matches
@@ -63,6 +64,7 @@ class Manager:
             if any(old.get('source') == str(path / old.get('relative', '.')) for path in paths):
                 require_supported(old, key)
 
+    @operation('Preparing sources')
     def prepare_skills(self, names=(), *, timeout=30, defer_payloads=False):
         """Clone listed repositories, validating consumers before publishing a checkout.
 
@@ -87,6 +89,7 @@ class Manager:
             if not selected:
                 continue
             name, source = members[0]
+            step("Preparing source", name)
             temporary = None
             try:
                 if not source.git:
@@ -289,6 +292,7 @@ class Manager:
                     raise Error(f"Overlapping targets: {item.key} and {key}")
             owners[item.key] = item.target
 
+    @operation('Inspecting source content', detail=lambda self, item: item.key)
     def payload(self, item):
         if item.kind == "setting":
             from .settings import Settings
@@ -599,6 +603,7 @@ class Manager:
         actual = snapshot(target, **policy)
         record["permission_differences"] = differences(requested, actual, failures)
 
+    @operation('Planning installation', detail=lambda self, item, **options: item.key)
     def plan(self, item, *, adopt=False, replace=False, reattach=False):
         payload_hash = self.payload(item)
         old = self.state.data["items"].get(item.key)
@@ -669,6 +674,7 @@ class Manager:
             return Plan(item, before, record, not desired)
         raise Error(f"Unsupported installation mode: {item.mode}")
 
+    @operation(lambda self, plan: 'Preserving detached content' if plan.materialize is not None else 'Removing integration' if plan.delete else 'Installing target' if plan.change else 'Checking target', detail=lambda self, plan: plan.item.key)
     def install(self, plan):
         item = plan.item
         copy_policy = payload_options(plan.record)
@@ -813,6 +819,7 @@ class Manager:
             if exists(stage) and not self.state.data.get("pending"):
                 (remove_link_entry if policy.get("preserve_symlinks") else remove)(stage)
 
+    @operation('Recovering interrupted changes')
     def recover(self):
         pending = self.state.data.get("pending")
         if pending is None:
@@ -909,6 +916,7 @@ class Manager:
         self.state.data["pending"] = None
         self.state.save()
 
+    @operation('Planning and applying content')
     def apply(self, requested=(), *, adopt=False, replace=False, reattach=False, dry_run=False, timeout=30, agent=None):
         self.state.ready()
         if (adopt or replace) and not requested:
@@ -1030,6 +1038,7 @@ class Manager:
             result.append(first)
         return result
 
+    @operation('Preserving and detaching content')
     def detach(self, keys, *, dry_run=False, agent=None):
         self.state.ready()
         requested = set(keys)
@@ -1058,7 +1067,8 @@ class Manager:
             if not records[key].get("detached"):
                 require_supported(records[key], key)
         plans, untouched = [], []
-        for key in keys:
+        for number, key in enumerate(keys, 1):
+            step(f"Planning detach {number}/{len(keys)}", key)
             old = self.state.data["items"].get(key)
             if old is None:
                 raise Error(f"Not a managed item: {key}")
@@ -1110,6 +1120,7 @@ class Manager:
             report.append(entry)
         return report
 
+    @operation('Collecting and publishing content', detail=lambda self, names=(), **options: names[0] if isinstance(names, (tuple, list)) and len(names) == 1 else None)
     def publish(self, names, *, message=None, from_copy=False, dry_run=False, timeout=30):
         """Publish each selected checkout once, reporting every catalog consumer.
 
@@ -1202,6 +1213,7 @@ class Manager:
                 self.state.save()
         return results, failed
 
+    @operation('Updating sources')
     def update(self, names=(), *, timeout=30, prepare_settings=False, fetch_cache=None):
         self.state.ready()
         sources = self.config.sources
@@ -1228,6 +1240,7 @@ class Manager:
             if not selected:
                 continue
             name, source = members[0]
+            step("Updating source", name)
             source_state = self.state.data["sources"].setdefault(name, {})
             try:
                 if source.git:
@@ -1369,6 +1382,7 @@ class Manager:
             return ("conflict" if desired != old["hash"] else "modified-locally"), None
         raise Error(f"Unsupported installation mode: {item.mode}")
 
+    @operation('Inspecting sources and installations')
     def status(self, *, refresh=False, timeout=30, agent=None):
         report = {"sources": [], "items": [], "pending": self.state.data.get("pending")}
         if "startup" in self.state.data:
@@ -1379,7 +1393,8 @@ class Manager:
             report["catalog_error"] = str(exc)
             sources = {}
         seen = set()
-        for name, source in sources.items():
+        for number, (name, source) in enumerate(sources.items(), 1):
+            step(f"Inspecting source {number}/{len(sources)}", name)
             entry = {"source": name, "path": str(source.path), "transport": "git" if source.git else "external",
                      **self.state.data["sources"].get(name, {})}
             entry["last_update_error"] = entry.pop("error", None)
@@ -1450,6 +1465,7 @@ class Manager:
                                         "status": "detached" if old.get("detached") else "setup" if old.get("kind") == "setup" else "orphaned-or-source-unavailable"})
         return report
 
+    @operation('Inspecting saved installations')
     def saved_status(self, *, agent=None, error=None):
         """Inspect recorded targets without interpreting source declarations or modes."""
         report = {"sources": [], "items": [], "pending": self.state.data["pending"],
@@ -1476,6 +1492,7 @@ class Manager:
             report["items"].append(item)
         return report
 
+    @operation('Checking installed content', detail=lambda self, record: record.get("source_name"))
     def installed_status(self, record):
         """Inspect the last installed target even when its source is unavailable."""
         try:

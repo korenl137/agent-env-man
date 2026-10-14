@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Optional live stderr progress for long-running foreground operations, showing phases, current targets, and elapsed time across content, repository, catalog, and settings work.
+Terminal text commands enable it automatically; `--progress` and `--no-progress` control it explicitly without changing stdout, JSON results, callback output, or transaction behavior.
+
 ## [1.2.0-rc.2] &mdash; 2026-10-14
 
 ### Added

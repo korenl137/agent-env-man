@@ -15,6 +15,7 @@ import uuid
 import tomlkit
 
 from .model import Error, Item, identifier, overlaps, relative
+from .progress import operation
 from .settings_formats import FORMATS, SettingsFormat
 from .storage import atomic_write, exists, is_reparse, observation, saved_path
 
@@ -434,6 +435,7 @@ class Settings:
                   (meta, snapshot["management"].encode(), guards.get(str(meta), observation(meta)))]
         transaction(self.state, writes, {f'{record["source_name"]}:settings': record}, dry_run=dry_run)
 
+    @operation('Preparing settings stage', detail=lambda self, item, **options: item.key)
     def prepare(self, item, *, dry_run=False):
         source_binding = self.config.sources[item.source_name]
         if source_binding.git:
@@ -459,6 +461,7 @@ class Settings:
         self.save_stage(record, source, dry_run=dry_run)
         return {"setting": item.source_name, "status": "planned" if dry_run else "prepared", "stage": str(root)}
 
+    @operation('Receiving shared settings', detail=lambda self, name, **options: name)
     def receive(self, name, *, dry_run=False):
         item = self.item(name)
         record = self.record(name)
@@ -478,6 +481,7 @@ class Settings:
         self.save_stage(record, result, dry_run=dry_run)
         return {"setting": name, "status": "conflict" if paths else "received", "conflicts": [list(p) for p in paths]}
 
+    @operation('Resolving settings conflict', detail=lambda self, name, *args, **options: name)
     def resolve(self, name, path, take, *, dry_run=False):
         self.item(name)
         record = self.record(name)
@@ -509,6 +513,7 @@ class Settings:
         self.save_stage(record, working, dry_run=dry_run)
         return {"setting": name, "status": "resolved", "remaining": record["conflicts"]}
 
+    @operation('Collecting settings changes', detail=lambda self, name, *args, **options: name)
     def collect(self, name, paths=(), *, dry_run=False):
         item = self.item(name)
         record = self.record(name)
@@ -544,6 +549,7 @@ class Settings:
         self.save_stage(record, result, dry_run=dry_run)
         return {"setting": name, "status": "collected", "paths": [list(p) for p in sorted(changed(local, result))]}
 
+    @operation('Releasing settings field', detail=lambda self, name, *args, **options: name)
     def release(self, name, path, *, dry_run=False):
         self.item(name)
         record = self.record(name)
@@ -554,6 +560,7 @@ class Settings:
         self.save_stage(record, working, dry_run=dry_run)
         return {"setting": name, "status": "released", "path": list(path)}
 
+    @operation('Planning settings application', detail=lambda self, item, **options: item.key)
     def apply_plan(self, item, *, replace=False, reattach=False):
         record = self.record(item.source_name)
         if record.get("detached") and not reattach:
@@ -614,6 +621,7 @@ class Settings:
                   (meta, snapshot["management"].encode(), desired.observations[str(meta)])]
         return writes, record
 
+    @operation("Preparing settings export", detail=lambda self, name: name)
     def export_plan(self, name):
         item = self.item(name)
         record = self.record(name)
@@ -638,6 +646,7 @@ class Settings:
                                "changed": any(before["kind"] != "file" or path.read_bytes() != content
                                               for path, content, before in writes[:2]), "paths": [list(p) for p in sorted(changed(incoming, result))]}
 
+    @operation('Exporting settings')
     def export(self, names, *, dry_run=False):
         self.state.ready()
         plans = [self.export_plan(name) for name in dict.fromkeys(names)]

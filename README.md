@@ -116,6 +116,7 @@ If the catalog itself changed upstream, use `aem catalog update`, then bootstrap
 Content updates do not refresh the catalog.
 
 Default output summarizes results; use `aem --verbose status` for details or `aem --json status` for scripts.
+Long foreground work shows live progress on terminal stderr; use global `--progress` to request it explicitly or `--no-progress` to suppress it.
 Global options precede the command and `--verbose` cannot be combined with `--json`.
 See [Commands](docs/commands.md) for selectors, output contracts, and preview limits.
 
