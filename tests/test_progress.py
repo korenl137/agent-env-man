@@ -168,6 +168,59 @@ class ProgressCommands(unittest.TestCase):
         finally:
             fixture.doCleanups()
 
+    def external_copy(self, *, best_effort=False):
+        from test_directories import Directories
+        fixture = Directories()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        if best_effort:
+            fixture.document['payload'] = {'defaults': {'permissions': 'best-effort'}}
+        fixture.external(mode="copy")
+        return fixture
+
+    def test_progress_bootstrap_reuses_saved_external_binding(self):
+        fixture = self.external_copy()
+        result = self.runner.invoke(cli, ["--config", str(fixture.config),
+                                         "--json", "--progress", "bootstrap"])
+        self.assertEqual(result.exit_code, 0, result.output + repr(result.exception))
+        self.assertEqual(json.loads(result.stdout)["items"][0]["status"], "external-ready")
+        self.assertIn("Finished", result.stderr)
+        self.assertFalse(fixture.target.exists())
+
+    def test_progress_applies_best_effort_copy_and_records_current_contents(self):
+        fixture = self.external_copy(best_effort=True)
+        result = self.runner.invoke(cli, ["--config", str(fixture.config),
+                                         "--json", "--progress", "apply", "--item", "cases"])
+        self.assertEqual(result.exit_code, 0, result.output + repr(result.exception))
+        self.assertEqual(json.loads(result.stdout)[0]["action"], "install")
+        self.assertIn("Finished", result.stderr)
+        self.assertEqual((fixture.target / "first.md").read_bytes(),
+                         (fixture.external_root / "first.md").read_bytes())
+        self.assertEqual(fixture.run_cli("status")["items"][0]["status"], "current")
+
+    def test_progress_status_observes_installed_copy(self):
+        fixture = self.external_copy()
+        fixture.run_cli("apply", "--item", "cases")
+        expected = fixture.run_cli("status")
+        for option in ("--no-progress", "--progress"):
+            with self.subTest(option=option):
+                result = self.runner.invoke(cli, ["--config", str(fixture.config),
+                                                 "--json", option, "status"])
+                self.assertEqual(result.exit_code, 0, result.output + repr(result.exception))
+                self.assertEqual(json.loads(result.stdout), expected)
+                self.assertEqual("Finished" in result.stderr, option == "--progress")
+
+    def test_terminal_default_status_observes_installed_copy(self):
+        fixture = self.external_copy()
+        fixture.run_cli("apply", "--item", "cases")
+        with self.runner.isolation() as streams:
+            with patch.object(sys.stderr, "isatty", return_value=True), \
+                    patch("agent_env_man.progress.DELAY", 0):
+                code = main(["--config", str(fixture.config), "status"])
+            stdout = streams[0].getvalue().decode()
+        self.assertEqual(code, 0)
+        self.assertIn("current", stdout)
+
     def test_repository_fetch_is_visible_while_subprocess_is_blocked(self):
         import subprocess
         from test_skill_catalog import SkillCatalog
