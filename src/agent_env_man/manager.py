@@ -301,7 +301,7 @@ class Manager:
                     raise Error(f"Overlapping targets: {item.key} and {key}")
             owners[item.key] = item.target
 
-    @operation('Inspecting source content', detail=lambda self, item: item.key)
+    @operation('Inspecting source content', detail=lambda self, item, **options: item.key)
     def payload(self, item, *, observe=False, modes=None, entries=None, inspector=None):
         if item.kind == "setting":
             from .settings import Settings
@@ -1580,7 +1580,7 @@ class Manager:
             report["items"].append(item)
         return report
 
-    @operation('Checking installed content', detail=lambda self, record: record.get("source_name"))
+    @operation('Checking installed content', detail=lambda self, record, **options: record.get("source_name"))
     def installed_status(self, record, *, target_observation=None):
         """Inspect the last installed target even when its source is unavailable."""
         try:
