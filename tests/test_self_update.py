@@ -252,6 +252,46 @@ class OriginalWorker(unittest.TestCase):
         self.assertEqual(result['status'], 'cancelled')
         run.assert_not_called()
 
+    def test_invalid_runtime_fails_before_remote_preparation(self):
+        self.settings['python'] = str(Path(self.settings['tool_dir']) / 'python')
+        self.request['saved_settings'] = dict(self.settings)
+        def unexpected(*args):
+            self.fail('Invalid runtime reached remote preparation')
+        result, perform, run = self.run_worker(prepare=unexpected)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('outside the uv tools directory', result['error'])
+        perform.assert_not_called()
+        run.assert_not_called()
+
+    def test_unreadable_policy_after_preparation_prevents_replacement(self):
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                def prepare(*args):
+                    if missing:
+                        self.config.unlink()
+                    else:
+                        self.config.write_text('broken = [', encoding='utf-8')
+                result, perform, run = self.run_worker(prepare=prepare)
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(self.config.exists(), not missing)
+                if not missing:
+                    self.assertEqual(self.config.read_text(), 'broken = [')
+                perform.assert_not_called()
+                run.assert_not_called()
+
+    def test_superseded_refresh_does_not_overwrite_result_or_continue_full_run(self):
+        self.full_request()
+        self.records = {'official': {'official_skill': True, 'agent': 'codex'}}
+        self.document['agents'] = {'codex': {}}
+        newer = {'token': 'new-request', 'status': 'queued', 'time': 123}
+        def refresh(command, **kwargs):
+            self.assertIn('_self-skill-refresh', command)
+            self_update.write_json(self.result, newer)
+            return subprocess.CompletedProcess(command, 0, stdout='{}')
+        result, _, run = self.run_worker(run=refresh)
+        self.assertEqual(result, newer)
+        run.assert_called_once()
+
     def test_superseded_request_and_pending_recovery_do_not_replace(self):
         result, perform, run = self.run_worker(result_token='new-request')
         self.assertEqual(result, {'token': 'new-request', 'status': 'queued'})
@@ -597,6 +637,40 @@ class SelfUpdate(SetupFixture):
         with patch('agent_env_man.self_update.subprocess.run', side_effect=run), self.assertRaises(ValueError):
             self_update.perform({'settings': self.settings})
         self.assertEqual(len(calls), 1)  # Metadata failure never reaches install.
+
+    def test_release_with_symlinked_metadata_is_rejected_before_install(self):
+        self.register()
+        descriptor = self.repo / 'pyproject.toml'
+        descriptor.unlink(missing_ok=True)
+        external = self.root / 'user-project.toml'
+        external.write_text('[project]\nname = "agent-env-man"\nversion = "0.2.1"\n')
+        try:
+            descriptor.symlink_to(external)
+        except OSError:
+            self.skipTest('Symlinks unavailable')
+        self.commit(self.repo)
+        self.git(self.repo, 'tag', 'v0.2.1')
+        real_run = subprocess.run
+        calls = []
+        def run(command, **kwargs):
+            if command[0] == str(self.uv):
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='agent-env-man v0.2.0\n')
+            return real_run(command, **kwargs)
+        before = external.read_bytes()
+        with patch.object(self_update.subprocess, 'run', side_effect=run):
+            with self.assertRaisesRegex(ValueError, 'tracked regular file'):
+                self_update.perform({'settings': self.settings})
+        self.assertEqual(calls, [[str(self.uv), 'tool', 'list']])
+        self.assertEqual(external.read_bytes(), before)
+
+    def test_missing_registered_tool_prevents_remote_access(self):
+        self.register()
+        with patch.object(self_update, 'run_captured', return_value=subprocess.CompletedProcess([], 0, stdout='')), \
+                patch.object(self_update, 'git') as git:
+            with self.assertRaisesRegex(ValueError, 'installation is missing'):
+                self_update.perform({'settings': self.settings})
+            git.assert_not_called()
 
     def test_copied_worker_updates_only_same_prerelease_series(self):
         config = self.register()

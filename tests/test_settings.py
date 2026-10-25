@@ -169,6 +169,103 @@ class StagedSettings(unittest.TestCase):
         self.assertEqual(tomlkit.parse(self.stage.read_text())['color'], 'green')
         self.call('locate', 'editor', '--source', '--target', code=2)
 
+    def test_invalid_saved_records_refuse_without_changing_stage_or_target(self):
+        self.apply()
+        state = self.manager().state
+        record = deepcopy(state.data['items']['editor:settings'])
+        variants = [dict(record, kind='skill'), dict(record, source_name='other'),
+                    dict(record, format='yaml'), dict(record, conflicts='color'),
+                    {key: value for key, value in record.items() if key != 'working'}]
+        for invalid in variants:
+            with self.subTest(record=invalid):
+                state.data['items']['editor:settings'] = invalid
+                state.save()
+                before = {path: path.read_bytes() for path in (self.stage, self.payload, self.target, state.path)}
+                self.assertRegex(self.apply(code=1), 'invalid saved settings record|stage is not prepared')
+                for path, content in before.items():
+                    self.assertEqual(path.read_bytes(), content)
+
+    def test_invalid_saved_conflict_paths_refuse_without_mutation(self):
+        state = self.manager().state
+        for conflicts in ([[]], ['color'], [[1]], [['color', 1]]):
+            with self.subTest(conflicts=conflicts):
+                state.data['items']['editor:settings']['conflicts'] = conflicts
+                state.save()
+                before = self.stage.read_bytes(), self.payload.read_bytes(), state.path.read_bytes()
+                self.assertIn('invalid saved conflict path', self.apply(code=1))
+                self.assertEqual((self.stage.read_bytes(), self.payload.read_bytes(), state.path.read_bytes()), before)
+                self.assertFalse(self.target.exists())
+
+    def test_redirected_saved_stage_preserves_referent_and_ownership(self):
+        root = self.stage.parent
+        saved = self.manager().state.path.read_bytes()
+        external = self.root / 'user-stage'
+        root.rename(external)
+        try:
+            root.symlink_to(external, target_is_directory=True)
+        except OSError:
+            self.skipTest('Symlinks unavailable')
+        before = {p.name: p.read_bytes() for p in external.iterdir() if p.is_file()}
+        self.assertIn('stage directory redirects', self.apply(code=1))
+        self.assertEqual({p.name: p.read_bytes() for p in external.iterdir() if p.is_file()}, before)
+        self.assertEqual(self.manager().state.path.read_bytes(), saved)
+        self.assertFalse(self.target.exists())
+
+    def test_unowned_stage_contents_are_not_adopted_by_prepare(self):
+        state = self.manager().state
+        del state.data['items']['editor:settings']
+        state.save()
+        self.edit(self.stage, color='user-owned')
+        before = self.stage.read_bytes(), state.path.read_bytes()
+        self.assertIn('Unmanaged settings stage exists', self.call('settings', 'prepare', 'editor', code=1))
+        self.assertEqual((self.stage.read_bytes(), state.path.read_bytes()), before)
+        self.assertIn('stage is not prepared', self.call('locate', 'editor', code=1))
+
+    def test_conflicting_exports_to_shared_file_preserve_all_stages(self):
+        catalog = tomlkit.parse(self.catalog.read_text())
+        catalog['settings']['second'] = dict(catalog['settings']['editor'])
+        self.catalog.write_text(tomlkit.dumps(catalog))
+        self.call('bootstrap', '--setting-target', f'second={self.root / "second-app.toml"}')
+        second = self.stage.parent.parent / 'second/config.toml'
+        self.edit(self.stage, color='first-stage')
+        self.edit(second, color='second-stage')
+        paths = (self.stage, second, self.payload, self.manager().state.path)
+        before = {p: p.read_bytes() for p in paths}
+        for options in ((), ('--dry-run',)):
+            self.assertIn('stages disagree', self.call('export', 'editor', 'second', *options, code=1))
+            self.assertEqual({p: p.read_bytes() for p in paths}, before)
+        self.edit(second, color='first-stage')
+        self.call('export', 'editor', 'second')
+        self.assertEqual(tomlkit.parse(self.payload.read_text())['color'], 'first-stage')
+
+    def test_export_refuses_unreceived_shared_conflict(self):
+        self.edit(self.payload, color='shared-edit')
+        self.edit(self.stage, color='local-edit')
+        paths = (self.payload, self.stage, self.manager().state.path)
+        before = {p: p.read_bytes() for p in paths}
+        self.assertIn('Shared source conflicts', self.call('export', 'editor', code=1))
+        self.assertEqual({p: p.read_bytes() for p in paths}, before)
+
+    def test_collection_conflict_preserves_actual_stage_and_baseline(self):
+        self.apply()
+        self.edit(self.stage, color='local-edit')
+        self.edit(self.target, color='actual-edit')
+        paths = (self.target, self.stage, self.manager().state.path)
+        before = {p: p.read_bytes() for p in paths}
+        self.assertIn('Collection conflicts', self.call('settings', 'collect', 'editor', code=1))
+        self.assertEqual({p: p.read_bytes() for p in paths}, before)
+        self.call('settings', 'collect', 'editor', '--path', '["color"]')
+        self.assertEqual(tomlkit.parse(self.stage.read_text())['color'], 'actual-edit')
+
+    def test_unknown_release_and_resolution_paths_leave_stage_unchanged(self):
+        paths = (self.stage, self.manager().state.path)
+        before = {p: p.read_bytes() for p in paths}
+        for args, message in ((('release',), 'Only a declared field'),
+                              (('resolve',), 'not an unresolved conflict')):
+            options = ('--take', 'local') if args == ('resolve',) else ()
+            self.assertIn(message, self.call('settings', *args, 'editor', '--path', '["missing"]', *options, code=1))
+            self.assertEqual({p: p.read_bytes() for p in paths}, before)
+
     def test_multiline_crlf_target_adoption_preserves_bytes(self):
         text = 'policy = """\nfirst\nsecond\n"""\n'
         self.stage.write_bytes(text.encode('utf-8'))

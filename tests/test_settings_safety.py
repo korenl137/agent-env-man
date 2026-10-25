@@ -1,12 +1,14 @@
 """Failure and recovery boundaries for settings files and saved ownership."""
 
 from copy import deepcopy
+import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from agent_env_man.model import Error
+from agent_env_man import settings
 from agent_env_man.settings import Bundle, recover_group, transaction
 from agent_env_man.storage import State, observation
 
@@ -96,6 +98,78 @@ class SettingsSafety(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b"count = 2\n")
         self.assertEqual(State(self.state.path.parent).data["items"]["unselected"], original_items["unselected"])
 
+    def test_guard_edit_during_staging_preserves_inputs_and_ownership(self):
+        source = self.root / 'source.toml'
+        source.write_bytes(b'original source\n')
+        guard = (source, observation(source))
+        saved = self.state.path.read_bytes()
+        write = settings.atomic_write
+        def race(path, content, **kwargs):
+            write(path, content, **kwargs)
+            source.write_bytes(b'concurrent source edit\n')
+        with patch.object(settings, 'atomic_write', side_effect=race):
+            with self.assertRaisesRegex(Error, 'Input changed during transaction'):
+                transaction(self.state, self.writes(), {'new': {}}, guards=[guard])
+        self.assertEqual(source.read_bytes(), b'concurrent source edit\n')
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertEqual(self.state.path.read_bytes(), saved)
+        self.assertFalse(list(self.root.glob('.aem-stage-*')))
+
+    def test_unchanged_write_is_guarded_while_other_members_are_staged(self):
+        other = self.root / 'other.toml'
+        writes = [(self.target, self.target.read_bytes(), observation(self.target)),
+                  (other, b'other = 1\n', observation(other))]
+        saved = self.state.path.read_bytes()
+        write = settings.atomic_write
+        def race(path, content, **kwargs):
+            write(path, content, **kwargs)
+            self.target.write_bytes(b'concurrent unchanged-member edit\n')
+        with patch.object(settings, 'atomic_write', side_effect=race):
+            with self.assertRaisesRegex(Error, 'Input changed during transaction'):
+                transaction(self.state, writes, {'new': {}})
+        self.assertFalse(other.exists())
+        self.assertEqual(self.target.read_bytes(), b'concurrent unchanged-member edit\n')
+        self.assertEqual(self.state.path.read_bytes(), saved)
+        self.assertFalse(list(self.root.glob('.aem-stage-*')))
+
+    def test_target_edit_after_journaling_keeps_edit_and_recoverable_stage(self):
+        save = self.state.save
+        def race():
+            save()
+            self.target.write_bytes(b'user edit after journal\n')
+        with patch.object(self.state, 'save', side_effect=race):
+            with self.assertRaisesRegex(Error, 'Recovery stopped'):
+                transaction(self.state, self.writes(), {'new': {}})
+        durable = State(self.state.path.parent)
+        entry = durable.data['pending']['files'][0]
+        self.assertEqual(self.target.read_bytes(), b'user edit after journal\n')
+        self.assertEqual(Path(entry['stage']).read_bytes(), b'count = 2\n')
+        self.assertFalse(Path(entry['backup']).exists())
+        self.assertNotIn('new', durable.data['items'])
+        self.target.write_bytes(b'count = 1\n')
+        recover_group(durable)
+        self.assertIsNone(State(self.state.path.parent).data['pending'])
+        self.assertFalse(Path(entry['stage']).exists())
+
+    def test_target_edit_after_replacement_keeps_backup_and_journal(self):
+        replace = os.replace
+        def race(source, destination):
+            replace(source, destination)
+            if Path(destination) == self.target:
+                self.target.write_bytes(b'user edit after replacement\n')
+        with patch.object(settings.os, 'replace', side_effect=race):
+            with self.assertRaisesRegex(Error, 'Recovery stopped'):
+                transaction(self.state, self.writes(), {'new': {}})
+        durable = State(self.state.path.parent)
+        entry = durable.data['pending']['files'][0]
+        self.assertEqual(self.target.read_bytes(), b'user edit after replacement\n')
+        self.assertEqual(Path(entry['backup']).read_bytes(), b'count = 1\n')
+        self.assertNotIn('new', durable.data['items'])
+        self.target.write_bytes(b'count = 2\n')
+        recover_group(durable)
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertIsNone(State(self.state.path.parent).data['pending'])
+
     def interrupted_entry(self, target=None):
         target = target or self.target
         before = observation(target)
@@ -118,6 +192,43 @@ class SettingsSafety(unittest.TestCase):
         self.assertFalse((self.root / "new.json").exists())
         self.assertIsNone(State(self.state.path.parent).data["pending"])
         self.assertEqual(self.state.data["items"]["unselected"]["opaque"], "keep")
+
+    def test_interrupted_group_restoration_can_resume_after_one_member_is_restored(self):
+        other = self.root / 'second.toml'
+        other.write_bytes(b'second original\n')
+        entries = [self.interrupted_entry(), self.interrupted_entry(other)]
+        self.journal(entries)
+        saved = self.state.path.read_bytes()
+        replace = os.replace
+        def fail_first_member(source, destination):
+            if Path(destination) == self.target:
+                raise OSError('interrupted restoration')
+            replace(source, destination)
+        with patch.object(settings.os, 'replace', side_effect=fail_first_member):
+            with self.assertRaisesRegex(OSError, 'interrupted restoration'):
+                recover_group(self.state)
+        self.assertEqual(other.read_bytes(), b'second original\n')
+        self.assertEqual(self.target.read_bytes(), b'new content\n')
+        self.assertEqual(Path(entries[0]['backup']).read_bytes(), b'count = 1\n')
+        self.assertEqual(self.state.path.read_bytes(), saved)
+        recover_group(State(self.state.path.parent))
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertEqual(other.read_bytes(), b'second original\n')
+        self.assertIsNone(State(self.state.path.parent).data['pending'])
+
+    def test_recovery_state_save_failure_keeps_journal_for_idempotent_retry(self):
+        entries = [self.interrupted_entry(), self.interrupted_entry(self.root / 'new.toml')]
+        self.journal(entries)
+        saved = self.state.path.read_bytes()
+        with patch.object(self.state, 'save', side_effect=OSError('state unavailable')):
+            with self.assertRaisesRegex(OSError, 'state unavailable'):
+                recover_group(self.state)
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertFalse((self.root / 'new.toml').exists())
+        self.assertEqual(self.state.path.read_bytes(), saved)
+        recover_group(State(self.state.path.parent))
+        self.assertIsNone(State(self.state.path.parent).data['pending'])
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
 
     def test_invalid_later_journal_entry_prevents_all_rollback(self):
         mutations = [

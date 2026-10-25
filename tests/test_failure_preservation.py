@@ -199,6 +199,50 @@ class RetainedEntryRecovery(TemporaryCases):
 
 
 class InstallationRecovery(TemporaryCases):
+    def test_source_edit_after_planning_does_not_replace_installed_copy(self):
+        case = self.fixture(workflows.Workflow)
+        target = case.installed_copy()
+        case.publish_skill_change()
+        case.run_cli('update')
+        state_path = State(Config(case.config).state_dir).path
+        saved, installed = state_path.read_bytes(), observation(target)
+        plan = manager_module.Manager.plan
+        changed = []
+        def race(manager, item, **options):
+            result = plan(manager, item, **options)
+            entry = item.source / 'SKILL.md'
+            entry.write_bytes(b'concurrent source edit\n')
+            changed.append(entry)
+            return result
+        with patch.object(manager_module.Manager, 'plan', new=race):
+            self.assertIn('source changed after preflight', case.run_cli('apply', '--item', 'report', code=1))
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(changed[0].read_bytes(), b'concurrent source edit\n')
+        self.assertEqual(observation(target), installed)
+        self.assertEqual(state_path.read_bytes(), saved)
+        self.assertFalse(list(target.parent.glob('.aem-stage-*')))
+
+    def test_redirected_backup_storage_cannot_receive_installed_contents(self):
+        case = self.fixture(workflows.Workflow)
+        case.require_links()
+        target = case.installed_copy()
+        case.publish_skill_change()
+        case.run_cli('update')
+        state = State(Config(case.config).state_dir)
+        backups = state.path.parent / 'skill-backups'
+        backups.rmdir()
+        outside = case.root / 'unowned-backups'
+        outside.mkdir()
+        sentinel = outside / 'sentinel'
+        sentinel.write_bytes(b'preserve outside\n')
+        backups.symlink_to(outside, target_is_directory=True)
+        saved, installed = state.path.read_bytes(), observation(target)
+        self.assertIn('backup storage redirects', case.run_cli('apply', '--item', 'report', code=1))
+        self.assertEqual(list(outside.iterdir()), [sentinel])
+        self.assertEqual(sentinel.read_bytes(), b'preserve outside\n')
+        self.assertEqual(observation(target), installed)
+        self.assertEqual(state.path.read_bytes(), saved)
+
     def interrupted_skill(self):
         case = self.fixture(workflows.Workflow)
         target = case.installed_copy()
@@ -210,6 +254,21 @@ class InstallationRecovery(TemporaryCases):
         state = self.journal(case, target, backup, target.with_name('.aem-stage-interrupted'),
                              before, observation(target), operation='skill-replacement', key='report')
         return case, target, backup, state
+
+    def test_edited_stage_blocks_recovery_before_target_or_backup_changes(self):
+        case, target, backup, state = self.interrupted_skill()
+        stage = Path(state.data['pending']['stage'])
+        shutil.copytree(target, stage)
+        (stage / 'SKILL.md').write_bytes(b'user edit in stage\n')
+        saved = state.path.read_bytes()
+        originals = {p: observation(p) for p in (target, backup, stage)}
+        self.assertIn('staged content changed', case.run_cli('recover', code=1))
+        self.assertEqual({p: observation(p) for p in originals}, originals)
+        self.assertEqual(state.path.read_bytes(), saved)
+        (stage / 'SKILL.md').write_text('replacement', encoding='utf-8')
+        case.run_cli('recover')
+        self.assertEqual(observation(target), originals[backup])
+        self.assertIsNone(State(state.path.parent).data['pending'])
 
     def test_recovery_rejects_invalid_paths_and_observations_without_touching_backup(self):
         case, target, backup, state = self.interrupted_skill()
