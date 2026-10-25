@@ -74,6 +74,8 @@ class PayloadExclusions(unittest.TestCase):
     def test_excluded_metadata_not_copied_or_read(self):
         for links in (False, True):
             with self.subTest(links=links):
+                if links and os.name == 'nt':
+                    self.skipTest('Opaque symlink payloads require POSIX')
                 if links:
                     self.document['directories']['cases']['preserve_symlinks'] = True; self.write()
                 else:
@@ -253,10 +255,11 @@ class PayloadExclusions(unittest.TestCase):
         self.require_links(); self.prepare()
         outside = self.root / 'outside'; outside.mkdir(); (outside / 'secret').write_text('private')
         (self.target / '._DAV').symlink_to(outside, target_is_directory=True)
+        original_link = os.readlink(self.target / '._DAV')
         (self.source / 'first.md').write_text('updated')
         self.run_cli('apply', '--item', 'cases')
         self.assertTrue((self.target / '._DAV').is_symlink())
-        self.assertEqual(os.readlink(self.target / '._DAV'), str(outside))
+        self.assertEqual(os.readlink(self.target / '._DAV'), original_link)
         self.assertEqual((outside / 'secret').read_text(), 'private')
 
     def test_instruction_required_entry_cannot_be_excluded(self):

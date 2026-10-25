@@ -1,4 +1,5 @@
 """Mocked Windows calls verify lock ownership without claiming native OS behavior."""
+from process_support import popen_hidden
 
 import errno
 import os
@@ -99,7 +100,7 @@ with lock(Path(sys.argv[1]), shared=sys.argv[2] == 'True', timeout=float(sys.arg
     print('locked', flush=True)
     sys.stdin.read(1)
 """
-        child = subprocess.Popen([sys.executable, '-c', program, str(self.root), str(shared), str(timeout)],
+        child = popen_hidden([sys.executable, '-c', program, str(self.root), str(shared), str(timeout)],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         def cleanup():
             if child.poll() is None:

@@ -1,4 +1,5 @@
 """Instruction bundles share delivery and ownership with independent Git skills."""
+from process_support import run_hidden
 
 from pathlib import Path
 import shutil
@@ -290,7 +291,6 @@ class Instructions(InstructionFixture):
     def test_generated_locator_command_handles_special_config_path(self):
         import os
         import shlex
-        import subprocess
         import sys
         if os.name == "nt":
             self.skipTest("POSIX shell command execution test")
@@ -305,7 +305,7 @@ class Instructions(InstructionFixture):
         command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         tokens = shlex.split(command)
         self.assertEqual(tokens, [sys.executable, "-m", "agent_env_man", "--config", str(self.config), "agent-hook", "personal", "--agent", "codex"])
-        result = subprocess.run(command, shell=True, cwd=self.external, input='{"hook_event_name":"SessionStart"}',
+        result = run_hidden(command, shell=True, cwd=self.external, input='{"hook_event_name":"SessionStart"}',
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]

@@ -21,6 +21,8 @@ Do not require every environment for every change; select the relevant dimension
 - Use platform-appropriate fake executables and subprocess invocation.
   A POSIX shebang is not a portable executable fixture, and successful command serialization does not establish execution or exit-code propagation in the target shell.
   Keep portable policy and output checks runnable everywhere; isolate native process, shell, and filesystem checks behind explicit capability requirements.
+  Launch test fixture processes through `process_support.run_hidden` or `process_support.popen_hidden` so native Windows runs suppress incidental console windows.
+  These helpers preserve explicitly requested detached/new-console behavior and do not patch product subprocess calls, keeping native console regression checks meaningful.
 - Exercise both success and failure behavior, especially preservation of user files, unrelated configuration, and saved ownership when an operation cannot proceed.
   A platform limitation should skip only checks requiring that capability, not portable validation of the corresponding error or refusal path.
 

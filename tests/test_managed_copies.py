@@ -1,4 +1,5 @@
 """Instruction and catalog copies remain independent through offline use and publication."""
+import json
 from pathlib import Path
 import unittest
 
@@ -50,7 +51,11 @@ class ManagedCopies(unittest.TestCase):
         self.assertEqual(self.cli('catalog', 'status')['status'], 'ready')
         self.assertEqual(self.cli('locate', 'personal')['root'], str(self.installed))
         self.assertEqual(self.entry.read_text(), 'Read guides/development.md')
-        self.assertIn(str(self.installed), str(self.manager().hook_context('personal')))
+        context = self.manager().hook_context('personal')['hookSpecificOutput']['additionalContext']
+        locations = json.loads(context.split('\n')[1])
+        self.assertEqual(locations['root'], str(self.installed))
+        self.assertEqual(locations['entry'], str(self.installed / 'entry.md'))
+        self.assertEqual(locations['global_entry'], str(self.entry))
         self.assertEqual((self.installed / 'guides/development.md').read_text(), 'Initial guidance')
         offline.rename(self.root / 'synced')
         self.copy.write_text(self.copy.read_text() + '\n# edited catalog\n')

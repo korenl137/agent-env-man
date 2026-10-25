@@ -1,4 +1,5 @@
 """Machine integration runs entirely in temporary homes with local repositories."""
+from process_support import run_hidden
 import importlib.util
 import io
 import json
@@ -235,9 +236,9 @@ class MachineSetup(SetupFixture):
         self.executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> ' + shlex.quote(str(calls)) + '\nexit 1\n')
         self.setup_cli('--shell', 'bash')
         rc = self.home / '.bashrc'
-        subprocess.run(['bash', '-c', 'source "$1"', '_', str(rc)], check=True)
+        run_hidden(['bash', '-c', 'source "$1"', '_', str(rc)], check=True)
         self.assertFalse(calls.exists())
-        result = subprocess.run(['bash', '--noprofile', '--rcfile', str(rc), '-i', '-c', 'printf READY'], capture_output=True)
+        result = run_hidden(['bash', '--noprofile', '--rcfile', str(rc), '-i', '-c', 'printf READY'], capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn(b'READY', result.stdout)
         self.assertEqual(calls.read_text().splitlines(), ['--config', str(self.config), 'startup', '--trigger', 'shell-start'])

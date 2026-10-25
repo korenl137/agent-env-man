@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Suppress incidental Windows console windows from test fixture processes while preserving native detached-process checks, and make path and byte-preservation assertions independent of Windows JSON escaping and newline translation.
 - Release configuration and installation locks before command result formatting/output and during self-update remote release discovery and metadata validation.
 Revalidate the request, policies, recovery state, official skill ownership, and installed version before replacement, preserving newer requests and cancelling stale prepared updates.
 

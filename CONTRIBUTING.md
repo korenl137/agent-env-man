@@ -30,6 +30,12 @@ git diff --check
 Select checks according to the affected behavior and remaining uncertainty; a complete suite run is not required for every change.
 Reuse passing results when subsequent changes cannot affect them.
 Tests must use temporary sources, targets, configuration, state, and local Git remotes, never actual user homes, credentials, or network remotes.
+
+On Windows, noninteractive development and test runs must not open visible terminal windows, including fixture, helper, and descendant processes.
+Apply hiding controls at process creation and verify representative descendant launches before long or parallel runs; redirected output or a hidden parent alone is insufficient.
+Preserve the semantics of native console and process-lifetime tests when adding these controls.
+If unexpected windows appear, stop the responsible process tree and correct its launch behavior before resuming.
+
 Tests requiring successful symlink creation may skip when the host lacks that capability; tests of the unavailable-symlink refusal path must still run.
 Verify user-visible behavior and preservation boundaries, including failure and recovery, rather than mirroring private implementation functions.
 For workflows spanning commands, check that each command's output and selection scope match the next command's inputs and operation targets.

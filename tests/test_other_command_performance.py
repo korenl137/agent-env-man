@@ -36,6 +36,7 @@ class PayloadCommandCosts(unittest.TestCase):
 
     def test_collection_preview_captures_hashes_and_changes_in_one_read(self):
         self.external(mode='copy')
+        original = (self.external_root / 'first.md').read_bytes()
         for level in ('strict', 'best-effort'):
             with self.subTest(permissions=level):
                 self.document['payload'] = {'defaults': {'permissions': level}}
@@ -52,7 +53,7 @@ class PayloadCommandCosts(unittest.TestCase):
                 self.assertEqual(counts.get('content:source'), 1)
                 self.assertEqual(counts.get('content:target'), 1)
                 self.assertEqual(counts.get('content:other', 0), 0)
-                self.assertEqual((self.external_root / 'first.md').read_bytes(), b'External case\n')
+                self.assertEqual((self.external_root / 'first.md').read_bytes(), original)
 
     def test_best_effort_detach_preview_reads_source_once(self):
         self.require_links()
@@ -66,6 +67,7 @@ class PayloadCommandCosts(unittest.TestCase):
     def test_pre_rename_recovery_inspects_stage_once_and_refuses_edits(self):
         self.external(mode='copy')
         self.run_cli('apply', '--item', 'cases')
+        original = (self.target / 'first.md').read_bytes()
         manager = self.manager()
         stage = self.target.with_name('.aem-stage-cost')
         backup = self.target.with_name('agent-loop.aem-backup-cost')
@@ -79,7 +81,7 @@ class PayloadCommandCosts(unittest.TestCase):
         error = self.run_cli('recover', code=1)
         self.assertIn('staged content changed', error)
         self.assertEqual((stage / 'first.md').read_bytes(), b'later edit')
-        self.assertEqual((self.target / 'first.md').read_bytes(), b'External case\n')
+        self.assertEqual((self.target / 'first.md').read_bytes(), original)
         (stage / 'first.md').write_bytes(b'staged')
         counts = count_inspections(self.config, ('recover',), self.external_root, self.target)
         self.assertEqual(counts['content:target'], 1)

@@ -293,7 +293,7 @@ class LocalCatalogCopies(unittest.TestCase):
         self.bootstrap_error()
         self.assertFalse(self.copy.exists())
         self.assertFalse(self.config.exists())
-        self.source.write_text('version = 2\n# 한글\r\n', encoding='utf-8')
+        self.source.write_bytes('version = 2\n# 한글\r\n'.encode('utf-8'))
         self.source.chmod(0o700)
         self.bootstrap()
         self.assertEqual(self.source.read_bytes(), self.copy.read_bytes())

@@ -1,4 +1,5 @@
 """Native Windows integration in temporary directories, without user setup."""
+from process_support import popen_hidden, run_hidden
 
 import json
 import base64
@@ -27,7 +28,7 @@ class NativeProcesses(unittest.TestCase):
                        "guard=lock(Path(sys.argv[1])); guard.__enter__(); "
                        "print('locked', flush=True); sys.stdin.read(1); "
                        "guard.__exit__(None,None,None)")
-            child = subprocess.Popen([sys._base_executable, "-c", program, str(path),
+            child = popen_hidden([sys._base_executable, "-c", program, str(path),
                                       str(Path(process_lock.__file__).parents[1])],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
@@ -65,7 +66,7 @@ class NativeProcesses(unittest.TestCase):
             self.assertEqual((path / "lock").read_bytes(), b"0")
 
     def test_wait_for_already_exited_native_process(self):
-        child = subprocess.Popen([sys._base_executable, "-c", "pass"])
+        child = popen_hidden([sys._base_executable, "-c", "pass"])
         self.assertEqual(child.wait(timeout=10), 0)
         self.assertTrue(self_update.wait_for_parent(child.pid))
 
@@ -78,7 +79,7 @@ class NativeProcesses(unittest.TestCase):
                    'result=run_captured([sys.executable,"-c",sys.argv[2]],capture_output=True,text=True,timeout=10); '
                    'print(json.dumps({"code":result.returncode,"stdout":result.stdout,"stderr":result.stderr,'
                    '"git":git("--version")}))')
-        result = subprocess.run([sys._base_executable, '-c', program, str(Path(self_update.__file__).parents[1]), child_code],
+        result = run_hidden([sys._base_executable, '-c', program, str(Path(self_update.__file__).parents[1]), child_code],
                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
                                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -97,7 +98,7 @@ class NativeProcesses(unittest.TestCase):
                        "print('locked', flush=True); sys.stdin.read(1)")
             # Launch the interpreter directly so kill() reaches the lock owner
             # rather than a Windows virtual-environment redirector.
-            child = subprocess.Popen([sys._base_executable, "-c", program, str(path),
+            child = popen_hidden([sys._base_executable, "-c", program, str(path),
                                       str(Path(process_lock.__file__).parents[1])],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
@@ -124,7 +125,7 @@ class NativeProcesses(unittest.TestCase):
                 child.communicate(timeout=10)
 
     def test_parent_wait_timeout_then_real_process_exit(self):
-        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read(1)"],
+        child = popen_hidden([sys.executable, "-c", "import sys; sys.stdin.read(1)"],
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
         try:
             with patch.object(self_update, "TIMEOUT", 0):
@@ -147,11 +148,11 @@ class NativeProcesses(unittest.TestCase):
                        "with_lock = lock(Path(sys.argv[1])); with_lock.__enter__(); "
                        "with_lock.__exit__(None, None, None)")
             with process_lock.lock(path):
-                child = subprocess.run([sys.executable, "-c", program, str(path)],
+                child = run_hidden([sys.executable, "-c", program, str(path)],
                                        capture_output=True, text=True, timeout=15)
                 self.assertNotEqual(child.returncode, 0)
                 self.assertIn("holds this config's lock", child.stderr)
-            child = subprocess.run([sys.executable, "-c", program, str(path)],
+            child = run_hidden([sys.executable, "-c", program, str(path)],
                                    capture_output=True, text=True, timeout=15)
             self.assertEqual(child.returncode, 0, child.stderr)
 
@@ -168,7 +169,7 @@ class NativePayloads(unittest.TestCase):
             payload = root / "payload"
             payload.mkdir()
             junction = payload / "redirect"
-            result = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J",
+            result = run_hidden(["cmd.exe", "/d", "/c", "mklink", "/J",
                                      str(junction), str(outside)],
                                     capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -193,7 +194,7 @@ class NativeHook(InstructionFixture):
         self.run_cli("apply")
         hook_file = self.agent / "hooks.json"
         hook = json.loads(hook_file.read_text())["hooks"]["SessionStart"][0]["hooks"][0]
-        result = subprocess.run(hook["command"], cwd=self.external,
+        result = run_hidden(hook["command"], cwd=self.external,
                                 input='{"hook_event_name":"SessionStart"}',
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -218,14 +219,14 @@ class NativeHook(InstructionFixture):
         self.run_cli('apply', '--agent', 'claude', '--item', 'personal:entry')
         group = json.loads((claude / 'settings.json').read_text())['hooks']['SessionStart'][0]
         command = group['hooks'][0]['command']
-        result = subprocess.run(command, cwd=self.external, capture_output=True, text=True, timeout=20)
+        result = run_hidden(command, cwd=self.external, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, '')
         metadata = json.loads(result.stdout.splitlines()[1])
         self.assertEqual(metadata['entry'], str(self.bundle / 'start.md'))
         self.assertEqual(metadata['global_entry'], str(claude / 'CLAUDE.md'))
         (claude / 'CLAUDE.md').unlink()
-        result = subprocess.run(command, cwd=self.external, capture_output=True, text=True, timeout=20)
+        result = run_hidden(command, cwd=self.external, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertIn('lookup failed', result.stderr)
@@ -246,7 +247,7 @@ class NativeHook(InstructionFixture):
         body += "aem --config " + quote(self.config) + " locate missing --cd\n"
         body += "[Console]::WriteLine($LASTEXITCODE)\n[Console]::WriteLine((Get-Location).Path)\n"
         encoded = base64.b64encode(body.encode("utf-16le")).decode()
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        result = run_hidden(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
                                 cwd=self.root, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.stdout.splitlines(), [str(relocated), "1", str(relocated)])
         self.assertIn("missing", result.stderr)

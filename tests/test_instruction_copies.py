@@ -1,5 +1,6 @@
 """Managed instruction copies retain an offline reading tree and explicit publication."""
 from pathlib import Path
+import json
 import os
 import shutil
 from unittest.mock import patch
@@ -24,6 +25,12 @@ class InstructionCopies(InstructionFixture):
         config = Config(self.config)
         return Manager(config, State(config.state_dir))
 
+    def hook_locations(self, agent='codex'):
+        context = self.manager().hook_context('personal', agent)
+        if agent == 'codex':
+            context = context['hookSpecificOutput']['additionalContext']
+        return json.loads(context.splitlines()[1])
+
     def test_copy_offline_entry_hook_and_detach(self):
         installed = self.configure_copy(subdir='nested/rules')
         self.run_cli('apply', '--dry-run')
@@ -36,11 +43,14 @@ class InstructionCopies(InstructionFixture):
         shutil.rmtree(self.external)
         self.catalog.unlink()
         self.assertEqual(self.run_cli('locate', 'personal')['root'], str(installed))
-        context = str(self.manager().hook_context('personal'))
-        self.assertIn(str(installed), context)
-        self.assertNotIn(str(self.external), context)
+        locations = self.hook_locations()
+        self.assertEqual(locations, {
+            'root': str(installed),
+            'entry': str(installed / 'start.md'),
+            'global_entry': str(self.agent / 'AGENTS.md'),
+        })
         self.run_cli('detach', 'personal:bundle')
-        self.assertIn(str(installed), str(self.manager().hook_context('personal')))
+        self.assertEqual(self.hook_locations(), locations)
         self.run_cli('detach', 'personal:entry')
         self.assertTrue((self.agent / 'AGENTS.md').is_file())
 
@@ -137,7 +147,9 @@ class InstructionCopies(InstructionFixture):
         for name in ('codex', 'claude'):
             manager = self.manager()
             found = manager.locate_instruction('personal', name)
-            self.assertIn(found['root'], str(manager.hook_context('personal', name)))
+            locations = self.hook_locations(name)
+            self.assertEqual(locations['root'], found['root'])
+            self.assertEqual(locations['entry'], found['entry'])
             (Path(found['root']) / 'start.md').write_text(name)
         self.run_cli('publish', 'personal', '--from-copy', code=1)
         self.assertNotIn((self.bundle / 'start.md').read_text(), ('codex', 'claude'))

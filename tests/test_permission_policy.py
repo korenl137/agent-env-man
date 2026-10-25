@@ -1,9 +1,9 @@
 """Permission policies preserve payloads and independently protect native modes."""
+from process_support import run_hidden
 
 import errno
 import json
 import shutil
-import subprocess
 import sys
 import os
 import unittest
@@ -386,7 +386,7 @@ class PermissionPolicy(unittest.TestCase):
     def test_fresh_cli_processes_apply_status_collection_and_detach(self):
         self.prepare()
         def cli(*args):
-            result = subprocess.run([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config), *args],
+            result = run_hidden([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config), *args],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)

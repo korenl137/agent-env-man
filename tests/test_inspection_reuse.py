@@ -32,6 +32,7 @@ class InspectionReuse(unittest.TestCase):
                     self.external(mode='copy')
                 else:
                     self.write()
+                original = (self.external_root / 'first.md').read_bytes()
                 self.run_cli('apply', '--item', 'cases')
                 for args, source_limit, target_limit in (
                     (('status',), 1, 1),
@@ -47,9 +48,11 @@ class InspectionReuse(unittest.TestCase):
                 (self.target / 'first.md').write_bytes(b'fixture replacement edit')
                 counts = count_inspections(self.config, ('apply', '--item', 'cases', '--replace'),
                                            self.external_root, self.target)
-                self.assertEqual((self.target / 'first.md').read_bytes(), b'External case\n')
+                self.assertEqual((self.target / 'first.md').read_bytes(), original)
                 if level == 'best-effort':
-                    self.assertLessEqual(counts.get('content:source', 0), 3)
+                    # Windows validates the source separately before copying;
+                    # POSIX combines that validation with its copy scan.
+                    self.assertLessEqual(counts.get('content:source', 0), 4 if os.name == 'nt' else 3)
                     self.assertLessEqual(counts.get('content:target', 0), 4)
                     self.assertLessEqual(counts.get('content:other', 0), 2)
                     if os.name != 'nt':
@@ -86,6 +89,7 @@ class InspectionReuse(unittest.TestCase):
         self.document['payload'] = {'defaults': {'permissions': 'best-effort'}}
         self.external(mode='copy')
         self.run_cli('apply', '--item', 'cases')
+        original = (self.target / 'first.md').read_bytes()
         (self.external_root / 'first.md').write_bytes(b'updated source')
         manager = self.manager()
         plan = manager.plan(manager.items()[0])
@@ -98,7 +102,7 @@ class InspectionReuse(unittest.TestCase):
         with patch.object(manager, 'source_observation', side_effect=changing):
             with self.assertRaisesRegex(Error, 'Copied payload changed during permission inspection'):
                 manager.install(plan)
-        self.assertEqual((self.target / 'first.md').read_bytes(), b'External case\n')
+        self.assertEqual((self.target / 'first.md').read_bytes(), original)
         self.assertFalse(manager.state.data['pending'])
 
     @unittest.skipIf(os.name == 'nt', 'POSIX source-root link race')

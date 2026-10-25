@@ -1,9 +1,9 @@
 """Personal resources exercise real offline CLI, ownership and delivery boundaries."""
+from process_support import run_hidden
 from copy import deepcopy
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -246,7 +246,7 @@ class PersonalHooks(unittest.TestCase):
         self.bootstrap()
         self.apply()
         command = self.document()['hooks']['SessionEnd'][0]['hooks'][0]['command']
-        result = subprocess.run(command, shell=True, input='event stdin', text=True, capture_output=True)
+        result = run_hidden(command, shell=True, input='event stdin', text=True, capture_output=True)
         self.assertEqual(result.returncode, 7)
         self.assertEqual(json.loads(result.stdout), self.doc['hooks']['observer']['agents']['codex']['args'])
         self.assertEqual(result.stderr, 'event stdin\n')
@@ -267,9 +267,9 @@ class PersonalHooks(unittest.TestCase):
     def assert_virtualenv_execution(self, executable):
         self.apply('--agent', 'codex')
         command = self.document()['hooks']['SessionEnd'][0]['hooks'][0]['command']
-        expected = subprocess.run([str(executable), str(self.script)], capture_output=True,
+        expected = run_hidden([str(executable), str(self.script)], capture_output=True,
                                   text=True, check=True)
-        actual = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        actual = run_hidden(command, shell=True, capture_output=True, text=True, check=True)
         self.assertEqual(json.loads(actual.stdout), json.loads(expected.stdout))
 
     def test_bootstrap_preserves_virtualenv_runtime_path(self):

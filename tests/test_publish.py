@@ -1,11 +1,11 @@
 """Publication uses local Git remotes and never touches user repositories."""
+from process_support import run_hidden
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -45,7 +45,7 @@ class Publication(unittest.TestCase):
         self.checkout = self.root / "checkouts/.aem-repositories/shared"
 
     def git(self, path, *args):
-        result = subprocess.run(["git", "-C", str(path), *map(str, args)], capture_output=True, text=True)
+        result = run_hidden(["git", "-C", str(path), *map(str, args)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.strip()
 

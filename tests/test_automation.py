@@ -1,8 +1,8 @@
 """Full automation uses temporary homes, local repositories, and fake uv installs."""
+from process_support import run_hidden
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 import unittest
@@ -258,7 +258,7 @@ class FullGitCatalog(unittest.TestCase):
         executable = self.bin / 'aem'
         executable.write_text('#!' + sys.executable + '\nfrom agent_env_man.cli import main\nraise SystemExit(main())\n')
         executable.chmod(0o755)
-        response = subprocess.run([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config),
+        response = run_hidden([sys.executable, '-m', 'agent_env_man', '--json', '--config', str(self.config),
                                    'automation', '--trigger', 'interval'], capture_output=True, text=True, timeout=5)
         self.assertEqual(response.returncode, 0, response.stderr)
         self.assertEqual(json.loads(response.stdout)['status'], 'queued')

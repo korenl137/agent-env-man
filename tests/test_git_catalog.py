@@ -1,11 +1,11 @@
 """Git inventories bootstrap and round-trip through local remotes only."""
+from process_support import run_hidden
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -43,7 +43,7 @@ class GitCatalog(unittest.TestCase):
         self.save_remote()
 
     def git(self, path, *args):
-        result = subprocess.run(["git", "-C", str(path), *map(str, args)], capture_output=True, text=True)
+        result = run_hidden(["git", "-C", str(path), *map(str, args)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.strip()
 
