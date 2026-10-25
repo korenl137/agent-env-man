@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Release configuration and installation locks before command result formatting/output and during self-update remote release discovery and metadata validation.
+Revalidate the request, policies, recovery state, official skill ownership, and installed version before replacement, preserving newer requests and cancelling stale prepared updates.
+
 ## [1.2.0-rc.3] &mdash; 2026-10-15
 
 Git tag `v1.2.0-rc.3` corresponds to Python package version `1.2.0rc3`; based on `v1.2.0-rc.2`.

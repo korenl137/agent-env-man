@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from agent_env_man.cli import cli, main
 from agent_env_man.cli_runtime import Runtime
+from agent_env_man.storage import lock
 
 
 class CliTests(unittest.TestCase):
@@ -99,3 +100,19 @@ class CliTests(unittest.TestCase):
         self.assertIn("AEM instruction root lookup failed", result.stdout)
         self.assertIsInstance(json.loads(result.stdout), dict)
         self.assertEqual(result.stderr, "")
+
+    def test_output_does_not_hold_operation_locks(self):
+        tools = self.root / 'tools'
+        self.config.write_text('version = 1\n[self_update]\ntool_dir = ' +
+                               json.dumps(str(tools)) + '\n', encoding='utf-8')
+        runtime = Runtime(self.config)
+        state_dir = self.config.parent / (self.config.name + '.state')
+        tool_lock = self.root / '.tools.aem-update-lock'
+        def output(report, **kwargs):
+            with lock(tool_lock), lock(state_dir):
+                self.assertEqual(report, {'status': 'completed'})
+        for custom in (False, True):
+            with self.subTest(custom=custom), patch.object(runtime, 'emit', side_effect=output) as emit:
+                runtime.run(lambda session: ({'status': 'completed'}, False),
+                            maintenance=True, output=output if custom else None)
+                self.assertEqual(emit.call_count, 0 if custom else 1)

@@ -16,6 +16,7 @@ For contribution setup and check selection, see [Contributing](https://github.co
 - Help and usage validation must complete before reading machine configuration or acquiring locks.
 - Global options belong before the command; repeated policy options must preserve the distinction between omission and an explicit replacement list.
 - Machine callbacks must emit the JSON required by their agent or worker contracts regardless of ordinary output mode.
+- Release operation locks before formatting or emitting results, including specialized path output; presentation uses the completed operation's in-memory snapshot.
 - The standalone installer and external update worker remain standard-library-only because they run outside the installed package environment.
 - Core operations expose optional phase observations independently of Click; the CLI owns terminal detection, stderr rendering, throttling, and the reporter lifetime.
   Progress samples the current operation while a blocking read or Git subprocess runs, without touching configuration/state or performing extra filesystem inspections.
@@ -385,6 +386,9 @@ Copy worker code into a distinct request directory before launching; never depen
 Registered commands and workers must acquire the shared installation lock before their configuration lock.
 This order also applies across machine files that share one uv tools directory.
 Recheck saved policy, recovery state, request identity, and actual installed version before replacement.
+Snapshot the installed version under locks, then release both locks for remote release discovery and metadata validation in a private checkout.
+Reacquire locks and reload policy, request identity, recovery state, and official skill ownership before replacement or recording preparation failure; a superseded request must not overwrite the newer result.
+Cancel a prepared update if the installed version changed, and retain both locks through the actual uv replacement.
 Persist attempts before launch, throttle failures across startup events, keep previews offline and read-only, and distinguish queued work from completed updates.
 Keep self commands independent of content declarations; ordinary content operations and instruction location callbacks must not schedule self-updates.
 Keep removal-only setup independent of runtime registration and policy edits.

@@ -131,6 +131,9 @@ No daemon or OS scheduler is installed.
 ### Replacement and repair
 
 Self-updates coordinate registered AEM commands sharing the same uv tools directory.
+Remote release discovery and metadata validation release the installation and configuration locks, so other commands can run during that preparation.
+Before replacement, the worker reacquires the locks and rechecks the request, policies, recovery state, owned official skills, and installed version.
+If another update changed the installed version during preparation, the attempt is cancelled; an explicit `aem self update` can retry.
 Commands can report lock contention during replacement; startup remains fail-open.
 Other package-manager processes and external editors are not covered by these locks.
 A failed uv replacement is reported without a rollback guarantee; rerun `scripts/setup.py` to repair the installation if AEM cannot start.

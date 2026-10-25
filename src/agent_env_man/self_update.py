@@ -269,22 +269,26 @@ def git_url(repository):
     return 'git+' + repository
 
 
-def perform(request, records=None):
-    """Validate release metadata before asking uv to replace the registered tool."""
-    settings = validate(request['settings'])
-    repository = settings.get('repository', REPOSITORY)
-    environment = dict(os.environ, UV_TOOL_DIR=settings['tool_dir'], UV_TOOL_BIN_DIR=settings['bin_dir'],
-                       GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
-    listing = run_captured([settings['uv'], 'tool', 'list'], env=environment, check=True,
+def tool_environment(settings):
+    return dict(os.environ, UV_TOOL_DIR=settings['tool_dir'], UV_TOOL_BIN_DIR=settings['bin_dir'],
+                GIT_TERMINAL_PROMPT='0', GIT_SSH_COMMAND='ssh -oBatchMode=yes')
+
+
+def installed_version(settings):
+    listing = run_captured([settings['uv'], 'tool', 'list'], env=tool_environment(settings), check=True,
                              capture_output=True, text=True, timeout=TIMEOUT).stdout
     installed = re.search(r'^agent-env-man v(\S+)', listing, re.MULTILINE)
     if installed is None:
         raise ValueError('Registered uv installation is missing; rerun scripts/setup.py')
-    if records is not None:
-        check_official_skills(records, package_version=installed[1])
-    selected = select_release(git('ls-remote', '--tags', repository), installed[1], settings['mode'])
+    return installed[1]
+
+
+def prepare_release(settings, current):
+    """Inspect remote metadata using only a private checkout, without locks."""
+    repository = settings.get('repository', REPOSITORY)
+    selected = select_release(git('ls-remote', '--tags', repository), current, settings['mode'])
     if selected is None:
-        return {'status': 'up-to-date'}
+        return None
     with tempfile.TemporaryDirectory(prefix='aem-release-') as temporary:
         checkout = Path(temporary)
         git('init', str(checkout))
@@ -299,11 +303,26 @@ def perform(request, records=None):
         if (not isinstance(project, dict) or project.get('name') != 'agent-env-man'
                 or release_version(project.get('version')) != release_version(selected['version'])):
             raise ValueError('Release tag does not match agent-env-man package metadata')
+    return selected
+
+
+def perform(request, records=None, *, prepared=None):
+    """Replace under locks, rejecting a plan made for a different installation."""
+    settings = validate(request['settings'])
+    installed = installed_version(settings)
+    if records is not None:
+        check_official_skills(records, package_version=installed)
+    if prepared is not None and installed != prepared['current']:
+        return {'status': 'cancelled', 'reason': 'Installed version changed during release preparation; retry'}
+    selected = prepared['selected'] if prepared is not None else prepare_release(settings, installed)
+    if selected is None:
+        return {'status': 'up-to-date'}
+    repository = settings.get('repository', REPOSITORY)
     command = [settings['uv'], 'tool', 'install', '--reinstall', '--python', settings['python'],
                '--from', git_url(repository) + '@' + selected['revision'], 'agent-env-man']
     if records is not None:
-        check_official_skills(records, package_version=installed[1])
-    run_captured(command, env=environment, check=True, capture_output=True, text=True, timeout=TIMEOUT)
+        check_official_skills(records, package_version=installed)
+    run_captured(command, env=tool_environment(settings), check=True, capture_output=True, text=True, timeout=TIMEOUT)
     return {'status': 'updated', **selected}
 
 
@@ -340,6 +359,32 @@ def wait_for_parent(pid):
     return True
 
 
+def worker_state(request, config, state_dir, parent_exited):
+    """Read cancellation gates afresh while holding both operation locks."""
+    document = tomllib.loads(config.read_text(encoding='utf-8'))
+    if not parent_exited:
+        return document, {}, {'status': 'failed', 'error': 'Could not confirm requesting process exit'}
+    reason = None
+    if document.get('self_update', {}) != request['saved_settings']:
+        reason = 'Self-update settings changed'
+    elif request.get('automatic') and document.get('automation', {}).get('mode', 'policies') != 'policies':
+        reason = 'Automation mode changed'
+    elif request.get('full') and document.get('automation', {}) != request['saved_automation']:
+        reason = 'Automation settings changed'
+    if reason:
+        return document, {}, {'status': 'cancelled', 'reason': reason}
+    state = json.loads((state_dir / 'state.json').read_text(encoding='utf-8'))
+    if state.get('pending') is not None:
+        return document, {}, {'status': 'cancelled', 'reason': 'Recovery is pending'}
+    return document, state['items'], None
+
+
+def worker_failure(exc):
+    # Git URLs/build logs may contain credentials; never persist their output.
+    return {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
+                                        else f'{type(exc).__name__}: release update failed')}
+
+
 def worker(request_path):
     from process_lock import lock
     request_path = Path(request_path)
@@ -353,36 +398,48 @@ def worker(request_path):
     refresh_skills = False
     try:
         parent_exited = wait_for_parent(request['parent_pid'])
+        prepared = None
+        outcome = None
+        tool_disabled = request.get('full') and request['settings'].get('mode', 'off') == 'off'
+        # Snapshot only the installed version. Remote discovery and metadata
+        # fetching do not mutate the registered tool or configuration.
+        with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
+            if read_result(result).get('token') != request['token']:
+                return
+            try:
+                _, records, outcome = worker_state(request, config, state_dir, parent_exited)
+                if outcome is None:
+                    check_official_skills(records, payload=False)
+                    if not tool_disabled:
+                        settings = validate(request['settings'])
+                        current = installed_version(settings)
+                        check_official_skills(records, package_version=current)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                outcome = worker_failure(exc)
+        if outcome is None and not tool_disabled:
+            try:
+                prepared = {'current': current, 'selected': prepare_release(settings, current)}
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                outcome = worker_failure(exc)
+        # A new request or policy edit may have arrived while preparing. Never
+        # install or overwrite a newer result using the initial snapshot.
         with lock(installation_lock(request['settings']), timeout=TIMEOUT), lock(state_dir, timeout=TIMEOUT):
             previous = read_result(result)
             if previous.get('token') != request['token']:
                 return
             try:
-                document = tomllib.loads(config.read_text(encoding='utf-8'))
-                if not parent_exited:
-                    outcome = {'status': 'failed', 'error': 'Could not confirm requesting process exit'}
-                elif document.get('self_update', {}) != request['saved_settings']:
-                    outcome = {'status': 'cancelled', 'reason': 'Self-update settings changed'}
-                elif request.get('automatic') and document.get('automation', {}).get('mode', 'policies') != 'policies':
-                    outcome = {'status': 'cancelled', 'reason': 'Automation mode changed'}
-                elif request.get('full') and document.get('automation', {}) != request['saved_automation']:
-                    outcome = {'status': 'cancelled', 'reason': 'Automation settings changed'}
-                elif json.loads((state_dir / 'state.json').read_text(encoding='utf-8')).get('pending') is not None:
-                    outcome = {'status': 'cancelled', 'reason': 'Recovery is pending'}
-                else:
-                    records = json.loads((state_dir / 'state.json').read_text(encoding='utf-8'))['items']
+                document, records, cancellation = worker_state(request, config, state_dir, parent_exited)
+                outcome = cancellation or outcome
+                if outcome is None:
                     check_official_skills(records, payload=False)
-                    outcome = ({'status': 'disabled'} if request.get('full') and request['settings'].get('mode', 'off') == 'off'
-                               else perform(request, records))
-                    continue_full = bool(request.get('full'))
+                    outcome = ({'status': 'disabled'} if tool_disabled
+                               else perform(request, records, prepared=prepared))
+                    continue_full = bool(request.get('full')) and outcome['status'] != 'cancelled'
                     owned_skill = any(record.get('official_skill') and not record.get('detached')
                                       and record.get('agent') in document.get('agents', {}) for record in records.values())
                     refresh_skills = owned_skill and (outcome['status'] in ('updated', 'up-to-date') or continue_full)
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
-                # Do not persist subprocess output: Git URLs/build logs may
-                # contain credentials. Explicit updates can retry immediately.
-                outcome = {'status': 'failed', 'error': (str(exc) if isinstance(exc, ValueError)
-                                                         else f'{type(exc).__name__}: release update failed')}
+                outcome = worker_failure(exc)
             if continue_full or refresh_skills:
                 write_json(result, {**previous, 'status': 'continuing' if continue_full else 'queued', 'skill_binding': full_binding(document),
                                     'stages': {'tool': outcome}})

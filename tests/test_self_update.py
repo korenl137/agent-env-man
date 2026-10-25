@@ -172,13 +172,14 @@ class OriginalWorker(unittest.TestCase):
         self.directory = self.state_dir / 'self-update-worker' / 'request-token'
         self.request_path = self.directory / 'request.json'
         self.settings = {'mode': 'compatible', 'tool_dir': str(self.root / 'tools'),
-                         'bin_dir': str(self.root / 'bin')}
+                         'bin_dir': str(self.root / 'bin'), 'uv': str(self.root / 'uv'),
+                         'python': sys.executable}
         self.document = {'version': 1, 'self_update': self.settings}
         self.request = {'token': 'request-token', 'parent_pid': 123, 'config': str(self.config),
                         'settings': self.settings, 'saved_settings': dict(self.settings)}
         self.records = {}
 
-    def run_worker(self, *, parent_exited=True, outcome=None, run=None, perform_error=None,
+    def run_worker(self, *, parent_exited=True, outcome=None, run=None, perform_error=None, prepare=None,
                    pending=None, result_token='request-token'):
         self.config.write_text(tomlkit.dumps(self.document), encoding='utf-8')
         self_update.write_json(self.state_dir / 'state.json', {'items': self.records, 'pending': pending})
@@ -188,12 +189,68 @@ class OriginalWorker(unittest.TestCase):
                 patch.object(self_update, 'sys', SimpleNamespace(stdin=SimpleNamespace(buffer=io.BytesIO()))), \
                 patch.object(self_update, 'wait_for_parent', return_value=parent_exited), \
                 patch.object(self_update, 'check_official_skills'), \
+                patch.object(self_update, 'installed_version', return_value='1.0.0'), \
+                patch.object(self_update, 'prepare_release', side_effect=prepare), \
                 patch.object(self_update, 'perform', return_value=outcome or {'status': 'updated'},
                              side_effect=perform_error) as perform, \
                 patch.object(self_update.subprocess, 'run', side_effect=run) as subprocess_run:
             self_update.worker(self.request_path)
         self.assertFalse(self.directory.exists(), 'Worker request was not cleaned up')
         return self_update.read_result(self.result), perform, subprocess_run
+
+    def test_changes_during_preparation_cancel_before_replacement(self):
+        for change in ('settings', 'automation', 'recovery', 'token'):
+            with self.subTest(change=change):
+                self.full_request()
+                def prepare(*args):
+                    with process_lock.lock(self_update.installation_lock(self.settings)), process_lock.lock(self.state_dir):
+                        if change in ('settings', 'automation'):
+                            document = dict(self.document)
+                            document['self_update' if change == 'settings' else 'automation'] = {'mode': 'off'}
+                            self.config.write_text(tomlkit.dumps(document), encoding='utf-8')
+                        elif change == 'recovery':
+                            self_update.write_json(self.state_dir / 'state.json', {'items': {}, 'pending': {}})
+                        else:
+                            self_update.write_json(self.result, {'token': 'new-request', 'status': 'queued'})
+                result, perform, run = self.run_worker(prepare=prepare)
+                self.assertEqual(result['status'], 'queued' if change == 'token' else 'cancelled')
+                self.assertEqual(result['token'], 'new-request' if change == 'token' else 'request-token')
+                perform.assert_not_called()
+                run.assert_not_called()
+
+    def test_preparation_failure_preserves_new_request_and_hides_credentials(self):
+        for superseded in (False, True):
+            with self.subTest(superseded=superseded):
+                def prepare(*args):
+                    if superseded:
+                        self_update.write_json(self.result, {'token': 'new-request', 'status': 'queued'})
+                    raise subprocess.CalledProcessError(1, ['secret credential'], stderr='secret credential')
+                result, perform, run = self.run_worker(prepare=prepare)
+                self.assertEqual(result['status'], 'queued' if superseded else 'failed')
+                self.assertNotIn('secret credential', json.dumps(result))
+                perform.assert_not_called()
+                run.assert_not_called()
+
+    def test_replacement_receives_fresh_ownership_records(self):
+        def prepare(*args):
+            self_update.write_json(self.state_dir / 'state.json', {'items': {'fresh': {}}, 'pending': None})
+        _, perform, _ = self.run_worker(prepare=prepare)
+        self.assertEqual(perform.call_args.args[1], {'fresh': {}})
+
+    def test_automatic_mode_change_during_preparation_cancels(self):
+        self.request['automatic'] = True
+        def prepare(*args):
+            self.config.write_text(tomlkit.dumps({**self.document, 'automation': {'mode': 'full'}}), encoding='utf-8')
+        result, perform, run = self.run_worker(prepare=prepare)
+        self.assertEqual(result['status'], 'cancelled')
+        perform.assert_not_called()
+        run.assert_not_called()
+
+    def test_changed_installation_does_not_continue_full_run(self):
+        self.full_request()
+        result, _, run = self.run_worker(outcome={'status': 'cancelled', 'reason': 'Installed version changed'})
+        self.assertEqual(result['status'], 'cancelled')
+        run.assert_not_called()
 
     def test_superseded_request_and_pending_recovery_do_not_replace(self):
         result, perform, run = self.run_worker(result_token='new-request')
@@ -389,6 +446,43 @@ class ParentExit(unittest.TestCase):
 
 
 class SelfUpdate(SetupFixture):
+    def test_worker_remote_preparation_releases_both_locks(self):
+        config = self.register()
+        self.release('0.2.1')
+        directory = config.state_dir / 'self-update-worker' / 'lock-test'
+        request_path = directory / 'request.json'
+        self_update.write_json(request_path, {
+            'token': 'lock-test', 'parent_pid': 0, 'config': str(self.config),
+            'settings': self.settings, 'saved_settings': self.settings})
+        self_update.write_json(self_update.result_path(config), {'token': 'lock-test', 'status': 'queued'})
+        real_git = self_update.git
+        phases = []
+        def git(*arguments, **kwargs):
+            if arguments[0] in ('ls-remote', 'fetch'):
+                with lock(self_update.installation_lock(self.settings)), lock(config.state_dir):
+                    phases.append(arguments[0])
+            return real_git(*arguments, **kwargs)
+        real_run = subprocess.run
+        installs = []
+        def run(command, **kwargs):
+            if command[0] == str(self.uv):
+                if 'install' in command:
+                    for path in (self_update.installation_lock(self.settings), config.state_dir):
+                        with self.assertRaises(Error), lock(path):
+                            self.fail('Replacement must retain its lock')
+                    installs.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='agent-env-man v0.2.0\n')
+            return real_run(command, **kwargs)
+        with patch.dict(sys.modules, {'process_lock': process_lock}), \
+                patch.object(self_update, 'sys', SimpleNamespace(stdin=SimpleNamespace(buffer=io.BytesIO()))), \
+                patch.object(self_update, 'git', side_effect=git), \
+                patch.object(self_update.subprocess, 'run', side_effect=run):
+            self_update.worker(request_path)
+        result = self_update.read_result(self_update.result_path(config))
+        self.assertEqual(result['status'], 'updated', result)
+        self.assertEqual(phases, ['ls-remote', 'fetch'])
+        self.assertEqual(len(installs), 1)
+
     def register(self, mode='compatible'):
         self.tools = self.root / 'uv tools'
         self.bin = self.root / 'uv bin'
@@ -579,6 +673,20 @@ class SelfUpdate(SetupFixture):
         with patch('agent_env_man.self_update.subprocess.run', side_effect=run):
             self.assertEqual(self_update.perform({'settings': self.settings, 'current': '0.2.0'}),
                              {'status': 'up-to-date'})
+
+    def test_prepared_release_rechecks_installed_version_without_network_or_install(self):
+        self.register()
+        prepared = {'current': '0.2.0', 'selected': {'version': '0.2.1', 'revision': 'a' * 40}}
+        for current in ('0.2.1', '0.3.0', '0.1.0'):
+            with self.subTest(current=current), patch.object(self_update, 'git') as git, patch.object(
+                    self_update, 'run_captured', return_value=subprocess.CompletedProcess(
+                        [], 0, stdout=f'agent-env-man v{current}\n')) as run:
+                result = self_update.perform({'settings': self.settings}, prepared=prepared)
+                self.assertEqual(result['status'], 'cancelled')
+                self.assertIn('version changed', result['reason'])
+                git.assert_not_called()
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0], [str(self.uv), 'tool', 'list'])
 
     def test_worker_waits_for_parent_then_updates_with_local_git(self):
         config = self.register()

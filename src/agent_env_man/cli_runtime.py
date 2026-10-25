@@ -202,14 +202,16 @@ class Runtime:
                     if any((path.read_bytes() if path.exists() else None) != data
                            for path, data in snapshot.items()):
                         raise Error('Saved instruction locations changed during lookup; retry after the active command')
-                if output is None:
-                    if callback is None:
-                        report = describe_report(report, config, state)
-                    finish(failed)
-                    self.emit(report, machine=callback is not None, failed=failed)
-                else:
-                    finish(failed)
-                    output(report)
+            # Presentation uses the operation's in-memory snapshot. A slow
+            # terminal or pipe must not retain configuration/installation locks.
+            if output is None:
+                if callback is None:
+                    report = describe_report(report, config, state)
+                finish(failed)
+                self.emit(report, machine=callback is not None, failed=failed)
+            else:
+                finish(failed)
+                output(report)
         except OPERATION_ERRORS as exc:
             finish(True)
             if callback == "agent-hook":
