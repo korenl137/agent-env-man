@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.0] &mdash; 2026-10-25
+
 ### Fixed
 
 - Suppress incidental Windows console windows from test fixture processes while preserving native detached-process checks, and make path and byte-preservation assertions independent of Windows JSON escaping and newline translation.
@@ -367,7 +369,8 @@ Maintenance commands can still inspect, detach, recover, and remove saved integr
 - Linux/WSL and native Windows path handling, with Python 3.11 or later and Git required.
 - Legacy source-local `links.conf` delivery and partial Codex configuration merging, retained alongside the initial catalog workflow.
 
-[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0-rc.3...HEAD
+[Unreleased]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0-rc.3...v1.2.0
 [1.2.0-rc.3]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0-rc.2...v1.2.0-rc.3
 [1.2.0-rc.2]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0-rc.1...v1.2.0-rc.2
 [1.2.0-rc.1]: https://github.com/mirinae3145/agent-env-man/compare/v1.2.0-rc...v1.2.0-rc.1
