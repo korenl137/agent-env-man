@@ -95,6 +95,77 @@ class RetainedEntryRecovery(TemporaryCases):
         self.assertEqual((cache / 'local').read_bytes(), b'unowned metadata')
         self.assertEqual(state.path.read_bytes(), saved)
 
+    def test_invalid_saved_exclusions_preserve_recovery_contents_and_journal(self):
+        case, cache, vault = self.prepared()
+        for exclusions in ('invalid', [['only-prefix']], [[42, '**/._DAV']],
+                           [['../outside', '**/._DAV']]):
+            with self.subTest(exclusions=exclusions):
+                state = self.recover_retained(case, {'vault': str(vault), 'paths': ['._DAV']})
+                state.data['pending']['exclusions'] = exclusions
+                state.save()
+                saved = state.path.read_bytes()
+                self.assertIn('Invalid saved payload exclusion', case.run_cli('recover', code=1))
+                self.assertEqual(state.path.read_bytes(), saved)
+                self.assertEqual((cache / 'local').read_bytes(), b'unowned metadata')
+                self.assertEqual(list(vault.iterdir()), [])
+
+    def test_rollback_refuses_duplicate_metadata_locations_and_retries_after_reconciliation(self):
+        case, cache, vault = self.prepared()
+        policy = {'exclusions': [['', '**/._DAV']]}
+        before = observation(case.target, **policy)
+        backup = case.target.with_name('backup-retention')
+        shutil.copytree(case.target, backup)
+        shutil.rmtree(backup / '._DAV')
+        (case.target / 'nested/doc.md').write_bytes(b'incoming content')
+        (vault / '0').mkdir()
+        (vault / '0/local').write_bytes(b'parked original metadata')
+        state = self.journal(case, case.target, backup, case.target.with_name('.aem-stage-retention'),
+                             before, observation(case.target, **policy), key='cases:directory',
+                             retained={'vault': str(vault), 'paths': ['._DAV']}, **policy)
+        saved = state.path.read_bytes()
+        self.assertIn('both recovery locations', case.run_cli('recover', code=1))
+        self.assertEqual(state.path.read_bytes(), saved)
+        self.assertEqual((cache / 'local').read_bytes(), b'unowned metadata')
+        self.assertEqual((vault / '0/local').read_bytes(), b'parked original metadata')
+        self.assertEqual((backup / 'nested/doc.md').read_text(), 'original')
+        preserved = case.root / 'reconciled-metadata'
+        cache.rename(preserved)
+        case.run_cli('recover')
+        self.assertEqual((cache / 'local').read_bytes(), b'parked original metadata')
+        self.assertEqual((preserved / 'local').read_bytes(), b'unowned metadata')
+        self.assertEqual((case.target / 'nested/doc.md').read_text(), 'original')
+        self.assertFalse(vault.exists())
+        self.assertIsNone(case.manager().state.data['pending'])
+
+    def test_metadata_moved_during_parking_preserves_included_content_and_allows_recovery(self):
+        case, cache, vault = self.prepared()
+        vault.rmdir()
+        (case.source / 'nested/doc.md').write_bytes(b'incoming content')
+        preserved = case.root / 'concurrently-moved-metadata'
+        checked_parent = payload_policy.checked_parent
+        moved = False
+        def moving(root, relative):
+            nonlocal moved
+            result = checked_parent(root, relative)
+            if root == case.target and relative == '._DAV' and not moved:
+                cache.rename(preserved)
+                moved = True
+            return result
+        with patch.object(payload_policy, 'checked_parent', side_effect=moving):
+            error = case.run_cli('apply', '--item', 'cases', code=1)
+        self.assertTrue(moved)
+        self.assertIn('missing during recovery', error)
+        self.assertEqual((preserved / 'local').read_bytes(), b'unowned metadata')
+        self.assertEqual((case.target / 'nested/doc.md').read_text(), 'original')
+        self.assertIsNotNone(case.manager().state.data['pending'])
+        preserved.rename(cache)
+        case.run_cli('recover')
+        self.assertEqual((cache / 'local').read_bytes(), b'unowned metadata')
+        self.assertIsNone(case.manager().state.data['pending'])
+        case.run_cli('apply', '--item', 'cases')
+        self.assertEqual((case.target / 'nested/doc.md').read_bytes(), b'incoming content')
+        self.assertEqual((cache / 'local').read_bytes(), b'unowned metadata')
+
     def test_conflicting_retained_entry_preserves_both_copies_until_reconciled(self):
         case, cache, vault = self.prepared()
         (vault / '0').mkdir()

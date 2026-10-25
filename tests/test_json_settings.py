@@ -12,6 +12,7 @@ import tomlkit
 
 from agent_env_man.model import Error
 from agent_env_man.settings import Bundle, Settings, merge, recover_group, transaction
+from agent_env_man.settings_formats import JsonFormat
 from agent_env_man.storage import observation
 import test_settings as fixtures
 
@@ -280,6 +281,33 @@ class JsonMerges(unittest.TestCase):
     @staticmethod
     def bundle(text):
         return Bundle.from_snapshot({'config': text, 'management': ''}, format='json')
+
+    def test_nested_write_refuses_nonobject_parent_without_changing_document(self):
+        value = JsonFormat.fields(JsonFormat.parse('{"value": 900719925474099312345}'))[('value',)]
+        for parent in ('null', 'false', '1e0', '"private"', '[1, {"child": 2}]'):
+            for path in (('parent', 'child'), ('parent', 'nested', 'child')):
+                with self.subTest(parent=parent, path=path):
+                    original = '{\r\n\t"local" : "\\u0061",\r\n\t"parent" : ' + parent + '\r\n}\n'
+                    document = JsonFormat.parse(original)
+                    with self.assertRaisesRegex(Error, 'Field structure conflict'):
+                        JsonFormat.put(document, path, value)
+                    self.assertEqual(JsonFormat.dump(document), original)
+
+    def test_nested_delete_beneath_nonobject_parent_preserves_exact_document(self):
+        for parent in ('null', 'false', '1e0', '"private"', '[1, {"child": 2}]'):
+            with self.subTest(parent=parent):
+                original = '{\r\n "parent":' + parent + ', "local":"\\u0061"\n}\r\n'
+                document = JsonFormat.parse(original)
+                JsonFormat.put(document, ('parent', 'nested', 'child'), delete=True)
+                self.assertEqual(JsonFormat.dump(document), original)
+
+    def test_delete_missing_nested_path_preserves_existing_siblings_and_tokens(self):
+        original = '{\r\n\t"parent": { "local":1e0 },\n\t"escaped":"\\u0061"\r\n}\n'
+        for path in (('absent', 'child'), ('parent', 'absent', 'child'), ('parent', 'absent')):
+            with self.subTest(path=path):
+                document = JsonFormat.parse(original)
+                JsonFormat.put(document, path, delete=True)
+                self.assertEqual(JsonFormat.dump(document), original)
 
     def test_number_spelling_is_equal_and_boolean_is_distinct(self):
         base = self.bundle('{"n":1,"zero":-0.0,"array":[1,{"x":2}]}')

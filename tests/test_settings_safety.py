@@ -11,6 +11,7 @@ from agent_env_man.model import Error
 from agent_env_man import settings
 from agent_env_man.settings import Bundle, recover_group, transaction
 from agent_env_man.storage import State, observation
+import test_settings as settings_tests
 
 
 class SettingsSafety(unittest.TestCase):
@@ -34,6 +35,27 @@ class SettingsSafety(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b"count = 1\n")
         self.assertEqual(self.state.path.read_bytes(), before)
         self.assertFalse(list(self.root.glob(".aem-*")))
+
+    def test_unknown_group_operation_preserves_files_and_ownership(self):
+        saved = self.state.path.read_bytes()
+        for preview in (False, True):
+            with self.subTest(preview=preview), self.assertRaisesRegex(Error, 'Unsupported grouped file operation'):
+                transaction(self.state, self.writes(), {'new': {}},
+                            operation='unknown-group', dry_run=preview)
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertEqual(self.state.path.read_bytes(), saved)
+        self.assertFalse(list(self.root.glob('.aem-*')))
+
+    def test_initial_stage_failure_does_not_create_durable_state(self):
+        state = State(self.root / 'new-state')
+        original = deepcopy(state.data)
+        with patch.object(settings, 'atomic_write', side_effect=OSError('initial disk failure')):
+            with self.assertRaisesRegex(OSError, 'initial disk failure'):
+                transaction(state, self.writes(), {'new': {'mode': 'settings'}})
+        self.assertEqual(self.target.read_bytes(), b'count = 1\n')
+        self.assertEqual(state.data, original)
+        self.assertFalse(state.path.exists())
+        self.assertFalse(list(self.root.glob('.aem-*')))
 
     def test_stale_read_rejected_even_in_preview(self):
         writes = self.writes()
@@ -283,6 +305,38 @@ class SettingsSafety(unittest.TestCase):
                 self.assertEqual(self.state.path.read_bytes(), before)
                 stage.unlink(missing_ok=True)
                 backup.write_bytes(b"count = 1\n")
+
+
+class SettingsStorageSafety(unittest.TestCase):
+    setUp = settings_tests.StagedSettings.setUp
+    call = settings_tests.StagedSettings.call
+    bootstrap = settings_tests.StagedSettings.bootstrap
+    manager = settings_tests.StagedSettings.manager
+
+    def test_targets_cannot_overwrite_sources_or_manager_storage(self):
+        manager = self.manager()
+        config = manager.config
+        source = config.sources['editor']
+        originals = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        protected = (self.payload, config.path, config.state_dir / 'overwrite.toml',
+                     config.checkout_root / 'overwrite.toml', self.stage, config.catalog_path)
+        for target in protected:
+            with self.subTest(target=target):
+                config.doc['settings']['editor']['target'] = str(target)
+                with self.assertRaisesRegex(Error, 'Setting target overlaps sources or manager storage'):
+                    settings.declaration(config, source, {'path': 'editor.toml'})
+        self.assertEqual({path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}, originals)
+
+    def test_stage_storage_cannot_be_created_inside_settings_source(self):
+        config = self.manager().config
+        source = config.sources['editor']
+        original = self.payload.read_bytes()
+        config.path = self.source / 'nested-machine.toml'
+        with self.assertRaisesRegex(Error, 'Settings stage storage overlaps sources or manager storage'):
+            settings.declaration(config, source, {'path': 'editor.toml'})
+        self.assertEqual(self.payload.read_bytes(), original)
+        self.assertFalse(config.path.exists())
+        self.assertFalse((self.source / 'nested-machine.toml.stages').exists())
 
 
 class SettingsMetadataSafety(unittest.TestCase):
