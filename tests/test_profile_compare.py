@@ -1,0 +1,191 @@
+"""Profile comparison reads two roots offline and never writes."""
+import io
+import json
+import os
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+from agent_env_man.cli import main
+
+AEM_COMMAND = 'python -m agent_env_man --config {config} startup --aem-hook-id marker-{name}'
+
+
+class Roots(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.tmp, ignore_errors=True))
+        self.config = self.tmp / 'aem' / 'machine.toml'
+        self.source = self.tmp / 'source'
+        (self.source / 'skill-a').mkdir(parents=True)
+        (self.source / 'entry.md').write_text('rules')
+        self.left = self.profile('left')
+        self.right = self.profile('right')
+
+    def profile(self, name, **overrides):
+        root = self.tmp / name
+        (root / 'skills').mkdir(parents=True)
+        (root / 'skills' / 'skill-a').symlink_to(self.source / 'skill-a')
+        (root / 'CLAUDE.md').symlink_to(self.source / 'entry.md')
+        (root / 'output-styles').symlink_to(self.source)
+        settings = {
+            'model': 'sonnet',
+            'effortLevel': 'medium',
+            'statusLine': {'type': 'command', 'command': 'python3 status.py'},
+            'hooks': {
+                'SessionStart': [
+                    {'matcher': '^startup$', 'hooks': [{'type': 'command',
+                     'command': AEM_COMMAND.format(config=self.config, name=name)}]},
+                    {'matcher': '', 'hooks': [{'type': 'command',
+                     'command': f'bash {root}/hooks/herdr.sh session'}]},
+                ],
+            },
+        }
+        settings.update(overrides)
+        (root / 'settings.json').write_text(json.dumps(settings))
+        plugins = root / 'plugins'
+        plugins.mkdir()
+        (plugins / 'installed_plugins.json').write_text(json.dumps(
+            {'version': 2, 'plugins': {'tool@market': [{'scope': 'user', 'version': '1.0.0'}]}}))
+        return root
+
+    def run_compare(self, *args, left=None, right=None):
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            code = main(['--config', str(self.config), *(['--json'] if '--json' in args else []), 'compare',
+                         str(left or self.left), str(right or self.right),
+                         *[a for a in args if a != '--json']])
+        return code, output.getvalue(), errors.getvalue()
+
+    def report(self, *args, **kwargs):
+        code, output, errors = self.run_compare('--json', *args, **kwargs)
+        self.assertEqual(code, 0, errors)
+        return json.loads(output)
+
+    def items(self, report, section):
+        return {item['item']: item for item in report['sections'][section]}
+
+    def snapshot(self):
+        return {str(p): (p.read_bytes() if p.is_file() and not p.is_symlink() else os.readlink(p) if p.is_symlink() else None)
+                for root in (self.left, self.right) for p in root.rglob('*')}
+
+
+class Compare(Roots):
+    def test_profile_specific_paths_are_not_drift(self):
+        report = self.report()
+        self.assertEqual(report['totals']['different'], 0, report)
+        self.assertEqual(report['totals']['expected'], 0)
+        self.assertGreater(report['totals']['same'], 8)
+
+    def test_value_difference_is_digest_unless_values_requested(self):
+        (self.right / 'settings.json').write_text(json.dumps({**json.loads((self.right / 'settings.json').read_text()),
+                                                              'model': 'opus-secret'}))
+        report = self.report()
+        item = self.items(report, 'settings')['model']
+        self.assertEqual(item['status'], 'different')
+        self.assertNotIn('opus-secret', json.dumps(report))
+        self.assertEqual(len(item['left']), 8)
+        shown = self.items(self.report('--values'), 'settings')['model']
+        self.assertEqual((shown['left'], shown['right']), ('sonnet', 'opus-secret'))
+
+    def test_expect_marks_a_difference_as_intended_and_reports_unmatched_names(self):
+        (self.right / 'settings.json').write_text(json.dumps({**json.loads((self.right / 'settings.json').read_text()),
+                                                              'model': 'opus'}))
+        report = self.report('--expect', 'model', '--expect', 'no.such.item')
+        self.assertEqual(self.items(report, 'settings')['model']['status'], 'expected')
+        self.assertEqual(report['totals']['different'], 0)
+        self.assertEqual(report['unmatched_expect'], ['no.such.item'])
+
+    def test_booleans_and_numbers_are_distinct_and_absence_is_not_null(self):
+        base = json.loads((self.left / 'settings.json').read_text())
+        (self.left / 'settings.json').write_text(json.dumps({**base, 'flag': True, 'nothing': None}))
+        (self.right / 'settings.json').write_text(json.dumps({**base, 'flag': 1}))
+        items = self.items(self.report(), 'settings')
+        self.assertEqual(items['flag']['status'], 'different')
+        self.assertNotIn('only', items['flag'])
+        self.assertEqual(items['nothing'].get('only'), 'left')
+
+    def test_numbers_compare_by_value_not_spelling(self):
+        base = json.loads((self.left / 'settings.json').read_text())
+        (self.left / 'settings.json').write_text(json.dumps({**base, 'interval': 10, 'ratio': 0.5}))
+        # The same values spelled differently: 1e1 is 10 and 5e-1 is 0.5.
+        (self.right / 'settings.json').write_text(json.dumps(base)[:-1] + ', "interval": 1e1, "ratio": 5e-1}')
+        items = self.items(self.report(), 'settings')
+        self.assertEqual((items['interval']['status'], items['ratio']['status']), ('same', 'same'))
+
+    def test_hook_groups_are_compared_by_owner(self):
+        data = json.loads((self.right / 'settings.json').read_text())
+        data['hooks']['SessionStart'] = [data['hooks']['SessionStart'][0],
+                                         {'matcher': '', 'hooks': [{'type': 'command', 'command': 'bash other.sh'}]}]
+        (self.right / 'settings.json').write_text(json.dumps(data))
+        hooks = self.items(self.report(), 'hooks')
+        self.assertEqual(hooks['SessionStart[^startup$] aem']['status'], 'same')
+        self.assertEqual(sum(1 for item in hooks.values() if item['status'] == 'same'), 1)
+        external = [item for name, item in hooks.items() if ' external#' in name]
+        self.assertEqual(len(external), 2)
+        self.assertEqual(sorted(item['only'] for item in external if 'only' in item), ['left', 'right'])
+        self.assertEqual(len({item['item'] for item in external}), 2)
+
+    def test_skill_link_plugin_and_entry_differences(self):
+        other = self.tmp / 'other'
+        other.mkdir()
+        (self.right / 'skills' / 'skill-a').unlink()
+        (self.right / 'skills' / 'skill-a').symlink_to(other)
+        (self.right / 'skills' / 'extra').symlink_to(other)
+        (self.right / 'CLAUDE.md').unlink()
+        (self.right / 'CLAUDE.md').write_text('own rules')
+        (self.right / 'plugins' / 'installed_plugins.json').write_text(json.dumps(
+            {'version': 2, 'plugins': {'tool@market': [{'version': '1.1.0'}], 'new@market': [{'version': '0.1'}]}}))
+        report = self.report()
+        self.assertEqual(self.items(report, 'skills')['skills/skill-a']['status'], 'different')
+        self.assertEqual(self.items(report, 'skills')['skills/extra']['only'], 'right')
+        self.assertEqual(self.items(report, 'entry')['CLAUDE.md']['status'], 'different')
+        plugins = self.items(report, 'plugins')
+        self.assertEqual((plugins['plugins/tool@market']['left'], plugins['plugins/tool@market']['right']), ('1.0.0', '1.1.0'))
+        self.assertEqual(plugins['plugins/new@market']['only'], 'right')
+
+    def test_missing_settings_file_lists_fields_as_one_sided(self):
+        (self.right / 'settings.json').unlink()
+        items = self.items(self.report(), 'settings')
+        self.assertTrue(items and all(item.get('only') == 'left' for item in items.values()))
+
+    def test_secret_values_stay_out_of_text_output_without_values_flag(self):
+        base = json.loads((self.left / 'settings.json').read_text())
+        (self.left / 'settings.json').write_text(json.dumps({**base, 'env': {'TOKEN': 'left-secret'}}))
+        (self.right / 'settings.json').write_text(json.dumps({**base, 'env': {'TOKEN': 'right-secret'}}))
+        code, output, _ = self.run_compare()
+        self.assertEqual(code, 0)
+        self.assertIn('env.TOKEN', output)
+        self.assertNotIn('secret', output)
+        self.assertIn('left-secret', self.run_compare('--values')[1])
+
+    def test_compare_changes_nothing_and_needs_no_machine_state(self):
+        before = self.snapshot()
+        self.run_compare()
+        self.run_compare('--values', '--json')
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.config.parent.exists())
+
+    def test_registered_agent_names_resolve_from_the_machine_file(self):
+        self.config.parent.mkdir()
+        self.config.write_text(f'version = 1\n[agents.claude]\nroot = "{self.left}"\nskills = "{self.left}/skills"\n'
+                               f'[agents.claude-lab]\nroot = "{self.right}"\nskills = "{self.right}/skills"\n')
+        code, output, errors = self.run_compare('--json', left='claude', right='claude-lab')
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(json.loads(output)['totals']['different'], 0)
+
+    def test_unknown_name_is_refused(self):
+        code, _, errors = self.run_compare(left='nobody')
+        self.assertEqual(code, 1)
+        self.assertIn('Unknown profile nobody', errors)
+
+    def test_invalid_settings_json_is_reported(self):
+        (self.right / 'settings.json').write_text('{broken')
+        code, _, errors = self.run_compare()
+        self.assertEqual(code, 1)
+        self.assertIn('settings.json', errors)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -14,6 +14,8 @@ Existing product destinations, saved IDs and callbacks remain unchanged.
 - Optional machine setting-to-agent association for independently applying common source fields to separate profiles; legacy unbound settings retain their current selection behavior for existing invocations, while new named selectors exclude them.
 Named root overlaps and unregistered instance selections are refused.
 Account login, plugin installation and native runtime isolation remain product-owned.
+- `aem compare LEFT RIGHT` compares two Claude Code profiles offline and read-only: settings fields, hook groups by owner, skill links, output styles, the instruction entry and installed plugin versions.
+Profile-specific paths are normalized, `--expect` marks intended differences, and values appear as digests unless `--values` is given.
 
 ## [1.2.0] &mdash; 2026-10-25
 

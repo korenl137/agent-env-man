@@ -107,6 +107,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `status` | Inspect sources and saved installations. | Only with `--refresh`. |
 | `detach` | Preserve contents and release ownership. | None. |
 | `locate` | Find installed content or prepared editing sources. | None. |
+| `compare` | Compare two Claude Code profiles read-only. | None. |
 | `recover` | Recover an interrupted target replacement. | None. |
 | `automation` | Run or preview device automation. | According to selected mode; no network in dry run. |
 | `startup` | Fail-open automatic-update callback. | According to due policies. |
@@ -742,6 +743,31 @@ aem publish report -m "Clarify guidance"
 ```
 
 Instruction callbacks continue to use saved instruction installations only, without catalog fallback or source lookup.
+
+## compare
+
+```text
+aem compare LEFT RIGHT [--expect ITEM]... [--values]
+```
+
+LEFT and RIGHT are registered agent names such as `claude` and `claude-lab`, or absolute profile root paths.
+A path needs no machine configuration, catalog or saved state; the command takes no locks and writes nothing.
+It supports the Claude Code profile layout.
+
+The comparison covers the settings fields outside `hooks`, hook groups by owner, skill links, output styles, the instruction entry and the installed plugin names with their versions.
+It never opens credentials, sessions, project history or plugin data.
+
+- Settings fields are compared leaf by leaf; arrays and empty objects are atomic, numbers compare by exact value and stay apart from booleans, and a missing field is distinct from `null`.
+- A hook group is AEM-owned when its command carries `--aem-hook-id`; only the presence of such a group is compared, because it names its own machine configuration.
+  Other groups are compared by their commands, and their labels carry a short digest of the command.
+- Skill links, output styles and the instruction entry compare link targets.
+- A string that contains a profile's own root is compared with the root replaced by `{root}`, so a profile-specific path is not a difference.
+
+Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as the report prints it, for example `model`, `statusLine.command`, `skills/NAME` or `plugins/NAME@MARKETPLACE`.
+`unmatched_expect` lists names that matched no item.
+A difference shows a short digest of each value, because settings can hold secrets; `--values` shows the values.
+Plugin versions and the entry are always shown.
+Exit status is 0 whether or not differences exist; scripts read the totals from `--json`.
 
 ## recover
 
