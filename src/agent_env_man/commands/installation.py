@@ -26,6 +26,8 @@ def apply(runtime, agent, item, timeout, adopt, replace, reattach, dry_run):
     Instruction IDs are NAME:bundle, NAME:entry, and NAME:hook. Selecting an
     entry or hook also selects its instruction group. Directories remain
     included with --agent because they are independent of agent bindings.
+    Named instances select only their associated settings; default product
+    selectors retain legacy unbound-settings selection.
     """
     if adopt and replace:
         raise click.UsageError("--adopt and --replace are mutually exclusive")

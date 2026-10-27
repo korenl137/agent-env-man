@@ -9,7 +9,7 @@ import stat
 import tempfile
 import uuid
 
-from .agents import profile, suffix
+from .agents import profile, suffix, product_name
 from .git_source import Git, now
 from .model import Config, MachineFile, Error, Item, identifier, overlaps, relative
 from .progress import operation, step
@@ -228,6 +228,15 @@ class Manager:
         logical = item.source_name if item.kind in ("skill", "directory", "setting", 'personal-hook') else f"{item.source_name}:{item.id.split('@')[0]}"
         return item.key in requested or logical in requested
 
+    def validate_agent(self, agent, *, saved=False):
+        profile(agent)
+        if product_name(agent) == agent or agent in self.config.doc.get('agents', {}):
+            return
+        if saved and any(agent in r.get('agents', [r.get('agent')])
+                         for r in self.state.data['items'].values()):
+            return
+        raise Error(f'Agent {agent} is not configured; connect it with setup --agent {agent}')
+
     def selected(self, requested=(), *, reattach=False, agent=None):
         all_items = self.items()
         # Entry installation includes its directory and hook; selecting a hook
@@ -250,8 +259,12 @@ class Manager:
         items = [i for i in items if reattach or not self.state.data["items"].get(i.key, {}).get("detached")]
         self.check_destinations([i for i in all_items if i.key not in detached])
         if agent is not None:
-            profile(agent)
-            items = [i for i in items if (i.kind in ("setting", "directory") or agent in (i.agents or (i.agent,)))]
+            self.validate_agent(agent)
+            items = [i for i in items if (i.kind == "directory" or (i.kind == "setting" and not i.agent and product_name(agent) == agent)
+                                         or agent in (i.agents or (i.agent,)))]
+        for item in items:
+            if item.kind == "setting" and item.agent:
+                self.validate_agent(item.agent)
         self.check_destinations(items)
         return items
 
@@ -276,6 +289,9 @@ class Manager:
                                                     or old["source"] != str(item.source)
                                                     or old.get("link_target", old["source"]) != str(item.link_destination)):
                 raise Error(f"{item.key}: path or mode changed; detach before reconfiguration")
+            if (old and not old.get('detached') and item.kind == 'setting'
+                    and old.get('agent', '') != item.agent):
+                raise Error(f'{item.key}: agent binding changed; detach before reconfiguration')
             for key, target in owners.items():
                 if key != item.key and overlaps(item.target, target):
                     other = next((i for i in items if i.key == key), None)
@@ -375,7 +391,7 @@ class Manager:
                     'location': 'source'}
         if target:
             raise Error("--target is supported only for settings")
-        profile(agent)
+        self.validate_agent(agent, saved=True)
         if not source:
             record = self.state.data["items"].get(f"{name}:directory")
             if record is not None:
@@ -1124,7 +1140,7 @@ class Manager:
         keys = [k for k in expanded if agent is None or records[k].get("kind") == "directory"
                 or agent in records[k].get("agents", [records[k].get("agent", "codex")])]
         if agent:
-            profile(agent)
+            self.validate_agent(agent, saved=True)
             for key in keys:
                 if len(records[key].get("agents", [])) > 1:
                     raise Error(f"{key}: shared target; detach without --agent to release all consumers")
@@ -1458,6 +1474,8 @@ class Manager:
 
     @operation('Inspecting sources and installations')
     def status(self, *, refresh=False, timeout=30, agent=None):
+        if agent:
+            self.validate_agent(agent, saved=True)
         report = {"sources": [], "items": [], "pending": self.state.data.get("pending")}
         if "startup" in self.state.data:
             report["startup"] = self.state.data["startup"]

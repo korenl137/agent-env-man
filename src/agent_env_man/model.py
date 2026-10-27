@@ -265,8 +265,13 @@ class Config(MachineFile):
             raise Error("Machine settings must be a table")
         for name, binding in machine_settings.items():
             identifier(name)
-            if not isinstance(binding, dict) or set(binding) != {"target"}:
-                raise Error(f"settings.{name} accepts only target")
+            if not isinstance(binding, dict) or ("target" not in binding or set(binding) - {"target", "agent"}):
+                raise Error(f"settings.{name} accepts target and optional agent")
+            if "agent" in binding:
+                from .agents import profile
+                if not isinstance(binding["agent"], str):
+                    raise Error(f"Setting {name}: agent must be a destination name")
+                profile(binding["agent"])
             from .storage import saved_path
             if not isinstance(binding["target"], str):
                 raise Error("Setting target must be a string")
@@ -274,21 +279,27 @@ class Config(MachineFile):
             if not target.is_absolute():
                 raise Error("Setting target must be absolute")
             saved_path(str(target))
+            if binding.get('agent') in self.agents:
+                root = Path(self.agents[binding['agent']]['root']).expanduser().absolute()
+                if root not in target.absolute().parents:
+                    raise Error(f'Setting {name}: target must be inside its agent root')
         for name, data in settings.items():
             if name not in machine_settings:
                 raise Error(f"Setting {name}: missing machine settings.{name}.target")
             if "external" in data and data["external"] not in self.doc.get("external_paths", {}):
                 raise Error(f"Setting {name}: missing external path binding")
         bindings = self.doc.get("external_paths", {})
+        from .agents import product_name
         from .personal_hooks import runtime
         for name, data in declared_hooks.items():
             if 'external' in data and data['external'] not in bindings:
                 raise Error(f'Hook {name}: missing external path binding')
-            selected_agents = set(data['agents']) & (set(self.agents) or {'codex'})
+            selected_agents = {name for name in (self.agents or {'codex': {}})
+                               if product_name(name) in data['agents']}
             if not selected_agents:
                 raise Error(f'Hook {name}: no declared agent is bound on this machine')
             for agent in selected_agents:
-                runtime(self, data['agents'][agent]['runtime'])
+                runtime(self, data['agents'][product_name(agent)]['runtime'])
         for name, data in skills.items():
             path = data.get("subdir", ".")
             if path != ".":
@@ -451,7 +462,7 @@ class Config(MachineFile):
         return sorted(self.agents, key=lambda n: (n != "codex", n))
 
     def declarations(self, source: Source) -> list[Item]:
-        from .agents import profile, suffix
+        from .agents import profile, suffix, product_name
         self.catalog()
         if source.name in self._directories:
             data = self._directories[source.name]
@@ -463,8 +474,10 @@ class Config(MachineFile):
         if source.name in self._hooks:
             result = []
             data = self._hooks[source.name]
-            for agent in sorted(set(data['agents']) & (set(self.agents) or {'codex'})):
-                binding = data['agents'][agent]
+            for agent in sorted(self.agents or {'codex': {}}):
+                if product_name(agent) not in data['agents']:
+                    continue
+                binding = data['agents'][product_name(agent)]
                 root = f'aem-agent-{agent}' if self.agents else 'agent'
                 result.append(Item(source.name, 'hook' + suffix(agent), binding['script'],
                     source.path / relative(binding['script']), self.target(root, relative(profile(agent).hook_name)),

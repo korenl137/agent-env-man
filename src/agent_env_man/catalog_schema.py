@@ -133,9 +133,11 @@ def validate(document):
             raise Error(f'hooks.{name}: source must name a declared source')
         if not isinstance(data.get('agents'), dict) or not data['agents']:
             raise Error(f'hooks.{name}: agents must be a nonempty table')
-        from .agents import profile
+        from .agents import profile, product_name
         from .personal_hooks import validate_binding
         for agent, binding in data['agents'].items():
+            if product_name(agent) != agent:
+                raise Error('Catalog hooks select products; bind named instances in the machine file')
             validate_binding(binding, profile(agent))
     names = [set(document.get(kind, {})) for kind in ("skills", "directories", "instructions", "settings", "hooks")]
     collision = set().union(*(a & b for i, a in enumerate(names) for b in names[i + 1:]))

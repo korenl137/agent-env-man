@@ -892,3 +892,16 @@ Prepare with `bootstrap --runtime NAME=ABSOLUTE_EXECUTABLE`, then register with 
 Plain apply and plain sync exclude personal hook registration.
 Update visits the source without changing installed definitions; its live script contents may change immediately.
 See [Personal hooks](personal-hooks.md).
+
+## Named agent destination selection
+
+`setup --agent` accepts `claude-NAME` and `codex-NAME` in addition to the existing product destinations.
+It saves separate roots, startup groups and official-skill ownership without authenticating an account or installing plugins.
+Other `--agent` selectors accept those saved names as exact destinations; `--agent claude` still means only the original Claude destination.
+Omitting the selector includes all configured destinations under each command's existing selection contract.
+An instance name is not a product-wide selector or Codex's native configuration preset.
+Catalog hook bindings select products and expand to their configured instances.
+Agent-associated settings are selected only for their bound instance.
+Unbound settings preserve their previous apply behavior without a selector or with the original product selectors; named selectors exclude them.
+Directories remain agent-independent, and `sync` still updates all sources before filtering installation.
+See [named instances](agent-profiles.md#named-instances) for binding examples, setting stages, callbacks and removal.

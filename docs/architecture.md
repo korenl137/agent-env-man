@@ -430,6 +430,11 @@ Do not grant agent hook trust or rewrite user execution policies.
 
 Resolve product-specific defaults, hook serialization, and callback output through internal agent profiles.
 Codex and Claude Code are shipped profiles.
+Named instances reuse the product implementation with a distinct installation identity, target roots and callback markers.
+Retain existing default IDs and persisted hook commands; never relocate old destinations when registering another instance.
+Catalog personal hooks remain product declarations expanded into configured instances.
+Optional machine settings associations select one instance and retain separate per-item stage/conflict ownership.
+Account authentication and runtime state are not copied or provisioned by this extension.
 Keep product syntax in internal profiles and delivery/ownership in the shared manager.
 Validate future extension with fake profiles without claiming third-product support.
 See [profile contracts](agent-profiles.md).

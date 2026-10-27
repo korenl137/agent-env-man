@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Named Claude and Codex destinations such as `claude-lab` and `codex-lab`, with independent default roots, startup/instruction hook identities, content ownership, selection and recovery through existing commands.
+Existing product destinations, saved IDs and callbacks remain unchanged.
+- Optional machine setting-to-agent association for independently applying common source fields to separate profiles; legacy unbound settings retain their current selection behavior for existing invocations, while new named selectors exclude them.
+Named root overlaps and unregistered instance selections are refused.
+Account login, plugin installation and native runtime isolation remain product-owned.
+
 ## [1.2.0] &mdash; 2026-10-25
 
 ### Fixed

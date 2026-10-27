@@ -368,7 +368,7 @@ Explicit commands ignore these policies and clocks.
 | `catalog` | String or table | Optional direct local path, local copy binding, or Git binding described below; required for bootstrap/content preparation. One binding per machine file. |
 | `checkout_root` | String | Managed Git storage; defaults to sibling `<machine-file>.checkouts`. |
 | `roots` | Table of paths | User-named installation roots; bootstrap defaults missing `skills`, `agent`, and `home`. |
-| `agents` | Table | Agent selections and path bindings, normally written by setup. |
+| `agents` | Table | Product destinations and named instance path bindings, normally written by setup. |
 | `runtimes` | Table of paths | Personal hook interpreter bindings; bootstrap never installs executables. |
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill, directory, or instruction names mapped to `"link"` or `"copy"`. Unknown names fail catalog validation. |
@@ -477,13 +477,24 @@ See [catalog commands](commands.md#catalog) for validation, publication, and fai
 
 ### Roots and agents
 
-`agents.codex` accepts only `root` and `skills` path strings.
-Omitted fields default to `CODEX_HOME` (or `~/.codex`) and `~/.agents/skills`, respectively.
+`agents.codex`, `agents.claude`, and named instances such as `agents.codex-lab` and `agents.claude-lab` accept only `root` and `skills` path strings.
+Named instances default to `~/.NAME` and `~/.NAME/skills`, independently of default-profile environment overrides.
+Their roots cannot overlap another configured instance root.
+See [named instances](agent-profiles.md#named-instances) for setup, selection, discovery limits, and removal.
+
+For the original Codex destination, omitted fields default to `CODEX_HOME` (or `~/.codex`) and `~/.agents/skills`, respectively.
 Setup persists resolved defaults; saved values take precedence over later environment changes.
 Setup initially respects existing `roots.agent` and `roots.skills` when adding Codex.
 Bootstrap root overrides for `agent` and `skills` also update an existing Codex binding.
 Custom roots must be declared explicitly.
 AEM derives `aem-agent-codex` and `aem-skills-codex` roots from the agent binding; conflicting manual definitions are rejected.
+
+Machine `settings.NAME` accepts `target` and optional `agent`.
+The agent names a destination and restricts installation selection to that instance; preparing or applying an active setting requires that destination to be configured, with the target inside its root.
+Detached associations may remain after instance removal.
+Omission preserves the setting's existing behavior without an agent selector or with the original product selectors; named selectors exclude unbound settings.
+Changing an active setting's association requires detach first.
+Each catalog setting name still has exactly one stage and target; use distinct declarations sharing one source/path to deploy common fields independently.
 
 ### Saved setup
 
@@ -640,7 +651,11 @@ Every automatic settings attempt receives shared changes and applies the stage a
 Full mode includes settings with omitted triggers and replaces their individual schedule with the full-run schedule.
 Attempt observations are generated under `sources.NAME.settings_automation` in saved state; full runs do not change this clock.
 No other item fields are accepted; names cannot collide with skills or instructions.
-Machine `[settings.NAME]` requires only `target`, an absolute application-file path or `~/...`.
+Machine `[settings.NAME]` requires `target`, an absolute application-file path or `~/...`, and optionally accepts `agent`.
+An associated setting has one stage and target and is selected only for that destination.
+Preparing or applying an active association requires a configured destination and a target inside its root.
+Detached associations can remain recorded after instance removal.
+For common settings in multiple profiles, use distinct catalog declarations with the same source/path/format and separate target bindings.
 Bootstrap `--setting-target NAME=PATH` persists these bindings and preserves omitted values.
 
 Catalog version remains 2, machine version 1, and state envelope version 2.
