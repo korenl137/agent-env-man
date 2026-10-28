@@ -16,13 +16,13 @@ import json
 import os
 from pathlib import Path
 
-from . import hooks
 from .agents import PROFILES, bindings, product_name
+from .hooks import HOOK_ID_ARGUMENT, without_marker
 from .model import Error
 
 # Claude Code's file names come from its profile; the rest of its layout is fixed here.
 CLAUDE = PROFILES['claude']
-AEM_HOOK_MARKER = hooks.HOOK_ID_ARGUMENT
+AEM_HOOK_MARKER = HOOK_ID_ARGUMENT
 ROOT = '{root}'
 MISSING = object()
 
@@ -126,7 +126,8 @@ def _hook_groups(hooks):
         for entry in entries if isinstance(entries, list) else []:
             commands = [hook.get('command', '') for hook in entry.get('hooks', []) if isinstance(hook, dict)]
             owner = 'aem' if any(AEM_HOOK_MARKER in command for command in commands) else 'external'
-            identity = '' if owner == 'aem' else '\n'.join(commands)
+            # A personal hook carries a per-agent marker, so it compares by its command without the marker.
+            identity = '' if owner == 'aem' else '\n'.join(without_marker(command) for command in commands)
             groups[(event, entry.get('matcher', ''), owner, identity)] = commands
     return groups
 

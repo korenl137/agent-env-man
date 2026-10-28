@@ -761,7 +761,7 @@ It never opens credentials, sessions, project history or plugin data.
 
 - Settings fields are compared leaf by leaf; arrays and empty objects are atomic, numbers compare by exact value and stay apart from booleans, and a missing field is distinct from `null`.
 - A hook group is AEM-owned when its command carries `--aem-hook-id`; only the presence of such a group is compared, because it names its own machine configuration.
-  Other groups are compared by their commands, and their labels carry a short digest of the command.
+  Other groups are compared by their commands, with an AEM personal-hook identity marker removed so the same hook compares equal across agents, and their labels carry a short digest of the command.
 - Skill links, output styles and the instruction entry compare link targets.
 - A string that contains a profile's own root is compared with the root replaced by `{root}`, so a profile-specific path is not a difference.
 

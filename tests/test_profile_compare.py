@@ -127,6 +127,21 @@ class Compare(Roots):
         self.assertEqual(sorted(item['only'] for item in external if 'only' in item), ['left', 'right'])
         self.assertEqual(len({item['item'] for item in external}), 2)
 
+    def test_personal_hooks_compare_without_their_per_agent_marker(self):
+        def personal(marker, script):
+            return {'matcher': '', 'hooks': [{'type': 'command', 'command': f": 'AEM personal hook [{marker}]'; exec /usr/bin/python3 {script}"}]}
+        for root, marker in ((self.left, '0' * 20), (self.right, '1' * 20)):
+            data = json.loads((root / 'settings.json').read_text())
+            data['hooks']['Stop'] = [personal(marker, '/tools/logger')]
+            (root / 'settings.json').write_text(json.dumps(data))
+        stops = [item for name, item in self.items(self.report(), 'hooks').items() if name.startswith('Stop')]
+        self.assertEqual([item['status'] for item in stops], ['same'])
+        data = json.loads((self.right / 'settings.json').read_text())
+        data['hooks']['Stop'] = [personal('1' * 20, '/tools/other')]
+        (self.right / 'settings.json').write_text(json.dumps(data))
+        self.assertEqual(sorted(item['status'] for name, item in self.items(self.report(), 'hooks').items() if name.startswith('Stop')),
+                         ['different', 'different'])
+
     def test_skill_link_plugin_and_entry_differences(self):
         other = self.tmp / 'other'
         other.mkdir()

@@ -32,6 +32,11 @@ def generated(command):
     return HOOK_ID_ARGUMENT in command or _MARKER.search(command) is not None
 
 
+def without_marker(command):
+    """The command with its generated identity marker removed, so the same hook compares equal across agents."""
+    return _MARKER.sub("AEM", command)
+
+
 def command(config_path, arguments, *, preserve_exit=False):
     args = [sys.executable, "-m", "agent_env_man", "--config", str(config_path), *arguments]
     result = ("& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
