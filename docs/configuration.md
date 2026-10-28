@@ -370,6 +370,7 @@ Explicit commands ignore these policies and clocks.
 | `roots` | Table of paths | User-named installation roots; bootstrap defaults missing `skills`, `agent`, and `home`. |
 | `agents` | Table | Product destinations and named instance path bindings, normally written by setup. |
 | `runtimes` | Table of paths | Personal hook interpreter bindings; bootstrap never installs executables. |
+| `tool_hooks` | Table | Hooks that other tools install for themselves and that `aem check-tool-hooks` expects; see below. |
 | `external_paths` | Table of paths | Logical external source bindings; every used external must be bound. |
 | `modes` | Table of strings | Catalog skill, directory, or instruction names mapped to `"link"` or `"copy"`. Unknown names fail catalog validation. |
 | `setup` | Table | Saved startup selections; normally written by setup. |
@@ -495,6 +496,29 @@ Detached associations may remain after instance removal.
 Omission preserves the setting's existing behavior without an agent selector or with the original product selectors; named selectors exclude unbound settings.
 Changing an active setting's association requires detach first.
 Each catalog setting name still has exactly one stage and target; use distinct declarations sharing one source/path to deploy common fields independently.
+
+### Tool hooks
+
+A tool hook is a hook a tool such as herdr installs for itself in a Claude Code profile.
+AEM does not own, install, edit or remove it; the machine declares what to expect, and `aem check-tool-hooks` reports when it is missing.
+
+```toml
+[tool_hooks.herdr]
+command = "herdr"
+event = "SessionStart"
+contains = "herdr-agent-state.sh"
+agents = ["claude", "claude-lab"]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `command` | Executable looked up on `PATH`. When it is not found, the tool is skipped without checking any profile. |
+| `event` | Claude Code hook event that must carry the hook. |
+| `contains` | Text that one hook command under that event must contain. |
+| `agents` | Optional registered Claude Code agents to check; omitted means every registered Claude Code agent. |
+
+The declaration is per machine, so a tool installed on one machine does not make another machine report a missing hook.
+Older AEM versions reject a machine file that contains `tool_hooks`.
 
 ### Saved setup
 

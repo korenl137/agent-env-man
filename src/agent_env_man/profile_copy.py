@@ -182,4 +182,5 @@ def render(result):
         lines += [f"  different {item['item']}" for item in check['unexpected']]
     else:
         lines.append('Nothing was written; add --write to create the profile.')
+    lines.append('Settings are an independent copy; to share fields later, see staged settings for named instances in the AEM docs.')
     return '\n'.join(lines)

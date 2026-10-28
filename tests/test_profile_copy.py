@@ -141,6 +141,12 @@ class Write(Copy):
 
 
 class Refuse(Copy):
+    def test_text_output_says_settings_are_independent(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            main(['--config', str(self.config), 'copy-profile', str(self.left), str(self.target)])
+        self.assertIn('independent copy', output.getvalue())
+
     def test_preview_writes_nothing(self):
         report = self.report('--set', 'model=opus')
         self.assertFalse(report['applied'])

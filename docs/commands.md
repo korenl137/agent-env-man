@@ -108,6 +108,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `detach` | Preserve contents and release ownership. | None. |
 | `locate` | Find installed content or prepared editing sources. | None. |
 | `compare` | Compare two Claude Code profiles read-only. | None. |
+| `check-tool-hooks` | Check that hooks other tools install for themselves are present. | None. |
 | `copy-profile` | Copy a Claude Code profile's reusable state into a new independent root. | None; writes only the new root. |
 | `recover` | Recover an interrupted target replacement. | None. |
 | `automation` | Run or preview device automation. | According to selected mode; no network in dry run. |
@@ -770,6 +771,19 @@ A difference shows a short digest of each value, because settings can hold secre
 Plugin versions and the entry are always shown.
 Exit status is 0 whether or not differences exist; scripts read the totals from `--json`.
 
+## check-tool-hooks
+
+```text
+aem check-tool-hooks [--agent NAME]...
+```
+
+Reads the machine's [`tool_hooks`](configuration.md#tool-hooks) declarations and the settings files of the registered Claude Code agents; it takes no locks and writes nothing.
+A tool whose `command` is not on `PATH` is reported as skipped.
+For an installed tool, each selected agent must have a hook under the declared event whose command contains the declared text; otherwise the agent is `missing` and the report says how to install the tool's integration for that profile.
+AEM never installs or changes tool hooks.
+`--agent` limits the check to registered Claude Code agents.
+Exit status is 1 when any hook is missing, so `--json` is for details rather than for deciding success.
+
 ## copy-profile
 
 ```text
@@ -787,6 +801,9 @@ Links are recreated against their own targets (relative links are resolved first
 `--set` changes a settings field in the copy only; the path is dotted, the value is JSON or plain text, and `hooks` cannot be set.
 Not copied: credentials, sessions, project history, plugin data, installed plugins (listed in the report; install them with the product CLI), skill entries that are not links, and hook groups AEM generated.
 Those groups name the source's agent, so register TARGET under `[agents.NAME]` in the machine configuration and run `aem apply --dry-run` to give it its own.
+
+The copied settings are an independent file: later changes to either profile do not reach the other.
+To share selected fields afterwards, declare them as settings for each profile as described in [named instances](agent-profiles.md#independent-settings-from-one-source) and [staged settings](settings-management.md).
 
 The profile is built in a staging folder beside TARGET and moved into place, so a failure leaves no partial profile.
 After writing, the copy is compared with the source: `expected` counts the `--set` fields, `not_copied` counts plugins and hook groups left out, and `unexpected` lists anything else that differs.

@@ -8,6 +8,7 @@ from .cli_runtime import Runtime
 from .commands import delivery, installation, device
 from .commands.catalog import catalog
 from .commands.compare import compare
+from .commands.check_tool_hooks import check_tool_hooks
 from .commands.copy_profile import copy_profile
 from .commands.settings import settings, export_command
 from .commands.documentation import docs
@@ -39,7 +40,7 @@ for command in (docs, delivery.bootstrap, delivery.update, delivery.publish,
                 installation.status, installation.detach, installation.locate,
                 installation.recover, device.setup, device.self_group,
                 device.automation_command, device.startup, device.agent_hook,
-                device.full_run, device.self_skill_refresh, catalog, settings, export_command, hooks, compare, copy_profile):
+                device.full_run, device.self_skill_refresh, catalog, settings, export_command, hooks, compare, copy_profile, check_tool_hooks):
     cli.add_command(command)
 
 

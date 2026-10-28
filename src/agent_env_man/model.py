@@ -109,7 +109,7 @@ class Config(MachineFile):
         version = self.doc.get("version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise Error("Unsupported machine config version")
-        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update", "automation", "settings", "runtimes"}
+        unknown = set(self.doc) - {"version", "catalog", "checkout_root", "roots", "agents", "external_paths", "modes", "setup", "self_update", "catalog_update", "automation", "settings", "runtimes", "tool_hooks"}
         if unknown:
             raise Error("Unknown machine fields: " + ", ".join(sorted(unknown)))
         if not isinstance(self.doc.get("roots", {}), dict):
@@ -140,6 +140,8 @@ class Config(MachineFile):
         self.roots = {identifier(k): absolute(v) for k, v in self.doc.get("roots", {}).items()}
         from .agents import bindings
         self.agents = bindings(self.doc)
+        from .tool_hooks import validate as tool_hooks
+        tool_hooks(self.doc)
         if not isinstance(self.doc.get('runtimes', {}), dict):
             raise Error('Machine runtimes must map names to absolute executable paths')
         from .personal_hooks import runtime_path
