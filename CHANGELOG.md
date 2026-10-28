@@ -15,6 +15,7 @@ Existing product destinations, saved IDs and callbacks remain unchanged.
 Named root overlaps and unregistered instance selections are refused.
 Account login, plugin installation and native runtime isolation remain product-owned.
 - `aem compare LEFT RIGHT` compares two Claude Code profiles offline and read-only: settings fields, hook groups by owner, skill links, output styles, the instruction entry and installed plugin versions.
+- `aem copy-profile SOURCE TARGET [--set FIELD=VALUE] [--write]` previews or creates an independent copy of a Claude Code profile's settings, instruction entry, output styles, skill links and hook scripts, rewrites the source root in paths, leaves out credentials, sessions, plugins and AEM-generated hook groups, and compares the result with the source.
 Profile-specific paths are normalized, `--expect` marks intended differences, and values appear as digests unless `--values` is given.
 
 ## [1.2.0] &mdash; 2026-10-25

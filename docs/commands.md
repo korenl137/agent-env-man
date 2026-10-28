@@ -108,6 +108,7 @@ Read-only commands and dry runs may create the lock directory/file; `setup --dry
 | `detach` | Preserve contents and release ownership. | None. |
 | `locate` | Find installed content or prepared editing sources. | None. |
 | `compare` | Compare two Claude Code profiles read-only. | None. |
+| `copy-profile` | Copy a Claude Code profile's reusable state into a new independent root. | None; writes only the new root. |
 | `recover` | Recover an interrupted target replacement. | None. |
 | `automation` | Run or preview device automation. | According to selected mode; no network in dry run. |
 | `startup` | Fail-open automatic-update callback. | According to due policies. |
@@ -768,6 +769,25 @@ Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as
 A difference shows a short digest of each value, because settings can hold secrets; `--values` shows the values.
 Plugin versions and the entry are always shown.
 Exit status is 0 whether or not differences exist; scripts read the totals from `--json`.
+
+## copy-profile
+
+```text
+aem copy-profile SOURCE TARGET [--set FIELD=VALUE]... [--write]
+```
+
+SOURCE is a registered agent name or an absolute profile root; TARGET is a new absolute root that does not exist or is an empty folder and must not overlap the source.
+Without `--write` the command only shows what would be copied.
+It needs no machine configuration or saved state, takes no locks and never changes AEM state; register TARGET as an agent yourself.
+
+Copied: the settings fields outside AEM-generated hooks, the instruction entry, output styles, skill links and the files in `hooks/`.
+Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root are rewritten to TARGET.
+`--set` changes a settings field in the copy only; the path is dotted, the value is JSON or plain text, and `hooks` cannot be set.
+Not copied: credentials, sessions, project history, plugin data, installed plugins (listed in the report; install them with the product CLI), skill entries that are not links, and hook groups AEM generated.
+Those groups name the source's agent, so register TARGET under `[agents.NAME]` in the machine configuration and run `aem apply --dry-run` to give it its own.
+
+The profile is built in a staging folder beside TARGET and moved into place, so a failure leaves no partial profile.
+After writing, the copy is compared with the source: `expected` counts the `--set` fields, `not_copied` counts plugins and hook groups left out, and `unexpected` lists anything else that differs.
 
 ## recover
 

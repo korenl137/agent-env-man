@@ -1,0 +1,161 @@
+"""A profile copy is independent of its source and compares clean except for intended changes."""
+import io
+import json
+import os
+import shutil
+import stat
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
+
+from agent_env_man.cli import main
+from agent_env_man.profile_compare import compare as compare_profiles
+from test_profile_compare import Roots
+
+
+class Copy(Roots):
+    def setUp(self):
+        super().setUp()
+        (self.left / 'hooks').mkdir()
+        script = self.left / 'hooks' / 'herdr.sh'
+        script.write_text(f'#!/bin/bash\nexec {self.left}/hooks/real.sh\n')
+        script.chmod(0o755)
+        self.target = self.tmp / 'copy'
+
+    def copy(self, *args, source=None, target=None):
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            code = main(['--config', str(self.config), '--json', 'copy-profile',
+                         str(source or self.left), str(target or self.target), *args])
+        return code, output.getvalue(), errors.getvalue()
+
+    def report(self, *args, **kwargs):
+        code, output, errors = self.copy(*args, **kwargs)
+        self.assertEqual(code, 0, errors)
+        return json.loads(output)
+
+    def settings(self, root):
+        return json.loads((root / 'settings.json').read_text())
+
+
+class Write(Copy):
+    def test_copy_with_one_change_compares_clean_except_that_change(self):
+        report = self.report('--set', 'model=opus', '--write')
+        check = report['verification']
+        self.assertEqual((check['expected'], check['unexpected']), (1, []))
+        self.assertEqual(self.settings(self.target)['model'], 'opus')
+        self.assertEqual(self.settings(self.left)['model'], 'sonnet')
+
+    def test_paths_are_rebased_and_aem_hook_groups_are_left_out(self):
+        self.report('--write')
+        text = (self.target / 'settings.json').read_text()
+        self.assertNotIn(str(self.left), text)
+        self.assertNotIn('--aem-hook-id', text)
+        commands = [h['command'] for g in self.settings(self.target)['hooks']['SessionStart'] for h in g['hooks']]
+        self.assertEqual(commands, [f'bash {self.target}/hooks/herdr.sh session'])
+        script = self.target / 'hooks' / 'herdr.sh'
+        self.assertEqual(script.read_text(), f'#!/bin/bash\nexec {self.target}/hooks/real.sh\n')
+        self.assertTrue(stat.S_IMODE(script.stat().st_mode) & 0o111)
+
+    def test_personal_hook_markers_are_also_left_out(self):
+        data = self.settings(self.left)
+        data['hooks']['Stop'] = [{'hooks': [{'type': 'command',
+                                             'command': ": 'AEM personal hook [0123456789abcdef0123]'; exec /usr/bin/true"}]}]
+        (self.left / 'settings.json').write_text(json.dumps(data))
+        self.report('--write')
+        self.assertNotIn('Stop', self.settings(self.target)['hooks'])
+
+    def test_copy_survives_removing_the_source_profile(self):
+        self.report('--write')
+        shutil.rmtree(self.left)
+        for path in self.target.rglob('*'):
+            if path.is_symlink():
+                self.assertTrue(path.exists(), f'{path} -> {os.readlink(path)}')
+                self.assertNotIn(str(self.left), os.readlink(path))
+            elif path.is_file():
+                self.assertNotIn(str(self.left), path.read_text())
+
+    def test_credentials_sessions_and_plugin_data_are_not_copied(self):
+        (self.left / '.credentials.json').write_text('secret')
+        (self.left / 'projects').mkdir()
+        (self.left / 'history.jsonl').write_text('{}')
+        (self.left / 'plugins' / 'data').mkdir()
+        self.report('--write')
+        self.assertEqual(sorted(p.name for p in self.target.iterdir()),
+                         ['CLAUDE.md', 'hooks', 'output-styles', 'settings.json', 'skills'])
+
+    def test_relative_links_are_resolved_before_copying(self):
+        (self.left / 'skills' / 'rel').symlink_to(os.path.relpath(self.source / 'skill-a', self.left / 'skills'))
+        self.report('--write')
+        self.assertEqual(os.readlink(self.target / 'skills' / 'rel'), str(self.source / 'skill-a'))
+
+    def test_real_skill_directories_are_reported_not_copied(self):
+        (self.left / 'skills' / 'local').mkdir()
+        report = self.report('--write')
+        self.assertIn({'item': 'skills/local', 'reason': 'not a link'}, report['skipped'])
+        self.assertFalse((self.target / 'skills' / 'local').exists())
+
+    def test_failure_leaves_no_target_or_staging_folder(self):
+        with mock.patch('os.symlink', side_effect=OSError('denied')):
+            code, _, errors = self.copy('--write')
+        self.assertEqual(code, 1)
+        self.assertIn('denied', errors)
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if p.name.startswith(('copy', '.aem-copy'))), [])
+
+    def test_set_creates_settings_and_parses_json_values(self):
+        (self.left / 'settings.json').unlink()
+        self.report('--set', 'a.b=5', '--set', 'name=plain', '--set', 'flag=true', '--write')
+        self.assertEqual(self.settings(self.target), {'a': {'b': 5}, 'name': 'plain', 'flag': True})
+
+    def test_a_missing_setting_is_unexpected_but_a_left_out_plugin_is_not(self):
+        real = compare_profiles
+
+        def lossy(*args, **kwargs):
+            report = real(*args, **kwargs)
+            report['sections']['settings'].append({'item': 'lost', 'status': 'different', 'only': 'left'})
+            report['sections']['hooks'].append({'item': 'added', 'status': 'different', 'only': 'right'})
+            return report
+        with mock.patch('agent_env_man.profile_copy.compare', lossy):
+            check = self.report('--write')['verification']
+        self.assertEqual([item['item'] for item in check['unexpected']], ['lost', 'added'])
+        self.assertEqual(check['not_copied'], 2)
+
+    def test_copy_into_an_existing_empty_folder_is_allowed(self):
+        self.target.mkdir()
+        self.report('--write')
+        self.assertTrue((self.target / 'settings.json').is_file())
+
+
+class Refuse(Copy):
+    def test_preview_writes_nothing(self):
+        report = self.report('--set', 'model=opus')
+        self.assertFalse(report['applied'])
+        self.assertFalse(self.target.exists())
+        self.assertNotIn('verification', report)
+
+    def test_nonempty_or_overlapping_targets_are_refused(self):
+        self.target.mkdir()
+        (self.target / 'keep').write_text('x')
+        code, _, errors = self.copy('--write')
+        self.assertEqual(code, 1)
+        self.assertIn('already exists', errors)
+        self.assertEqual((self.target / 'keep').read_text(), 'x')
+        for target in (self.left, self.left / 'inner', self.tmp):
+            code, _, errors = self.copy('--write', target=target)
+            self.assertEqual(code, 1)
+            self.assertIn('overlaps', errors)
+
+    def test_bad_set_arguments_are_refused(self):
+        for spec in ('model', '=x', 'hooks.SessionStart=1', 'model.deep=1'):
+            code, _, errors = self.copy('--set', spec, '--write')
+            self.assertEqual(code, 1, spec)
+            self.assertFalse(self.target.exists(), spec)
+
+    def test_source_settings_stay_untouched(self):
+        before = self.snapshot()
+        self.report('--set', 'model=opus', '--write')
+        self.assertEqual(self.snapshot(), before)
+
+
+if __name__ == '__main__':
+    unittest.main()

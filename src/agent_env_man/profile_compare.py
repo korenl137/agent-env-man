@@ -43,13 +43,14 @@ def resolve(document, spec):
     return Profile(spec, Path(binding['root']).expanduser(), Path(binding['skills']).expanduser())
 
 
-def _normalize(value, root):
+def _normalize(value, root, replacement=ROOT):
+    """Replace a profile's own root inside every string; a profile copy passes the new root."""
     if isinstance(value, str):
-        return value.replace(str(root), ROOT)
+        return value.replace(str(root), str(replacement))
     if isinstance(value, list):
-        return [_normalize(item, root) for item in value]
+        return [_normalize(item, root, replacement) for item in value]
     if isinstance(value, dict):
-        return {key: _normalize(item, root) for key, item in value.items()}
+        return {key: _normalize(item, root, replacement) for key, item in value.items()}
     return value
 
 
@@ -85,11 +86,11 @@ def _digest(value):
     return hashlib.sha256(json.dumps(_canonical(value), sort_keys=True).encode()).hexdigest()[:8]
 
 
-def _read_json(path):
+def _read_json(path, parse_float=Decimal):
     if not path.is_file():
         return None
     try:
-        document = json.loads(path.read_text(encoding='utf-8'), parse_float=Decimal)
+        document = json.loads(path.read_text(encoding='utf-8'), parse_float=parse_float)
     except (OSError, ValueError) as exc:
         raise Error(f'Cannot read {path}: {exc}') from exc
     if not isinstance(document, dict):
