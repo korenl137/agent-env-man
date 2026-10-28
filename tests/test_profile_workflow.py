@@ -5,12 +5,12 @@ import shutil
 from contextlib import redirect_stdout, redirect_stderr
 
 from agent_env_man.cli import main
-from test_named_profiles import NamedProfiles
+import test_named_profiles
 from test_setup import SetupFixture
 
 
 class Workflow(SetupFixture):
-    prepare = NamedProfiles.prepare
+    prepare = test_named_profiles.NamedProfiles.prepare
 
     def run_main(self, *args):
         output, errors = io.StringIO(), io.StringIO()
