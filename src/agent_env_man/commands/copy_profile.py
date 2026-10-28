@@ -1,6 +1,7 @@
 """Copy a Claude Code profile into a new independent root."""
 
 import json
+import os
 
 import click
 
@@ -29,7 +30,9 @@ def copy_profile(runtime, source, target, sets, write):
     give it its own AEM hooks.
     """
     def operation(session):
-        copy = plan(resolve(session.manager.config.doc, source), target, sets)
+        managed = {os.path.normpath(record['target']) for record in session.manager.state.data.get('items', {}).values()
+                   if isinstance(record.get('target'), str)}
+        copy = plan(resolve(session.manager.config.doc, source), target, sets, managed)
         if write:
             apply(copy)
         return report(copy, write), False

@@ -70,12 +70,22 @@ def _text(data, source, target):
         return data
 
 
-def _entries(directory, relative, source, target, links, skipped):
+def _leave_to_aem(path, relative, managed, skipped):
+    """AEM re-creates what it installed; copying it would make the new profile's apply a conflict."""
+    if os.path.normpath(path) in managed:
+        skipped.append((relative.as_posix(), 'installed by AEM; run aem apply for the target'))
+        return True
+    return False
+
+
+def _entries(directory, relative, source, target, links, skipped, managed):
     for entry in sorted(directory.iterdir()):
+        if _leave_to_aem(entry, relative / entry.name, managed, skipped):
+            continue
         if entry.is_symlink():
             links[relative / entry.name] = _link(entry, source, target)
         else:
-            skipped.append((str(relative / entry.name), 'not a link'))
+            skipped.append(((relative / entry.name).as_posix(), 'not a link'))
 
 
 def _plugin_install(source, target, skipped):
@@ -105,7 +115,7 @@ def _plugin_install(source, target, skipped):
     return [{'env': env, 'args': args} for args in [*adds.values(), *installs]]
 
 
-def plan(source, target, sets=()):
+def plan(source, target, sets=(), managed=frozenset()):
     target = absolute(str(target))
     if overlaps(target, source.root.resolve()):
         raise Error(f'Target {target} overlaps the source profile; use an independent root')
@@ -129,21 +139,27 @@ def plan(source, target, sets=()):
         fields = [_assign(settings, spec) for spec in sets]
 
     if source.skills.is_dir():
-        _entries(source.skills, Path('skills'), source, target, links, skipped)
+        _entries(source.skills, Path('skills'), source, target, links, skipped, managed)
     entry = source.root / CLAUDE.entry_name
-    if entry.is_symlink():
+    if _leave_to_aem(entry, Path(CLAUDE.entry_name), managed, skipped):
+        pass
+    elif entry.is_symlink():
         links[Path(CLAUDE.entry_name)] = _link(entry, source, target)
     elif entry.is_file():
         files[Path(CLAUDE.entry_name)] = (_text(entry.read_bytes(), source, target), entry.stat().st_mode & 0o777)
     styles = source.root / 'output-styles'
-    if styles.is_symlink():
+    if _leave_to_aem(styles, Path('output-styles'), managed, skipped):
+        pass
+    elif styles.is_symlink():
         links[Path('output-styles')] = _link(styles, source, target)
     elif styles.is_dir():
-        _entries(styles, Path('output-styles'), source, target, links, skipped)
+        _entries(styles, Path('output-styles'), source, target, links, skipped, managed)
     hook_dir = source.root / 'hooks'
     if hook_dir.is_dir() and not hook_dir.is_symlink():
         for script in sorted(hook_dir.iterdir()):
             relative = Path('hooks') / script.name
+            if _leave_to_aem(script, relative, managed, skipped):
+                continue
             if script.is_symlink():
                 links[relative] = _link(script, source, target)
             elif script.is_file():
@@ -189,8 +205,10 @@ def report(plan, applied):
         comparison = compare(plan.source, Profile(plan.target.name, plan.target, plan.target / 'skills'), expect=plan.sets)
         different = [{'section': section, **item} for section, items in comparison['sections'].items()
                      for item in items if item['status'] == 'different']
-        # Plugins and hook groups the copy leaves out show up as present only in the source.
-        left_out = [item for item in different if item['section'] in ('plugins', 'hooks') and item.get('only') == 'left']
+        # Plugins, hook groups and AEM-installed links the copy leaves out show up as present only in the source.
+        left = {item for item, _ in plan.skipped}
+        left_out = [item for item in different if item.get('only') == 'left' and (
+            item['section'] in ('plugins', 'hooks') or any(item['item'] == name or item['item'].startswith(name + '/') for name in left))]
         result['verification'] = {'same': comparison['totals']['same'], 'expected': comparison['totals']['expected'],
                                   'not_copied': len(left_out),
                                   'unexpected': [item for item in different if item not in left_out]}
