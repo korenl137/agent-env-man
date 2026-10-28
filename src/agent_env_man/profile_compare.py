@@ -16,10 +16,13 @@ import json
 import os
 from pathlib import Path
 
-from .agents import bindings
+from . import hooks
+from .agents import PROFILES, bindings, product_name
 from .model import Error
 
-AEM_HOOK_MARKER = '--aem-hook-id'
+# Claude Code's file names come from its profile; the rest of its layout is fixed here.
+CLAUDE = PROFILES['claude']
+AEM_HOOK_MARKER = hooks.HOOK_ID_ARGUMENT
 ROOT = '{root}'
 MISSING = object()
 
@@ -36,6 +39,8 @@ def resolve(document, spec):
     if os.path.isabs(os.path.expanduser(spec)):
         root = Path(spec).expanduser()
         return Profile(spec, root, root / 'skills')
+    if product_name(spec) != CLAUDE.name:
+        raise Error(f'Profile {spec} is not a Claude Code profile; only Claude Code layouts are supported')
     registered = bindings(document)
     if spec not in registered:
         raise Error(f'Unknown profile {spec}; use a registered agent name or an absolute root path')
@@ -100,7 +105,7 @@ def _read_json(path, parse_float=Decimal):
 
 def _settings(profile):
     """Return (normalized hooks, {dotted path: normalized scalar}) of the profile's settings."""
-    document = _read_json(profile.root / 'settings.json')
+    document = _read_json(profile.root / CLAUDE.hook_name)
     if document is None:
         return {}, {}
     hooks = document.pop('hooks', {})
@@ -144,7 +149,7 @@ def _plugins(profile):
 
 
 def _entry(profile):
-    path = profile.root / 'CLAUDE.md'
+    path = profile.root / CLAUDE.entry_name
     if path.is_symlink():
         return _normalize(os.readlink(path), profile.root)
     if path.is_file():
@@ -209,7 +214,7 @@ def compare(left, right, *, expect=(), show_values=False):
                                   _links(right.root / 'output-styles', right.root),
                                   expected, show_values, 'output-styles/'),
         'plugins': _section(_plugins(left), _plugins(right), expected, True, 'plugins/'),
-        'entry': [_item('CLAUDE.md', _entry(left), _entry(right), expected, True)],
+        'entry': [_item(CLAUDE.entry_name, _entry(left), _entry(right), expected, True)],
     }
     totals = {'same': 0, 'expected': 0, 'different': 0}
     for items in sections.values():

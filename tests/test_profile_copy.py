@@ -120,6 +120,20 @@ class Write(Copy):
         self.assertEqual([item['item'] for item in check['unexpected']], ['lost', 'added'])
         self.assertEqual(check['not_copied'], 2)
 
+    def test_codex_source_is_refused(self):
+        code, _, errors = self.copy('--write', source='codex')
+        self.assertEqual(code, 1)
+        self.assertIn('not a Claude Code profile', errors)
+        self.assertFalse(self.target.exists())
+
+    def test_write_never_creates_or_changes_the_machine_configuration(self):
+        self.report('--write')
+        self.assertFalse(self.config.exists())
+        self.config.parent.mkdir(exist_ok=True)
+        self.config.write_text('version = 1\n')
+        self.report('--write', target=self.tmp / 'second')
+        self.assertEqual(self.config.read_text(), 'version = 1\n')
+
     def test_copy_into_an_existing_empty_folder_is_allowed(self):
         self.target.mkdir()
         self.report('--write')

@@ -753,7 +753,7 @@ aem compare LEFT RIGHT [--expect ITEM]... [--values]
 
 LEFT and RIGHT are registered agent names such as `claude` and `claude-lab`, or absolute profile root paths.
 A path needs no machine configuration, catalog or saved state; the command takes no locks and writes nothing.
-It supports the Claude Code profile layout.
+It supports the Claude Code profile layout and refuses other products.
 
 The comparison covers the settings fields outside `hooks`, hook groups by owner, skill links, output styles, the instruction entry and the installed plugin names with their versions.
 It never opens credentials, sessions, project history or plugin data.
@@ -778,7 +778,9 @@ aem copy-profile SOURCE TARGET [--set FIELD=VALUE]... [--write]
 
 SOURCE is a registered agent name or an absolute profile root; TARGET is a new absolute root that does not exist or is an empty folder and must not overlap the source.
 Without `--write` the command only shows what would be copied.
-It needs no machine configuration or saved state, takes no locks and never changes AEM state; register TARGET as an agent yourself.
+It needs no machine configuration and never changes it or the saved state; register TARGET as an agent yourself.
+A preview takes no locks; `--write` takes the same operation lock as other writing commands.
+It supports the Claude Code profile layout and refuses other products.
 
 Copied: the settings fields outside AEM-generated hooks, the instruction entry, output styles, skill links and the files in `hooks/`.
 Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root are rewritten to TARGET.

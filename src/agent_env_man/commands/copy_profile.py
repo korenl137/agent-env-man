@@ -37,4 +37,4 @@ def copy_profile(runtime, source, target, sets, write):
     def output(result):
         click.echo(json.dumps(result, indent=2, ensure_ascii=True) if runtime.json_output else render(result))
 
-    return runtime.run(operation, maintenance=True, missing_ok=True, preview=True, output=output)
+    return runtime.run(operation, maintenance=True, missing_ok=True, preview=not write, output=output)

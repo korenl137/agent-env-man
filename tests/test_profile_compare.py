@@ -178,7 +178,12 @@ class Compare(Roots):
     def test_unknown_name_is_refused(self):
         code, _, errors = self.run_compare(left='nobody')
         self.assertEqual(code, 1)
-        self.assertIn('Unknown profile nobody', errors)
+        self.assertIn('nobody', errors)
+
+    def test_codex_profiles_are_refused(self):
+        code, _, errors = self.run_compare(left='codex')
+        self.assertEqual(code, 1)
+        self.assertIn('not a Claude Code profile', errors)
 
     def test_invalid_settings_json_is_reported(self):
         (self.right / 'settings.json').write_text('{broken')

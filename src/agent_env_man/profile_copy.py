@@ -13,15 +13,12 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import tempfile
 
+from .hooks import generated
 from .model import Error, absolute, overlaps
-from .profile_compare import AEM_HOOK_MARKER, Profile, _normalize, _plugins, _read_json, compare
-
-# AEM hook commands carry --aem-hook-id or a quoted "AEM <purpose> [<20 hex>]" marker.
-AEM_MARKER = re.compile(r"AEM [^\[\]']+ \[[0-9a-f]{20}\]")
+from .profile_compare import CLAUDE, Profile, _normalize, _plugins, _read_json, compare
 
 
 @dataclass
@@ -38,7 +35,7 @@ class Plan:
 
 def _aem_owned(group):
     commands = [hook.get('command', '') for hook in group.get('hooks', []) if isinstance(hook, dict)]
-    return any(AEM_HOOK_MARKER in command or AEM_MARKER.search(command) for command in commands)
+    return any(generated(command) for command in commands)
 
 
 def _assign(document, spec):
@@ -87,7 +84,7 @@ def plan(source, target, sets=()):
         raise Error(f'Target {target} already exists and is not empty')
     links, files, skipped = {}, {}, []
 
-    settings, fields = _read_json(source.root / 'settings.json', parse_float=float), []
+    settings, fields = _read_json(source.root / CLAUDE.hook_name, parse_float=float), []
     if settings is not None or sets:
         settings, owned, kept = settings or {}, 0, {}
         for event, groups in settings.pop('hooks', {}).items():
@@ -104,11 +101,11 @@ def plan(source, target, sets=()):
 
     if source.skills.is_dir():
         _entries(source.skills, Path('skills'), source, target, links, skipped)
-    entry = source.root / 'CLAUDE.md'
+    entry = source.root / CLAUDE.entry_name
     if entry.is_symlink():
-        links[Path('CLAUDE.md')] = _link(entry, source, target)
+        links[Path(CLAUDE.entry_name)] = _link(entry, source, target)
     elif entry.is_file():
-        files[Path('CLAUDE.md')] = (_text(entry.read_bytes(), source, target), entry.stat().st_mode & 0o777)
+        files[Path(CLAUDE.entry_name)] = (_text(entry.read_bytes(), source, target), entry.stat().st_mode & 0o777)
     styles = source.root / 'output-styles'
     if styles.is_symlink():
         links[Path('output-styles')] = _link(styles, source, target)
@@ -136,7 +133,7 @@ def apply(plan):
     try:
         staging.chmod(plan.mode)
         if plan.settings is not None:
-            (staging / 'settings.json').write_text(json.dumps(plan.settings, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+            (staging / CLAUDE.hook_name).write_text(json.dumps(plan.settings, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         for relative, (data, mode) in plan.files.items():
             (staging / relative).parent.mkdir(parents=True, exist_ok=True)
             (staging / relative).write_bytes(data)
@@ -157,8 +154,8 @@ def report(plan, applied):
     result = {'source': {'name': plan.source.name, 'root': str(plan.source.root)},
               'target': str(plan.target), 'applied': applied,
               'settings': plan.settings is not None, 'set': plan.sets,
-              'links': sorted(str(path) for path in plan.links),
-              'files': sorted(str(path) for path in plan.files),
+              'links': sorted(path.as_posix() for path in plan.links),
+              'files': sorted(path.as_posix() for path in plan.files),
               'skipped': [{'item': item, 'reason': reason} for item, reason in plan.skipped]}
     if applied:
         comparison = compare(plan.source, Profile(plan.target.name, plan.target, plan.target / 'skills'), expect=plan.sets)
@@ -175,7 +172,7 @@ def report(plan, applied):
 def render(result):
     lines = [f"{'Copied' if result['applied'] else 'Would copy'} {result['source']['name']} -> {result['target']}"]
     if result['settings']:
-        lines.append('settings.json' + (f" (set {', '.join(result['set'])})" if result['set'] else ''))
+        lines.append(CLAUDE.hook_name + (f" (set {', '.join(result['set'])})" if result['set'] else ''))
     lines += [f'link  {path}' for path in result['links']] + [f'file  {path}' for path in result['files']]
     lines += [f"skip  {item['item']}: {item['reason']}" for item in result['skipped']]
     if result['applied']:

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sys
 
@@ -20,6 +21,15 @@ TRUST_NOTICE = ("Codex hook trust must be reviewed separately: in the next Codex
 def marker(config_path, identity, purpose):
     digest = hashlib.sha256(f"{config_path}\0{identity}".encode()).hexdigest()[:20]
     return f"AEM {purpose} [{digest}]"
+
+
+HOOK_ID_ARGUMENT = "--aem-hook-id"
+_MARKER = re.compile(r"AEM [^\[\]']+ \[[0-9a-f]{20}\]")
+
+
+def generated(command):
+    """Whether a hook command has the shape AEM writes: a hook-id argument or a quoted marker."""
+    return HOOK_ID_ARGUMENT in command or _MARKER.search(command) is not None
 
 
 def command(config_path, arguments, *, preserve_exit=False):
