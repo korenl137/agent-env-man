@@ -112,7 +112,7 @@ def validate(document):
         raise Error("Catalog settings must be a table")
     for name, data in settings.items():
         identifier(name)
-        table(data, {"source", "path", "format", "update"}, f"settings.{name}")
+        table(data, {"source", "path", "format", "update", "agent"}, f"settings.{name}")
         if "update" in data:
             table(data["update"], {"trigger", "min_interval", "timeout"}, f"settings.{name}.update")
             _validate_policy(data["update"], f"settings.{name}.update")
@@ -123,6 +123,11 @@ def validate(document):
         from .settings_formats import FORMATS
         if not isinstance(data.get("format"), str) or data["format"] not in FORMATS:
             raise Error(f"settings.{name}: unsupported format; choose from {', '.join(FORMATS)}")
+        if "agent" in data:
+            from .agents import profile
+            if not isinstance(data["agent"], str):
+                raise Error(f"settings.{name}: agent must be a destination name")
+            profile(data["agent"])
     declared_hooks = document.get('hooks', {})
     if not isinstance(declared_hooks, dict):
         raise Error('Catalog hooks must be a table')
@@ -193,6 +198,8 @@ def normalize(document):
     for name, data in document.get("settings", {}).items():
         field = "repo" if sources[data["source"]]["type"] == "git" else "external"
         result["settings"][name] = {field: data["source"], "path": data["path"], "format": data["format"]}
+        if "agent" in data:
+            result["settings"][name]["agent"] = data["agent"]
         if "update" in data:
             result["settings"][name]["update"] = _policy_model(data["update"])
     result['hooks'] = {}

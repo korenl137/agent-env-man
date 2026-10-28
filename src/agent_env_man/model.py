@@ -285,9 +285,18 @@ class Config(MachineFile):
                 root = Path(self.agents[binding['agent']]['root']).expanduser().absolute()
                 if root not in target.absolute().parents:
                     raise Error(f'Setting {name}: target must be inside its agent root')
-        for name, data in settings.items():
+        for name, data in list(settings.items()):
+            owner = data.get("agent")
+            if owner and owner not in self.agents:
+                # A declaration for a named profile this machine does not have is skipped; a stray binding is still refused.
+                if name in machine_settings:
+                    raise Error(f"Setting {name}: its agent {owner} is not registered on this machine")
+                del settings[name]
+                continue
             if name not in machine_settings:
                 raise Error(f"Setting {name}: missing machine settings.{name}.target")
+            if owner and machine_settings[name].get("agent") != owner:
+                raise Error(f"Setting {name}: machine binding must name agent {owner}")
             if "external" in data and data["external"] not in self.doc.get("external_paths", {}):
                 raise Error(f"Setting {name}: missing external path binding")
         bindings = self.doc.get("external_paths", {})
