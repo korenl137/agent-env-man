@@ -13,12 +13,13 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import tempfile
 
 from .hooks import generated
 from .model import Error, absolute, overlaps
-from .profile_compare import CLAUDE, Profile, _normalize, _plugins, _read_json, compare
+from .profile_compare import CLAUDE, Profile, _normalize, _read_json, compare
 
 
 @dataclass
@@ -31,6 +32,7 @@ class Plan:
     files: dict  # relative path -> (bytes, mode)
     skipped: list  # (item, reason)
     sets: list
+    install: list  # product CLI invocations that would install the plugins; never run
 
 
 def _aem_owned(group):
@@ -74,6 +76,33 @@ def _entries(directory, relative, source, target, links, skipped):
             links[relative / entry.name] = _link(entry, source, target)
         else:
             skipped.append((str(relative / entry.name), 'not a link'))
+
+
+def _plugin_install(source, target, skipped):
+    """Product CLI steps that would reinstall the source's user-scope plugins in the target.
+
+    Plugins belong to the product CLI, so nothing here is executed; the steps are
+    returned for the user to run. The marketplace sources come from the source
+    profile's registry, and a plugin whose marketplace is unknown cannot be installed.
+    """
+    plugins = [(name, install) for name, installs in (_read_json(source.root / 'plugins' / 'installed_plugins.json') or {}).get('plugins', {}).items()
+               for install in installs if isinstance(install, dict) and install.get('scope', 'user') == 'user']
+    if not plugins:
+        return []
+    registry = _read_json(source.root / 'plugins' / 'known_marketplaces.json') or {}
+    env = {'CLAUDE_CONFIG_DIR': str(target)}
+    adds, installs = {}, []
+    for name, install in plugins:
+        marketplace = name.partition('@')[2]
+        entry = registry.get(marketplace, {}).get('source', {})
+        argument = {'github': entry.get('repo'), 'directory': entry.get('path'), 'git': entry.get('url')}.get(entry.get('source'))
+        if not argument:
+            skipped.append((f'plugins/{name}', 'marketplace source unknown; add the marketplace and install it by hand'))
+            continue
+        adds.setdefault(marketplace, ['claude', 'plugin', 'marketplace', 'add', _normalize(argument, source.root, target)])
+        installs.append(['claude', 'plugin', 'install', name, '--scope', 'user'])
+    skipped.append(('plugins', f'{len(plugins)} installed plugin(s) are not copied; run the listed steps with the product CLI'))
+    return [{'env': env, 'args': args} for args in [*adds.values(), *installs]]
 
 
 def plan(source, target, sets=()):
@@ -120,10 +149,8 @@ def plan(source, target, sets=()):
             elif script.is_file():
                 files[relative] = (_text(script.read_bytes(), source, target), script.stat().st_mode & 0o777)
 
-    installed = _plugins(source)
-    if installed:
-        skipped.append(('plugins', f'{len(installed)} installed plugin(s) are not copied; install with the product CLI'))
-    return Plan(source, target, source.root.stat().st_mode & 0o777, settings, links, files, skipped, fields)
+    install = _plugin_install(source, target, skipped)
+    return Plan(source, target, source.root.stat().st_mode & 0o777, settings, links, files, skipped, fields, install)
 
 
 def apply(plan):
@@ -156,7 +183,8 @@ def report(plan, applied):
               'settings': plan.settings is not None, 'set': plan.sets,
               'links': sorted(path.as_posix() for path in plan.links),
               'files': sorted(path.as_posix() for path in plan.files),
-              'skipped': [{'item': item, 'reason': reason} for item, reason in plan.skipped]}
+              'skipped': [{'item': item, 'reason': reason} for item, reason in plan.skipped],
+              'plugin_steps': plan.install}
     if applied:
         comparison = compare(plan.source, Profile(plan.target.name, plan.target, plan.target / 'skills'), expect=plan.sets)
         different = [{'section': section, **item} for section, items in comparison['sections'].items()
@@ -175,6 +203,10 @@ def render(result):
         lines.append(CLAUDE.hook_name + (f" (set {', '.join(result['set'])})" if result['set'] else ''))
     lines += [f'link  {path}' for path in result['links']] + [f'file  {path}' for path in result['files']]
     lines += [f"skip  {item['item']}: {item['reason']}" for item in result['skipped']]
+    if result['plugin_steps']:
+        lines.append('Plugin steps (not run; use the product CLI):')
+        lines += ['  ' + ' '.join(f'{key}={shlex.quote(value)}' for key, value in step['env'].items()) + ' ' + shlex.join(step['args'])
+                  for step in result['plugin_steps']]
     if result['applied']:
         check = result['verification']
         lines.append(f"verification: same {check['same']}, expected {check['expected']}, "

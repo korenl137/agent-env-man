@@ -95,6 +95,29 @@ class Write(Copy):
         self.assertIn({'item': 'skills/local', 'reason': 'not a link'}, report['skipped'])
         self.assertFalse((self.target / 'skills' / 'local').exists())
 
+    def test_plugins_become_product_cli_steps_that_are_never_run(self):
+        plugins = self.left / 'plugins'
+        (plugins / 'known_marketplaces.json').write_text(json.dumps({
+            'market': {'source': {'source': 'github', 'repo': 'owner/repo'}},
+            'other': {'source': {'source': 'directory', 'path': str(plugins / 'local')}}}))
+        (plugins / 'installed_plugins.json').write_text(json.dumps({'version': 2, 'plugins': {
+            'tool@market': [{'scope': 'user', 'version': '1.0.0'}],
+            'dir@other': [{'scope': 'user', 'version': '0.1'}],
+            'proj@market': [{'scope': 'project', 'version': '2'}],
+            'lost@ghost': [{'scope': 'user', 'version': '3'}]}}))
+        with mock.patch('subprocess.Popen', side_effect=AssertionError('plugins are installed by the product CLI')):
+            report = self.report('--write')
+        env = {'CLAUDE_CONFIG_DIR': str(self.target)}
+        self.assertEqual(report['plugin_steps'], [
+            {'env': env, 'args': ['claude', 'plugin', 'marketplace', 'add', 'owner/repo']},
+            {'env': env, 'args': ['claude', 'plugin', 'marketplace', 'add', str(self.target / 'plugins' / 'local')]},
+            {'env': env, 'args': ['claude', 'plugin', 'install', 'tool@market', '--scope', 'user']},
+            {'env': env, 'args': ['claude', 'plugin', 'install', 'dir@other', '--scope', 'user']}])
+        skipped = {item['item'] for item in report['skipped']}
+        self.assertIn('plugins/lost@ghost', skipped)
+        self.assertNotIn('plugins/proj@market', skipped)
+        self.assertFalse((self.target / 'plugins').exists())
+
     def test_failure_leaves_no_target_or_staging_folder(self):
         with mock.patch('os.symlink', side_effect=OSError('denied')):
             code, _, errors = self.copy('--write')
@@ -141,6 +164,14 @@ class Write(Copy):
 
 
 class Refuse(Copy):
+    def test_text_output_lists_plugin_steps_with_the_target_config_dir(self):
+        (self.left / 'plugins' / 'known_marketplaces.json').write_text(json.dumps(
+            {'market': {'source': {'source': 'github', 'repo': 'owner/repo'}}}))
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            main(['--config', str(self.config), 'copy-profile', str(self.left), str(self.target)])
+        self.assertIn(f'CLAUDE_CONFIG_DIR={self.target} claude plugin install tool@market --scope user', output.getvalue())
+
     def test_text_output_says_settings_are_independent(self):
         output, errors = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(errors):

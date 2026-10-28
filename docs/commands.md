@@ -799,8 +799,9 @@ It supports the Claude Code profile layout and refuses other products.
 Copied: the settings fields outside AEM-generated hooks, the instruction entry, output styles, skill links and the files in `hooks/`.
 Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root are rewritten to TARGET.
 `--set` changes a settings field in the copy only; the path is dotted, the value is JSON or plain text, and `hooks` cannot be set.
-Not copied: credentials, sessions, project history, plugin data, installed plugins (listed in the report; install them with the product CLI), skill entries that are not links, and hook groups AEM generated.
-Those groups name the source's agent, so register TARGET under `[agents.NAME]` in the machine configuration and run `aem apply --dry-run` to give it its own.
+Not copied: credentials, sessions, project history, plugin data, installed plugins, skill entries that are not links, and hook groups AEM generated.
+The report lists the product CLI steps that would reinstall the source's user-scope plugins in TARGET (`claude plugin marketplace add`, then `claude plugin install`, each with `CLAUDE_CONFIG_DIR` set to TARGET) as `plugin_steps`; AEM never runs them, a plugin whose marketplace source is unknown is listed as skipped, and the installed versions follow each marketplace's current release.
+The hook groups AEM generated name the source's agent, so register TARGET under `[agents.NAME]` in the machine configuration and run `aem apply --dry-run` to give it its own.
 
 The copied settings are an independent file: later changes to either profile do not reach the other.
 To share selected fields afterwards, declare them as settings for each profile as described in [named instances](agent-profiles.md#independent-settings-from-one-source) and [staged settings](settings-management.md).
