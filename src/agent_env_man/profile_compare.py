@@ -103,6 +103,15 @@ def _read_json(path, parse_float=Decimal):
     return document
 
 
+def _hook_events(settings, path):
+    """Return a settings document's hooks, refusing a shape Claude Code would not accept."""
+    hooks = settings.get('hooks', {})
+    if not isinstance(hooks, dict) or not all(
+            isinstance(groups, list) and all(isinstance(group, dict) for group in groups) for groups in hooks.values()):
+        raise Error(f'{path}: hooks must map each event to a list of hook groups')
+    return hooks
+
+
 def _settings(profile):
     """Return (normalized hooks, {dotted path: normalized scalar}) of the profile's settings."""
     document = _read_json(profile.root / CLAUDE.hook_name)

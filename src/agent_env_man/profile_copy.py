@@ -1,8 +1,9 @@
 """Copy a Claude Code profile's reusable state into a new, independent root.
 
-Only an allowlist is copied: settings fields, the instruction entry, output
-styles, skill links and hook scripts. Credentials, sessions, history and
-plugin data are never read, and installed plugins are listed but not copied.
+Copied: every settings field outside AEM-generated hook groups (env values
+included), the instruction entry, output styles, skill links and hook scripts.
+Credentials, sessions, history and plugin data are never read, and installed
+plugins are listed but not copied.
 Links are recreated against their own targets, so the copy never points back
 into the source profile, and strings that name the source root are rewritten
 to the new root. Hook groups AEM generated are skipped: they name the source's
@@ -19,7 +20,7 @@ import tempfile
 
 from .hooks import generated
 from .model import Error, absolute, overlaps
-from .profile_compare import CLAUDE, Profile, _normalize, _read_json, compare
+from .profile_compare import CLAUDE, Profile, _hook_events, _normalize, _read_json, compare
 
 
 @dataclass
@@ -126,7 +127,9 @@ def plan(source, target, sets=(), managed=frozenset()):
     settings, fields = _read_json(source.root / CLAUDE.hook_name, parse_float=float), []
     if settings is not None or sets:
         settings, owned, kept = settings or {}, 0, {}
-        for event, groups in settings.pop('hooks', {}).items():
+        hooks = _hook_events(settings, source.root / CLAUDE.hook_name)
+        settings.pop('hooks', None)
+        for event, groups in hooks.items():
             mine = [group for group in groups if not _aem_owned(group)]
             owned += len(groups) - len(mine)
             if mine:

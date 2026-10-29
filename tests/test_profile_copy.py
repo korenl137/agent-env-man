@@ -125,6 +125,14 @@ class Write(Copy):
         self.assertIn('denied', errors)
         self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if p.name.startswith(('copy', '.aem-copy'))), [])
 
+    def test_malformed_hooks_are_refused_without_writing(self):
+        for hooks in ([], {'Stop': {}}, {'Stop': ['not a group']}):
+            (self.left / 'settings.json').write_text(json.dumps({'hooks': hooks}))
+            code, _, errors = self.copy('--write')
+            self.assertEqual(code, 1)
+            self.assertIn('hooks must map each event to a list of hook groups', errors)
+            self.assertFalse(self.target.exists())
+
     def test_set_creates_settings_and_parses_json_values(self):
         (self.left / 'settings.json').unlink()
         self.report('--set', 'a.b=5', '--set', 'name=plain', '--set', 'flag=true', '--write')

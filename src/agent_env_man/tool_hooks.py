@@ -10,7 +10,7 @@ import shutil
 
 from .agents import bindings, product_name
 from .model import Error, identifier
-from .profile_compare import CLAUDE, Profile, _read_json
+from .profile_compare import CLAUDE, Profile, _hook_events, _read_json
 
 FIELDS = {'command', 'event', 'contains', 'agents'}
 
@@ -44,9 +44,9 @@ def validate(document):
 
 
 def _present(profile, event, contains):
-    settings = _read_json(profile.root / CLAUDE.hook_name) or {}
-    groups = settings.get('hooks', {}).get(event, [])
-    return any(contains in hook.get('command', '') for group in groups if isinstance(group, dict)
+    path = profile.root / CLAUDE.hook_name
+    groups = _hook_events(_read_json(path) or {}, path).get(event, [])
+    return any(contains in hook.get('command', '') for group in groups
                for hook in group.get('hooks', []) if isinstance(hook, dict))
 
 

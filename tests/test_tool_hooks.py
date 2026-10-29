@@ -68,6 +68,13 @@ class Check(ToolHooks):
         self.hook('claude', event='Stop')
         self.assertEqual(self.statuses(self.report(expect=1))['claude'], 'missing')
 
+    def test_malformed_hooks_are_reported_as_an_error(self):
+        for hooks in ([], {'SessionStart': ['not a group']}):
+            (self.roots['claude'] / 'settings.json').write_text(json.dumps({'hooks': hooks}))
+            code, _, errors = self.check()
+            self.assertEqual(code, 1)
+            self.assertIn('hooks must map each event to a list of hook groups', errors)
+
     def test_absent_tool_is_skipped_without_reading_profiles(self):
         self.write_config(command='definitely-not-installed-tool')
         (self.roots['claude'] / 'settings.json').write_text('{broken')
