@@ -22,6 +22,8 @@ aem apply
 ```
 
 Select only the agent and shell requested; Claude uses `--agent claude`, and other supported shells are `zsh` and `powershell`.
+A second profile of the same product is a named agent such as `--agent claude-lab` or `--agent codex-lab`, with its own default root.
+`aem compare`, `aem copy-profile` and `aem check-tool-hooks` inspect, seed or check Claude Code profiles; read their help before use.
 Codex and Claude use their own saved paths and hook formats; preserve unrelated settings and hooks.
 Setup includes this official skill but does not install user catalog content or grant hook trust.
 For a Git catalog, replace the bootstrap example with `aem bootstrap --catalog-repository URL --catalog-path catalogs/personal.toml`.
