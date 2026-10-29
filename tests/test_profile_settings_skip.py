@@ -64,7 +64,23 @@ class ProfileSettings(SetupFixture):
     def test_a_binding_for_an_unregistered_profile_is_refused(self):
         self.declare(agent='claude-lab')
         self.bind(agent='claude-lab')
-        self.refused('its agent claude-lab is not registered')
+        self.refused('its agent claude-lab is not registered on this machine; register it with '
+                     'aem setup --agent claude-lab or remove machine settings.lab-preferences')
+
+    def test_a_legacy_machine_counts_its_implicit_codex_agent(self):
+        self.configure()
+        (self.external / 'preferences.json').write_text('{"model":"sonnet"}')
+        doc = tomlkit.parse(self.catalog.read_text())
+        doc['settings'] = {'codex-preferences': {'source': 'personal', 'path': 'preferences.json',
+                                                 'format': 'json', 'agent': 'codex'}}
+        self.catalog.write_text(tomlkit.dumps(doc))
+        machine = tomlkit.parse(self.config.read_text())
+        self.assertNotIn('agents', machine)
+        machine['settings'] = {'codex-preferences': {'target': str(self.agent / 'preferences.json'), 'agent': 'codex'}}
+        self.config.write_text(tomlkit.dumps(machine))
+        self.run_cli('bootstrap')
+        self.run_cli('apply', '--dry-run')
+        self.assertIn('codex-preferences:settings', self.items())
 
     def test_a_setting_without_agent_still_requires_every_machine_to_bind_it(self):
         self.declare()

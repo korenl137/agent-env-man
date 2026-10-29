@@ -285,12 +285,14 @@ class Config(MachineFile):
                 root = Path(self.agents[binding['agent']]['root']).expanduser().absolute()
                 if root not in target.absolute().parents:
                     raise Error(f'Setting {name}: target must be inside its agent root')
+        registered = self.agents or {"codex": {}}
         for name, data in list(settings.items()):
             owner = data.get("agent")
-            if owner and owner not in self.agents:
+            if owner and owner not in registered:
                 # A declaration for a named profile this machine does not have is skipped; a stray binding is still refused.
                 if name in machine_settings:
-                    raise Error(f"Setting {name}: its agent {owner} is not registered on this machine")
+                    raise Error(f"Setting {name}: its agent {owner} is not registered on this machine; "
+                                f"register it with aem setup --agent {owner} or remove machine settings.{name}")
                 del settings[name]
                 continue
             if name not in machine_settings:
