@@ -33,8 +33,9 @@ def validate(document):
             raise Error(f"tool_hooks.{name}.event must be one of {', '.join(CLAUDE.command_events)}")
         agents = value.get('agents')
         if agents is not None:
-            if not isinstance(agents, list) or not all(isinstance(agent, str) for agent in agents):
-                raise Error(f'tool_hooks.{name}.agents must be a list of agent names')
+            # An empty list would read as "check none" but would check every profile, so it is refused.
+            if not isinstance(agents, list) or not agents or not all(isinstance(agent, str) for agent in agents):
+                raise Error(f'tool_hooks.{name}.agents must be a nonempty list of agent names')
             for agent in agents:
                 if agent not in registered or product_name(agent) != CLAUDE.name:
                     raise Error(f'tool_hooks.{name}.agents: {agent} is not a registered Claude Code agent')

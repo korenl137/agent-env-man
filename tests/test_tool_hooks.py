@@ -118,7 +118,8 @@ class Validation(ToolHooks):
     def test_bad_declarations_are_refused(self):
         self.assertIn('requires command', self.refused('colour = "red"\n'))
         self.assertIn('agents', self.refused('agents = ["claude-gone"]\n'))
-        self.assertIn('agents must be a list', self.refused('agents = "claude"\n'))
+        self.assertIn('agents must be a nonempty list', self.refused('agents = "claude"\n'))
+        self.assertIn('agents must be a nonempty list', self.refused('agents = []\n'))
         self.assertIn('requires command', self.refused(tool='x.y'))
 
     def test_unknown_event_is_refused(self):
