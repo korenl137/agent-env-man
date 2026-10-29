@@ -10,14 +10,15 @@ because settings can carry secrets.
 """
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Context, Decimal
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 
 from .agents import PROFILES, bindings, product_name
-from .hooks import HOOK_ID_ARGUMENT, without_marker
+from .hooks import HOOK_ID_ARGUMENT, generated, without_marker
 from .model import Error
 
 # Claude Code's file names come from its profile; the rest of its layout is fixed here.
@@ -39,7 +40,11 @@ def resolve(document, spec):
     if os.path.isabs(os.path.expanduser(spec)):
         root = Path(spec).expanduser()
         return Profile(spec, root, root / 'skills')
-    if product_name(spec) != CLAUDE.name:
+    try:
+        product = product_name(spec)
+    except Error:
+        raise Error(f'Unknown profile {spec}; use a registered agent name or an absolute root path') from None
+    if product != CLAUDE.name:
         raise Error(f'Profile {spec} is not a Claude Code profile; only Claude Code layouts are supported')
     registered = bindings(document)
     if spec not in registered:
@@ -51,7 +56,8 @@ def resolve(document, spec):
 def _normalize(value, root, replacement=ROOT):
     """Replace a profile's own root inside every string; a profile copy passes the new root."""
     if isinstance(value, str):
-        return value.replace(str(root), str(replacement))
+        # The root must end at a path boundary: ~/.claude must not rewrite ~/.claude-lab.
+        return re.sub(re.escape(str(root)) + r'(?![\w.-])', lambda _: str(replacement), value)
     if isinstance(value, list):
         return [_normalize(item, root, replacement) for item in value]
     if isinstance(value, dict):
@@ -73,7 +79,9 @@ def _canonical(value):
     if isinstance(value, bool) or value is None or isinstance(value, str):
         return value
     if isinstance(value, (int, float, Decimal)):
-        return ('number', str(Decimal(str(value)).normalize()))
+        number = Decimal(str(value))
+        # Enough precision that normalizing only drops trailing zeros and never rounds.
+        return ('number', str(number.normalize(Context(prec=max(1, len(number.as_tuple().digits))))))
     if isinstance(value, list):
         return [_canonical(item) for item in value]
     if isinstance(value, dict):
@@ -107,7 +115,8 @@ def _hook_events(settings, path):
     """Return a settings document's hooks, refusing a shape Claude Code would not accept."""
     hooks = settings.get('hooks', {})
     if not isinstance(hooks, dict) or not all(
-            isinstance(groups, list) and all(isinstance(group, dict) for group in groups) for groups in hooks.values()):
+            isinstance(groups, list) and all(isinstance(group, dict) and isinstance(group.get('hooks', []), list)
+                                             for group in groups) for groups in hooks.values()):
         raise Error(f'{path}: hooks must map each event to a list of hook groups')
     return hooks
 
@@ -133,19 +142,28 @@ def _hook_groups(hooks):
         return groups
     for event, entries in hooks.items():
         for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
             commands = [hook.get('command', '') for hook in entry.get('hooks', []) if isinstance(hook, dict)]
-            owner = 'aem' if any(AEM_HOOK_MARKER in command for command in commands) else 'external'
-            # A personal hook carries a per-agent marker, so it compares by its command without the marker.
-            identity = '' if owner == 'aem' else '\n'.join(without_marker(command) for command in commands)
+            owner = 'aem' if any(generated(command) for command in commands) else 'external'
+            # Startup and instruction groups name their machine configuration, so only their presence compares;
+            # a personal hook carries a per-agent marker, so it compares by its command without the marker.
+            identity = ('' if any(AEM_HOOK_MARKER in command for command in commands)
+                        else '\n'.join(without_marker(command) for command in commands))
             groups[(event, entry.get('matcher', ''), owner, identity)] = commands
     return groups
+
+
+def _target(link):
+    """A link's target with a relative target resolved against the link's folder, as a copy writes it."""
+    return os.path.normpath(os.path.join(link.parent, os.readlink(link)))
 
 
 def _links(directory, root):
     """Map entry names to a normalized link target, 'directory' or 'file'; None if absent."""
     if not directory.is_dir():
         return None
-    return {entry.name: (_normalize(os.readlink(entry), root) if entry.is_symlink()
+    return {entry.name: (_normalize(_target(entry), root) if entry.is_symlink()
                          else 'directory' if entry.is_dir() else 'file')
             for entry in sorted(directory.iterdir())}
 
@@ -161,9 +179,14 @@ def _plugins(profile):
 def _entry(profile):
     path = profile.root / CLAUDE.entry_name
     if path.is_symlink():
-        return _normalize(os.readlink(path), profile.root)
+        return _normalize(_target(path), profile.root)
     if path.is_file():
-        return 'file:' + hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+        data = path.read_bytes()
+        try:
+            data = _normalize(data.decode('utf-8'), profile.root).encode('utf-8')
+        except UnicodeDecodeError:
+            pass
+        return 'file:' + hashlib.sha256(data).hexdigest()[:8]
     return MISSING
 
 

@@ -125,6 +125,25 @@ class Write(Copy):
         self.assertIn('denied', errors)
         self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if p.name.startswith(('copy', '.aem-copy'))), [])
 
+    def test_sibling_paths_numbers_and_permissions_survive_the_copy(self):
+        data = self.settings(self.left)
+        sibling = str(self.left) + '-lab/hooks/run.sh'
+        data['env'] = {'LAB': sibling, 'OWN': str(self.left / 'hooks')}
+        settings = self.left / 'settings.json'
+        settings.write_text(json.dumps(data)[:-1] + ', "ratio": 0.1234567890123456789012, "scale": 1.50}')
+        settings.chmod(0o600)
+        (self.left / 'CLAUDE.md').unlink()
+        (self.left / 'CLAUDE.md').write_text(f'Rules live in {self.left}/rules and {sibling}.\n')
+        (self.left / 'skills' / 'rel').symlink_to(os.path.relpath(self.source / 'skill-a', self.left / 'skills'))
+        report = self.report('--write')
+        self.assertEqual(report['verification']['unexpected'], [])
+        copied = (self.target / 'settings.json').read_text()
+        self.assertIn('"ratio": 0.1234567890123456789012', copied)
+        self.assertIn('"scale": 1.50', copied)
+        self.assertEqual(self.settings(self.target)['env'], {'LAB': sibling, 'OWN': str(self.target / 'hooks')})
+        self.assertIn(sibling, (self.target / 'CLAUDE.md').read_text())
+        self.assertEqual(stat.S_IMODE((self.target / 'settings.json').stat().st_mode), 0o600)
+
     def test_malformed_hooks_are_refused_without_writing(self):
         for hooks in ([], {'Stop': {}}, {'Stop': ['not a group']}):
             (self.left / 'settings.json').write_text(json.dumps({'hooks': hooks}))

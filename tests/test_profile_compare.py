@@ -136,6 +136,8 @@ class Compare(Roots):
             (root / 'settings.json').write_text(json.dumps(data))
         stops = [item for name, item in self.items(self.report(), 'hooks').items() if name.startswith('Stop')]
         self.assertEqual([item['status'] for item in stops], ['same'])
+        # Personal hooks are AEM-owned, as copy-profile treats them, yet still compare by command.
+        self.assertTrue(all(' aem#' in name for name in self.items(self.report(), 'hooks') if name.startswith('Stop')))
         data = json.loads((self.right / 'settings.json').read_text())
         data['hooks']['Stop'] = [personal('1' * 20, '/tools/other')]
         (self.right / 'settings.json').write_text(json.dumps(data))
@@ -191,9 +193,24 @@ class Compare(Roots):
         self.assertEqual(json.loads(output)['totals']['different'], 0)
 
     def test_unknown_name_is_refused(self):
-        code, _, errors = self.run_compare(left='nobody')
-        self.assertEqual(code, 1)
-        self.assertIn('nobody', errors)
+        for name in ('nobody', 'relative/root'):
+            code, _, errors = self.run_compare(left=name)
+            self.assertEqual(code, 1)
+            self.assertIn(f'Unknown profile {name}; use a registered agent name or an absolute root path', errors)
+
+    def test_numbers_beyond_default_decimal_precision_stay_distinct(self):
+        base = (self.left / 'settings.json').read_text()[:-1]
+        (self.left / 'settings.json').write_text(base + ', "big": 12345678901234567890123456789012}')
+        (self.right / 'settings.json').write_text(base.replace('left', 'right') + ', "big": 12345678901234567890123456789013}')
+        self.assertEqual(self.items(self.report(), 'settings')['big']['status'], 'different')
+
+    def test_a_sibling_root_sharing_the_prefix_is_not_normalized(self):
+        sibling = str(self.left) + '-lab/settings.json'
+        for root, value in ((self.left, sibling), (self.right, str(self.right) + '-lab/settings.json')):
+            data = json.loads((root / 'settings.json').read_text())
+            data['env'] = {'OTHER': value}
+            (root / 'settings.json').write_text(json.dumps(data))
+        self.assertEqual(self.items(self.report(), 'settings')['env.OTHER']['status'], 'different')
 
     def test_codex_profiles_are_refused(self):
         code, _, errors = self.run_compare(left='codex')

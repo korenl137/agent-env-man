@@ -11,6 +11,7 @@ agent, so the new profile gets its own once it is registered and applied.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ import tempfile
 
 from .hooks import generated
 from .model import Error, absolute, overlaps
-from .profile_compare import CLAUDE, Profile, _hook_events, _normalize, _read_json, compare
+from .profile_compare import CLAUDE, Profile, _hook_events, _normalize, _read_json, _target, compare
 
 
 @dataclass
@@ -41,13 +42,30 @@ def _aem_owned(group):
     return any(generated(command) for command in commands)
 
 
+def _no_constant(name):
+    raise ValueError(f'{name} is not valid JSON')
+
+
+def _json(value, level=0):
+    """JSON text indented like json.dumps(indent=2), writing Decimal numbers with their exact digits."""
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (dict, list)) and value:
+        inner, outer = '  ' * (level + 1), '  ' * level
+        items = ([json.dumps(key, ensure_ascii=False) + ': ' + _json(item, level + 1) for key, item in value.items()]
+                 if isinstance(value, dict) else [_json(item, level + 1) for item in value])
+        opening, closing = ('{', '}') if isinstance(value, dict) else ('[', ']')
+        return opening + '\n' + inner + (',\n' + inner).join(items) + '\n' + outer + closing
+    return json.dumps(value, ensure_ascii=False)
+
+
 def _assign(document, spec):
     field, separator, raw = spec.partition('=')
     keys = field.split('.')
     if not separator or not all(keys) or keys[0] == 'hooks':
         raise Error(f'--set expects FIELD=VALUE outside hooks: {spec}')
     try:
-        value = json.loads(raw)
+        value = json.loads(raw, parse_float=Decimal, parse_constant=_no_constant)
     except ValueError:
         value = raw
     node = document
@@ -61,7 +79,7 @@ def _assign(document, spec):
 
 def _link(path, source, target):
     """Absolute link target with the source root replaced; relative links are resolved first."""
-    return _normalize(os.path.normpath(os.path.join(path.parent, os.readlink(path))), source.root, target)
+    return _normalize(_target(path), source.root, target)
 
 
 def _text(data, source, target):
@@ -124,7 +142,7 @@ def plan(source, target, sets=(), managed=frozenset()):
         raise Error(f'Target {target} already exists and is not empty')
     links, files, skipped = {}, {}, []
 
-    settings, fields = _read_json(source.root / CLAUDE.hook_name, parse_float=float), []
+    settings, fields = _read_json(source.root / CLAUDE.hook_name), []
     if settings is not None or sets:
         settings, owned, kept = settings or {}, 0, {}
         hooks = _hook_events(settings, source.root / CLAUDE.hook_name)
@@ -179,7 +197,11 @@ def apply(plan):
     try:
         staging.chmod(plan.mode)
         if plan.settings is not None:
-            (staging / CLAUDE.hook_name).write_text(json.dumps(plan.settings, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+            written = staging / CLAUDE.hook_name
+            written.write_text(_json(plan.settings) + '\n', encoding='utf-8')
+            original = plan.source.root / CLAUDE.hook_name
+            # Settings can hold secrets in env, so the copy keeps the source file's permissions.
+            written.chmod(original.stat().st_mode & 0o777 if original.is_file() else 0o600)
         for relative, (data, mode) in plan.files.items():
             (staging / relative).parent.mkdir(parents=True, exist_ok=True)
             (staging / relative).write_bytes(data)

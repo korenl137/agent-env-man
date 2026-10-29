@@ -195,6 +195,7 @@ They do not fetch, run automatic updates, or register startup integrations; the 
 ### Removal and previews
 
 Removing an agent requires first detaching its managed content.
+Machine `settings` bindings that name the removed agent stay in the machine file; while the catalog declares that setting with the same `agent`, remove the binding as well, or every catalog load refuses it.
 Dry run writes no files, including lock files.
 When only `--remove-shell` / `--remove-agent` selections are supplied, setup uses saved ownership instead of validating installation declarations.
 Removal accepts retired integration names and old state versions 1/2; unknown machine fields and unselected records are preserved.
@@ -760,10 +761,11 @@ The comparison covers the settings fields outside `hooks`, hook groups by owner,
 It never opens credentials, sessions, project history or plugin data.
 
 - Settings fields are compared leaf by leaf; arrays and empty objects are atomic, numbers compare by exact value and stay apart from booleans, and a missing field is distinct from `null`.
-- A hook group is AEM-owned when its command carries `--aem-hook-id`; only the presence of such a group is compared, because it names its own machine configuration.
-  Other groups are compared by their commands, with an AEM personal-hook identity marker removed so the same hook compares equal across agents, and their labels carry a short digest of the command.
-- Skill links, output styles and the instruction entry compare link targets.
-- A string that contains a profile's own root is compared with the root replaced by `{root}`, so a profile-specific path is not a difference.
+- A hook group is AEM-owned when its command carries `--aem-hook-id` or an AEM personal-hook identity marker, the same rule `copy-profile` uses.
+  A group with `--aem-hook-id` names its own machine configuration, so only its presence is compared.
+  Other groups, including personal hooks, are compared by their commands with the identity marker removed, so the same hook compares equal across agents; their labels carry a short digest of the command.
+- Skill links, output styles and the instruction entry compare link targets, with relative targets resolved against the link's folder; an instruction file compares by its text.
+- A string that contains a profile's own root, ending at a path boundary, is compared with the root replaced by `{root}`, so a profile-specific path is not a difference while a sibling such as `.claude-lab` next to `.claude` is left alone.
 
 Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as the report prints it, for example `model`, `statusLine.command`, `skills/NAME` or `plugins/NAME@MARKETPLACE`.
 `unmatched_expect` lists names that matched no item.
@@ -793,10 +795,10 @@ aem copy-profile SOURCE TARGET [--set FIELD=VALUE]... [--write]
 SOURCE is a registered agent name or an absolute profile root; TARGET is a new absolute root that does not exist or is an empty folder and must not overlap the source.
 Without `--write` the command only shows what would be copied.
 It needs no machine configuration and never changes it or the saved state; register TARGET as an agent yourself.
-A preview takes no locks; `--write` takes the same operation lock as other writing commands.
+A preview takes no locks; `--write` takes the same operation lock as other writing commands, which creates the configuration's state directory if it does not exist yet.
 It supports the Claude Code profile layout and refuses other products.
 
-Copied: the settings fields outside AEM-generated hooks, and the instruction entry, output styles, skill links and `hooks/` files that AEM did not install (links you made yourself are kept).
+Copied: the settings fields outside AEM-generated hooks, with exact numbers and the source file's permissions, and the instruction entry, output styles, skill links and `hooks/` files that AEM did not install (links you made yourself are kept).
 Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root are rewritten to TARGET.
 `--set` changes a settings field in the copy only; the path is dotted, the value is JSON or plain text, and `hooks` cannot be set.
 Not copied: anything recorded as an AEM installation target in the machine's saved state (reported as skipped; `aem apply --agent NAME` creates it for the new profile, which a copied link would turn into a conflict), credentials, sessions, project history, plugin data, installed plugins, skill entries that are not links, and hook groups AEM generated.
