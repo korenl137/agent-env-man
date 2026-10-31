@@ -768,7 +768,7 @@ It never opens credentials, sessions, project history or plugin data.
 - A string that contains a profile's own root, ending at a path boundary, is compared with the root replaced by `{root}`, so a profile-specific path is not a difference while a sibling such as `.claude-lab` next to `.claude` is left alone.
   The root is recognized as an absolute path, with forward slashes, and, inside the home folder, after `~/`, `$HOME/` or `${HOME}/`.
 
-Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as the report prints it, for example `model`, `statusLine.command`, `skills/NAME` or `plugins/NAME@MARKETPLACE`.
+Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as the report prints it, for example `model`, `statusLine.command`, `skills/NAME`, `plugins/NAME@MARKETPLACE` or a hook label; naming a settings object such as `permissions` also covers every field below it.
 `unmatched_expect` lists names that matched no item.
 A difference shows a short digest of each value, because settings can hold secrets; `--values` shows the values.
 Plugin versions and the entry are always shown.

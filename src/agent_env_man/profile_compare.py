@@ -204,10 +204,19 @@ def _entry(profile):
     return MISSING
 
 
+def _expects(expectation, name):
+    """An expectation names an item or, for a settings object, every field below it."""
+    return name == expectation or name.startswith(expectation + '.')
+
+
+def _status(name, expected):
+    return 'expected' if any(_expects(expectation, name) for expectation in expected) else 'different'
+
+
 def _item(name, left, right, expected, show):
     if _same(left, right):
         return {'item': name, 'status': 'same'}
-    item = {'item': name, 'status': 'expected' if name in expected else 'different'}
+    item = {'item': name, 'status': _status(name, expected)}
     if left is MISSING:
         item['only'] = 'right'
     elif right is MISSING:
@@ -226,7 +235,7 @@ def _section(left, right, expected, show, prefix=''):
             for key in sorted(set(left) | set(right))]
 
 
-def _hooks(left, right, show):
+def _hooks(left, right, expected, show):
     left_groups, right_groups = _hook_groups(left), _hook_groups(right)
     items = []
     for key in sorted(set(left_groups) | set(right_groups)):
@@ -235,7 +244,7 @@ def _hooks(left, right, show):
         label = f'{event}[{matcher}] {owner}' + (f'#{_digest(identity)[:6]}' if identity else '')
         item = {'item': label, 'status': 'same'}
         if key not in left_groups or key not in right_groups:
-            item['status'] = 'different'
+            item['status'] = _status(label, expected)
             item['only'] = 'left' if key in left_groups else 'right'
             if show:
                 item['commands'] = left_groups.get(key) or right_groups.get(key)
@@ -254,7 +263,7 @@ def compare(left, right, *, expect=(), show_values=False):
     right_hooks, right_fields = _settings(right)
     sections = {
         'settings': _section(left_fields, right_fields, expected, show_values),
-        'hooks': _hooks(left_hooks, right_hooks, show_values),
+        'hooks': _hooks(left_hooks, right_hooks, expected, show_values),
         'skills': _section(_links(left.skills, left.root), _links(right.skills, right.root),
                            expected, show_values, 'skills/'),
         'output-styles': _section(_links(left.root / 'output-styles', left.root),
@@ -268,9 +277,10 @@ def compare(left, right, *, expect=(), show_values=False):
         for item in items:
             totals[item['status']] += 1
     known = {item['item'] for items in sections.values() for item in items}
+    unmatched = {expectation for expectation in expected if not any(_expects(expectation, name) for name in known)}
     return {'left': {'name': left.name, 'root': str(left.root)},
             'right': {'name': right.name, 'root': str(right.root)},
-            'totals': totals, 'unmatched_expect': sorted(expected - known), 'sections': sections}
+            'totals': totals, 'unmatched_expect': sorted(unmatched), 'sections': sections}
 
 
 def render(report):

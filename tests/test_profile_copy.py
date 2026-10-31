@@ -202,6 +202,11 @@ class Write(Copy):
         self.assertEqual(self.settings(self.target)['statusLine']['command'], f'bash {self.target}/status.sh')
 
 
+    def test_setting_an_object_value_is_expected(self):
+        check = self.report('--set', 'permissions={"allow":["Bash"],"deny":["Read"]}', '--write')['verification']
+        self.assertEqual((check['expected'], check['unexpected']), (2, []))
+
+
 class Refuse(Copy):
     def test_text_output_lists_plugin_steps_with_the_target_config_dir(self):
         (self.left / 'plugins' / 'known_marketplaces.json').write_text(json.dumps(

@@ -244,5 +244,21 @@ class Compare(Roots):
         self.assertNotIn('', self.items(self.report(), 'settings'))
 
 
+    def test_expect_marks_an_intended_hook_difference(self):
+        self.edit(self.right, lambda data: data['hooks'].update(
+            Stop=[{'hooks': [{'type': 'command', 'command': 'bash notify.sh'}]}]))
+        label = next(name for name in self.items(self.report(), 'hooks') if name.startswith('Stop'))
+        report = self.report('--expect', label)
+        self.assertEqual(self.items(report, 'hooks')[label]['status'], 'expected')
+        self.assertEqual((report['totals']['different'], report['unmatched_expect']), (0, []))
+
+    def test_expect_on_a_settings_object_covers_its_fields(self):
+        self.edit(self.right, lambda data: data.update(permissions={'allow': ['Bash'], 'deny': []}))
+        report = self.report('--expect', 'permissions')
+        self.assertEqual({item['status'] for name, item in self.items(report, 'settings').items()
+                          if name.startswith('permissions.')}, {'expected'})
+        self.assertEqual((report['totals']['different'], report['unmatched_expect']), (0, []))
+
+
 if __name__ == '__main__':
     unittest.main()
