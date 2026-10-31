@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 
 from .agents import PROFILES, bindings, product_name
-from .hooks import HOOK_ID_ARGUMENT, generated, without_marker
+from .hooks import HOOK_ID_ARGUMENT, generated, script, without_marker
 from .model import Error
 
 # Claude Code's file names come from its profile; the rest of its layout is fixed here.
@@ -146,10 +146,12 @@ def _settings(profile):
 
 
 def _hook_groups(hooks):
-    """Map (event, matcher, owner, identity) to a group's commands.
+    """Map (event, matcher, owner, identity) to the command lists of every group with that key.
 
-    AEM-owned groups name their own machine configuration, so only the
-    presence of such a group is comparable; external groups compare by command.
+    A group's AEM-generated handlers and its other handlers are keyed apart,
+    because a profile copy keeps only the latter. AEM-owned handlers name their
+    own machine configuration, so only their presence is comparable; external
+    handlers compare by command. Repeated groups are kept, so a count differs.
     """
     groups = {}
     if not isinstance(hooks, dict):
@@ -159,12 +161,18 @@ def _hook_groups(hooks):
             if not isinstance(entry, dict):
                 continue
             commands = [hook.get('command', '') for hook in entry.get('hooks', []) if isinstance(hook, dict)]
-            owner = 'aem' if any(generated(command) for command in commands) else 'external'
-            # Startup and instruction groups name their machine configuration, so only their presence compares;
-            # a personal hook carries a per-agent marker, so it compares by its command without the marker.
-            identity = ('' if any(AEM_HOOK_MARKER in command for command in commands)
-                        else '\n'.join(without_marker(command) for command in commands))
-            groups[(event, entry.get('matcher', ''), owner, identity)] = commands
+            parts = {'aem': [command for command in commands if generated(command)],
+                     'external': [command for command in commands if not generated(command)]}
+            for owner, owned in parts.items():
+                if not owned and (owner == 'aem' or parts['aem']):
+                    continue
+                scripts = [script(command) for command in owned]
+                # Startup and instruction handlers name their machine configuration, so only their presence compares;
+                # a personal hook carries a per-agent marker, so it compares by its command without the marker.
+                identity = ('' if any(isinstance(text, str) and AEM_HOOK_MARKER in text for text in scripts)
+                            else '\n'.join(without_marker(text) if isinstance(text, str) else json.dumps(text)
+                                           for text in scripts))
+                groups.setdefault((event, entry.get('matcher', ''), owner, identity), []).append(owned)
     return groups
 
 
@@ -242,12 +250,16 @@ def _hooks(left, right, expected, show):
         event, matcher, owner, identity = key
         # External groups differ by command, so the label carries a digest to tell two apart.
         label = f'{event}[{matcher}] {owner}' + (f'#{_digest(identity)[:6]}' if identity else '')
-        item = {'item': label, 'status': 'same'}
-        if key not in left_groups or key not in right_groups:
+        found = left_groups.get(key, []), right_groups.get(key, [])
+        item = {'item': label, 'owner': owner, 'status': 'same'}
+        if len(found[0]) != len(found[1]):
             item['status'] = _status(label, expected)
-            item['only'] = 'left' if key in left_groups else 'right'
+            if not found[0] or not found[1]:
+                item['only'] = 'left' if found[0] else 'right'
+            else:
+                item['left'], item['right'] = map(len, found)  # the same group, repeated a different number of times
             if show:
-                item['commands'] = left_groups.get(key) or right_groups.get(key)
+                item['commands'] = (found[0] or found[1])[0]
         items.append(item)
     return items
 

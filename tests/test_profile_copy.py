@@ -10,7 +10,7 @@ from unittest import mock
 
 from agent_env_man.cli import main
 from agent_env_man.profile_compare import compare as compare_profiles
-from test_profile_compare import Roots
+from test_profile_compare import Roots, encoded_aem_command
 
 
 class Copy(Roots):
@@ -189,11 +189,29 @@ class Write(Copy):
         self.report('--write')
         self.assertTrue((self.target / 'settings.json').is_file())
 
-
     def edit_source(self, change):
         data = self.settings(self.left)
         change(data)
         (self.left / 'settings.json').write_text(json.dumps(data))
+
+    def test_an_own_command_beside_an_aem_command_is_kept(self):
+        self.edit_source(lambda data: data['hooks']['SessionStart'][0]['hooks'].append(
+            {'type': 'command', 'command': 'bash mine.sh'}))
+        check = self.report('--write')['verification']
+        groups = self.settings(self.target)['hooks']['SessionStart']
+        self.assertIn({'matcher': '^startup$', 'hooks': [{'type': 'command', 'command': 'bash mine.sh'}]}, groups)
+        self.assertNotIn('--aem-hook-id', (self.target / 'settings.json').read_text())
+        self.assertEqual(check['unexpected'], [])
+
+    def test_aem_hooks_encoded_for_windows_are_left_out(self):
+        self.edit_source(lambda data: data['hooks']['SessionStart'][0]['hooks'][0].update(
+            command=encoded_aem_command('C:\\aem\\machine.toml', '0' * 20)))
+        self.report('--write')
+        self.assertNotIn('EncodedCommand', (self.target / 'settings.json').read_text())
+
+    def test_setting_an_object_value_is_expected(self):
+        check = self.report('--set', 'permissions={"allow":["Bash"],"deny":["Read"]}', '--write')['verification']
+        self.assertEqual((check['expected'], check['unexpected']), (2, []))
 
     def test_home_relative_source_paths_are_rewritten(self):
         self.edit_source(lambda data: data['statusLine'].update(command=f'bash ~/{self.left.name}/status.sh'))
@@ -201,10 +219,17 @@ class Write(Copy):
             self.report('--write')
         self.assertEqual(self.settings(self.target)['statusLine']['command'], f'bash {self.target}/status.sh')
 
+    def test_an_own_hook_missing_from_the_copy_is_unexpected(self):
+        real = compare_profiles
 
-    def test_setting_an_object_value_is_expected(self):
-        check = self.report('--set', 'permissions={"allow":["Bash"],"deny":["Read"]}', '--write')['verification']
-        self.assertEqual((check['expected'], check['unexpected']), (2, []))
+        def lossy(*args, **kwargs):
+            report = real(*args, **kwargs)
+            report['sections']['hooks'].append({'item': 'Stop[] external#abcdef', 'owner': 'external',
+                                                'status': 'different', 'only': 'left'})
+            return report
+        with mock.patch('agent_env_man.profile_copy.compare', lossy):
+            check = self.report('--write')['verification']
+        self.assertEqual([item['item'] for item in check['unexpected']], ['Stop[] external#abcdef'])
 
 
 class Refuse(Copy):

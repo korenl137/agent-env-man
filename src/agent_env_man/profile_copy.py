@@ -37,9 +37,13 @@ class Plan:
     install: list  # product CLI invocations that would install the plugins; never run
 
 
-def _aem_owned(group):
-    commands = [hook.get('command', '') for hook in group.get('hooks', []) if isinstance(hook, dict)]
-    return any(generated(command) for command in commands)
+def _without_aem(group):
+    """The group with AEM-generated handlers removed; None when nothing else is left in it."""
+    handlers = group.get('hooks', [])
+    kept = [hook for hook in handlers if not (isinstance(hook, dict) and generated(hook.get('command', '')))]
+    if len(kept) == len(handlers):
+        return group
+    return {**group, 'hooks': kept} if kept else None
 
 
 def _no_constant(name):
@@ -148,8 +152,9 @@ def plan(source, target, sets=(), managed=frozenset()):
         hooks = _hook_events(settings, source.root / CLAUDE.hook_name)
         settings.pop('hooks', None)
         for event, groups in hooks.items():
-            mine = [group for group in groups if not _aem_owned(group)]
-            owned += len(groups) - len(mine)
+            remaining = [_without_aem(group) for group in groups]
+            owned += sum(kept is not group for kept, group in zip(remaining, groups))
+            mine = [group for group in remaining if group is not None]
             if mine:
                 kept[event] = mine
         if kept:
@@ -233,7 +238,8 @@ def report(plan, applied):
         # Plugins, hook groups and AEM-installed links the copy leaves out show up as present only in the source.
         left = {item for item, _ in plan.skipped}
         left_out = [item for item in different if item.get('only') == 'left' and (
-            item['section'] in ('plugins', 'hooks') or any(item['item'] == name or item['item'].startswith(name + '/') for name in left))]
+            item['section'] == 'plugins' or item.get('owner') == 'aem'
+            or any(item['item'] == name or item['item'].startswith(name + '/') for name in left))]
         result['verification'] = {'same': comparison['totals']['same'], 'expected': comparison['totals']['expected'],
                                   'not_copied': len(left_out),
                                   'unexpected': [item for item in different if item not in left_out]}

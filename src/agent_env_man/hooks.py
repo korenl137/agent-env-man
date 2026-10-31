@@ -27,9 +27,26 @@ HOOK_ID_ARGUMENT = "--aem-hook-id"
 _MARKER = re.compile(r"AEM [^\[\]']+ \[[0-9a-f]{20}\]")
 
 
+_ENCODED_PREFIX = "powershell.exe -NoProfile -NonInteractive -EncodedCommand "
+
+
+def script(command):
+    """The PowerShell script inside AEM's encoded Windows command; any other command is returned unchanged."""
+    if isinstance(command, str) and command.startswith(_ENCODED_PREFIX):
+        try:
+            return base64.b64decode(command[len(_ENCODED_PREFIX):], validate=True).decode("utf-16le")
+        except (ValueError, UnicodeError):
+            pass
+    return command
+
+
 def generated(command):
-    """Whether a hook command has the shape AEM writes: a hook-id argument or a quoted marker."""
-    return HOOK_ID_ARGUMENT in command or _MARKER.search(command) is not None
+    """Whether a hook command has the shape AEM writes: a hook-id argument or a quoted marker.
+
+    Commands written on Windows are encoded, so their script is inspected instead.
+    """
+    command = script(command)
+    return isinstance(command, str) and (HOOK_ID_ARGUMENT in command or _MARKER.search(command) is not None)
 
 
 def without_marker(command):

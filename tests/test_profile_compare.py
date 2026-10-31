@@ -1,4 +1,5 @@
 """Profile comparison reads two roots offline and never writes."""
+import base64
 import io
 import json
 import os
@@ -9,6 +10,14 @@ from pathlib import Path
 from unittest import mock
 
 from agent_env_man.cli import main
+
+
+def encoded_aem_command(config, digest):
+    """An AEM startup command as AEM writes it on native Windows."""
+    script = (f"& 'python' '-m' 'agent_env_man' '--config' '{config}' 'startup' "
+              f"'--aem-hook-id' 'AEM startup [{digest}]'; exit $LASTEXITCODE")
+    return 'powershell.exe -NoProfile -NonInteractive -EncodedCommand ' + base64.b64encode(script.encode('utf-16le')).decode('ascii')
+
 
 AEM_COMMAND = 'python -m agent_env_man --config {config} startup --aem-hook-id marker-{name}'
 
@@ -224,11 +233,18 @@ class Compare(Roots):
         self.assertEqual(code, 1)
         self.assertIn('settings.json', errors)
 
-
     def edit(self, root, change):
         data = json.loads((root / 'settings.json').read_text())
         change(data)
         (root / 'settings.json').write_text(json.dumps(data))
+
+    def test_aem_hooks_encoded_for_windows_are_aem_owned(self):
+        for root, digest in ((self.left, '0' * 20), (self.right, '1' * 20)):
+            self.edit(root, lambda data: data['hooks']['SessionStart'][0]['hooks'][0].update(
+                command=encoded_aem_command(f'C:\\aem\\{root.name}.toml', digest)))
+        report = self.report()
+        self.assertEqual(report['totals']['different'], 0, report)
+        self.assertEqual(self.items(report, 'hooks')['SessionStart[^startup$] aem']['status'], 'same')
 
     def test_home_relative_spellings_of_the_root_are_normalized(self):
         self.edit(self.left, lambda data: data['statusLine'].update(command=f'bash ~/{self.left.name}/status.sh'))
@@ -236,13 +252,6 @@ class Compare(Roots):
         with mock.patch('pathlib.Path.home', return_value=self.tmp):
             report = self.report()
         self.assertEqual(self.items(report, 'settings')['statusLine.command']['status'], 'same')
-
-
-    def test_a_settings_file_holding_only_hooks_has_no_unnamed_field(self):
-        self.edit(self.left, lambda data: [data.pop(key) for key in list(data) if key != 'hooks'])
-        (self.right / 'settings.json').unlink()
-        self.assertNotIn('', self.items(self.report(), 'settings'))
-
 
     def test_expect_marks_an_intended_hook_difference(self):
         self.edit(self.right, lambda data: data['hooks'].update(
@@ -258,6 +267,17 @@ class Compare(Roots):
         self.assertEqual({item['status'] for name, item in self.items(report, 'settings').items()
                           if name.startswith('permissions.')}, {'expected'})
         self.assertEqual((report['totals']['different'], report['unmatched_expect']), (0, []))
+
+    def test_a_repeated_hook_group_is_a_difference(self):
+        self.edit(self.left, lambda data: data['hooks']['SessionStart'].append(data['hooks']['SessionStart'][0]))
+        item = self.items(self.report(), 'hooks')['SessionStart[^startup$] aem']
+        self.assertEqual(item['status'], 'different')
+        self.assertEqual((item['left'], item['right']), (2, 1))
+
+    def test_a_settings_file_holding_only_hooks_has_no_unnamed_field(self):
+        self.edit(self.left, lambda data: [data.pop(key) for key in list(data) if key != 'hooks'])
+        (self.right / 'settings.json').unlink()
+        self.assertNotIn('', self.items(self.report(), 'settings'))
 
 
 if __name__ == '__main__':
