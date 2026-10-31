@@ -74,13 +74,18 @@ def validate(document):
             raise Error(f"Catalog {kind} must be a TOML table")
         for name, data in entries.items():
             identifier(name)
-            table(data, INSTRUCTION_FIELDS if kind == "instructions" else SKILL_FIELDS | ({"preserve_symlinks"} if kind == "directories" else set()), f"{kind}.{name}")
+            table(data, INSTRUCTION_FIELDS if kind == "instructions" else SKILL_FIELDS | ({"preserve_symlinks", "agent"} if kind == "directories" else set()), f"{kind}.{name}")
             patterns(data.get("exclude", []), f"{kind}.{name}.exclude")
             permission_policy(data.get("permissions", "strict"), f"{kind}.{name}.permissions")
             if kind == "directories":
                 enabled = data.get("preserve_symlinks", False)
                 if not isinstance(enabled, bool):
                     raise Error(f"{kind}.{name}.preserve_symlinks: expected Boolean")
+                if "agent" in data:
+                    from .agents import profile
+                    if not isinstance(data["agent"], str):
+                        raise Error(f"{kind}.{name}: agent must be a destination name")
+                    profile(data["agent"])
             source = data.get("source")
             if not isinstance(source, str) or source not in sources:
                 raise Error(f"{kind}.{name}: source must name a declared source")
@@ -186,7 +191,10 @@ def normalize(document):
             if kind in ("skills", "directories"):
                 entry.update(install)
                 if kind == "directories":
-                    entry.setdefault("root", "home")
+                    if "agent" in data:
+                        entry["agent"] = data["agent"]  # the machine resolves the default root from this profile
+                    else:
+                        entry.setdefault("root", "home")
                     entry["preserve_symlinks"] = data.get("preserve_symlinks", False)
                 if "update" in data:
                     entry["update"] = _policy_model(data["update"])

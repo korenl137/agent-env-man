@@ -224,18 +224,22 @@ General directories use Git or external sources and require no entry document, s
 | `exclude` | Array of strings | Additional [payload exclusions](#payload-exclusions); defaults to `[]`. |
 | `subdir` | String | Source directory; defaults to `"."`. |
 | `preserve_symlinks` | Boolean | `false`; require opaque symbolic link preservation for this directory only. Execution is supported on POSIX. |
+| `agent` | String | Optional destination name such as `claude-lab`; binds the directory to that destination. |
 | `install` | Table | Optional installation settings below. |
 | `update` | Table | Optional policy selection and overrides, using the same rules as skills. |
 
 - `directories.NAME.install` accepts `root`, `destination`, and `mode`.
-- `root` is a machine root name, defaulting to `"home"` when omitted.
+- With `agent`, a machine that has not registered that destination skips the declaration, as for `settings.NAME.agent`.
+  A registered machine installs below that destination's root unless `install.root` names another root, and `--agent` selects the item only for that destination.
+  Older AEM versions reject the field.
+- `root` is a machine root name, defaulting to `"home"` when omitted and no `agent` is declared.
   Bootstrap preserves a saved `roots.home`, or records the current user's absolute home directory when the binding is absent.
   Use `--root home=PATH` for an explicit initial binding, or `--root NAME=PATH` to bind another declared root.
 - An explicitly named root without a machine binding is an error; it never falls back to `home`.
 - `destination` is a literal relative directory path below that root, defaulting to the item name.
 - `mode` is `"link"` by default or explicit `"copy"`; machine `modes.NAME` overrides it.
 - The entire `install` table may be omitted to use these defaults.
-- Each declaration creates one agent-independent target and ownership ID `NAME:directory`; commands also accept the catalog name.
+- Each declaration creates one target and ownership ID `NAME:directory`, agent-independent unless it declares `agent`; commands also accept the catalog name.
 - The target cannot own an entire configured root or overlap sources, other targets, catalog, stages, or manager storage.
 - Path and mode changes require detach before reconfiguration.
 

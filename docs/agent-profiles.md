@@ -87,7 +87,7 @@ Inspect and preserve existing contents before an explicitly planned migration.
 Omitting `--agent` retains the existing all-configured-destinations behavior, which includes instances explicitly added by setup.
 `--agent claude` selects only the original destination, not every Claude instance.
 Use `--agent claude-lab` for the additional destination; an unregistered named selection is refused rather than applying unrelated shared items.
-Directories remain independent of agent selection.
+Directories remain independent of agent selection unless they declare `agent`; a bound directory is selected only for that destination and skipped on machines that have not registered it.
 Unbound legacy settings retain their existing apply behavior without a selector or with a default product selector.
 A named selector excludes unbound settings so a lab-only apply cannot write a default profile's preferences; associate per-instance settings explicitly as described below.
 `sync --agent` still updates all sources and filters only installation; an update can immediately affect links consumed by other instances.

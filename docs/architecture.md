@@ -316,8 +316,9 @@ Stop later stages on failure without claiming cross-repository rollback; preserv
 Git identity checks still validate the managed checkout's origin and expected branch before applying or updating.
 
 General directories reuse directory payloads, named sources, and per-target ownership without requiring an entry document or agent integration.
-Omitted directory installation roots normalize to `home`; bootstrap records the user's home path only when that binding is absent, preserving explicit roots and saved paths.
-Their single ownership key is `NAME:directory`; agent filters include them as common items.
+Omitted directory installation roots normalize to `home` unless the directory declares `agent`; bootstrap records the user's home path only when that binding is absent, preserving explicit roots and saved paths.
+Their single ownership key is `NAME:directory`; agent filters include them as common items unless the directory declares `agent`.
+A directory bound with `agent` installs below that registered destination's root, is selected, detached and reported only for that destination, and is skipped on machines that have not registered it; its saved record keeps `agents` and `agent_bound`.
 Directory policies reuse skill policy composition and clocks, supporting local external checks/sync without Git transport.
 Active directory link guards include orphaned consumers of shared checkouts.
 

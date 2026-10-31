@@ -260,7 +260,7 @@ class Manager:
         self.check_destinations([i for i in all_items if i.key not in detached])
         if agent is not None:
             self.validate_agent(agent)
-            items = [i for i in items if (i.kind == "directory" or (i.kind == "setting" and not i.agent and product_name(agent) == agent)
+            items = [i for i in items if ((i.kind == "directory" and not i.agents) or (i.kind == "setting" and not i.agent and product_name(agent) == agent)
                                          or agent in (i.agents or (i.agent,)))]
         for item in items:
             if item.kind == "setting" and item.agent:
@@ -439,7 +439,7 @@ class Manager:
             raise Error(f"{name}: unknown catalog skill, directory, instruction bundle, setting or personal hook")
         selected = sources[name]
         items = [i for i in config.declarations(selected) if i.kind in ("skill", "directory", "instruction", 'personal-hook')
-                 and (i.kind == "directory" or agent in (i.agents or (i.agent,)))]
+                 and (i.kind == "directory" or agent in (i.agents or (i.agent,)))]  # a directory name has one target
         if not items:
             raise Error(f"{name}: no declaration for agent {agent}")
         item = items[0]
@@ -671,7 +671,10 @@ class Manager:
         if item.kind == "directory":
             record["preserve_symlinks"] = item.preserve_symlinks
             record.pop("agent")
-            record.pop("agents")
+            if item.agents:
+                record["agent_bound"] = True  # keeps "agents" so --agent finds it in saved state
+            else:
+                record.pop("agents")
         present = before["kind"] != "missing"
         if item.mode == "agent-hook":
             if item.kind == 'personal-hook':
@@ -1137,7 +1140,7 @@ class Manager:
         unknown = requested - records.keys() - {logical(k, r) for k, r in records.items()}
         if unknown:
             raise Error(f"Not a managed item: {sorted(unknown)}")
-        keys = [k for k in expanded if agent is None or records[k].get("kind") == "directory"
+        keys = [k for k in expanded if agent is None or (records[k].get("kind") == "directory" and not records[k].get("agent_bound"))
                 or agent in records[k].get("agents", [records[k].get("agent", "codex")])]
         if agent:
             self.validate_agent(agent, saved=True)
@@ -1514,7 +1517,7 @@ class Manager:
             try:
                 for item in self.config.declarations(source):
                     seen.add(item.key)
-                    if agent and item.kind != "directory" and agent not in (item.agents or (item.agent,)):
+                    if agent and not (item.kind == "directory" and not item.agents) and agent not in (item.agents or (item.agent,)):
                         continue
                     item_entry = {"item": item.key, "target": str(item.target), "mode": item.mode}
                     old = self.state.data["items"].get(item.key)
@@ -1564,7 +1567,7 @@ class Manager:
         for key, old in self.state.data["items"].items():
             if old.get("mode") == "setup-config":
                 continue
-            if key not in seen and (agent is None or old.get("kind") == "directory"
+            if key not in seen and (agent is None or (old.get("kind") == "directory" and not old.get("agent_bound"))
                                     or agent in old.get("agents", [old.get("agent", "codex")])):
                 report["items"].append({"item": key, "target": old["target"],
                                         "installation": self.installed_status(old),
@@ -1579,7 +1582,7 @@ class Manager:
         if error:
             report["configuration_error"] = str(error)
         for key, record in self.state.data["items"].items():
-            if agent and record.get("kind") != "directory" and agent not in record.get("agents", [record.get("agent", "codex")]):
+            if agent and not (record.get("kind") == "directory" and not record.get("agent_bound")) and agent not in record.get("agents", [record.get("agent", "codex")]):
                 continue
             item = {"item": key, "target": record.get("target"), "mode": record.get("mode"),
                     "status": "detached" if record.get("detached") else "recorded"}

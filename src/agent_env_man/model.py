@@ -339,7 +339,14 @@ class Config(MachineFile):
                 relative(data["entry_destination"])
             if "entry_root" not in data and not self.agents:
                 raise Error(f"Instruction {name}: missing target root entry_root")
-        for name, data in directories.items():
+        declared_directories = set(directories)
+        for name, data in list(directories.items()):
+            owner = data.get("agent")
+            if owner and owner not in registered:
+                del directories[name]  # a profile this machine does not have: skipped, like a bound setting
+                continue
+            if owner:
+                data.setdefault("root", f"aem-agent-{owner}" if self.agents else "agent")
             if "external" in data and data["external"] not in bindings:
                 raise Error(f"Directory {name}: missing machine external_paths.{data['external']}")
             if data.get("subdir", ".") != ".":
@@ -366,7 +373,7 @@ class Config(MachineFile):
         self._settings = settings
         self._hooks = declared_hooks
         self._directories = directories
-        if self.modes.keys() - (skills.keys() | directories.keys() | instructions.keys()):
+        if self.modes.keys() - (skills.keys() | declared_directories | instructions.keys()):
             raise Error("Machine mode override does not name a skill, directory, or instruction in the catalog")
         from .updates import resolve_policies
 
@@ -483,6 +490,7 @@ class Config(MachineFile):
             return [Item(source.name, "directory", subdir, source.path / subdir,
                          self.target(data["root"], relative(data.get("destination", source.name))),
                          self.modes.get(source.name, data.get("mode", "link")), "directory",
+                         **({"agent": data["agent"], "agents": (data["agent"],)} if "agent" in data else {}),
                          preserve_symlinks=data.get("preserve_symlinks", False), exclusions=data.get("exclusions", ()), permissions=data.get("permissions", "strict"))]
         if source.name in self._hooks:
             result = []

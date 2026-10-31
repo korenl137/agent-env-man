@@ -603,7 +603,7 @@ aem apply [--agent AGENT] [--item ID ...] [--git-timeout TIMEOUT]
 - Skill and directory selectors are catalog names (directories also accept `NAME:directory`); instruction IDs are `NAME:bundle`, `NAME:entry`, and `NAME:hook`.
 - Selecting an entry or hook also selects its bundle and the other instruction items.
 - Selecting only a bundle installs its linked or copied directory without selecting the entry or hook.
-- `--agent` filters installation destinations; directories remain included as agent-independent targets.
+- `--agent` filters installation destinations; directories remain included as agent-independent targets unless they declare `agent`.
 
 | Option | Effect | Selection requirement |
 | --- | --- | --- |
@@ -645,7 +645,7 @@ It exits `1` if any attempted item fails, otherwise `0`.
 
 Directory policy results use `directory: NAME` instead of `skill: NAME`, retaining the same policy and attempt fields.
 External directory checks report `external-no-fetch` without installing; sync validates and applies their local source without Git transport.
-Directories participate in agent-filtered apply, status, detach, and locate as common items.
+Directories participate in agent-filtered apply, status, detach, and locate as common items; a directory that declares `agent` is selected by apply, status, and detach only for that destination, and locate still finds it by name.
 
 ## status
 
@@ -971,5 +971,5 @@ An instance name is not a product-wide selector or Codex's native configuration 
 Catalog hook bindings select products and expand to their configured instances.
 Agent-associated settings are selected only for their bound instance.
 Unbound settings preserve their previous apply behavior without a selector or with the original product selectors; named selectors exclude them.
-Directories remain agent-independent, and `sync` still updates all sources before filtering installation.
+Directories remain agent-independent unless they declare `agent`, and `sync` still updates all sources before filtering installation.
 See [named instances](agent-profiles.md#named-instances) for binding examples, setting stages, callbacks and removal.
