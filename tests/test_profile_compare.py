@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from agent_env_man.cli import main
 
@@ -222,6 +223,19 @@ class Compare(Roots):
         code, _, errors = self.run_compare()
         self.assertEqual(code, 1)
         self.assertIn('settings.json', errors)
+
+
+    def edit(self, root, change):
+        data = json.loads((root / 'settings.json').read_text())
+        change(data)
+        (root / 'settings.json').write_text(json.dumps(data))
+
+    def test_home_relative_spellings_of_the_root_are_normalized(self):
+        self.edit(self.left, lambda data: data['statusLine'].update(command=f'bash ~/{self.left.name}/status.sh'))
+        self.edit(self.right, lambda data: data['statusLine'].update(command=f'bash $HOME/{self.right.name}/status.sh'))
+        with mock.patch('pathlib.Path.home', return_value=self.tmp):
+            report = self.report()
+        self.assertEqual(self.items(report, 'settings')['statusLine.command']['status'], 'same')
 
 
 if __name__ == '__main__':

@@ -53,11 +53,25 @@ def resolve(document, spec):
     return Profile(spec, Path(binding['root']).expanduser(), Path(binding['skills']).expanduser())
 
 
+def _spellings(root):
+    """The ways a setting can name a profile root: absolute, with forward slashes, or relative to the home folder."""
+    root = Path(root)
+    spellings = {str(root), root.as_posix()}
+    try:
+        relative = root.relative_to(Path.home()).as_posix()
+    except ValueError:
+        relative = '.'
+    if relative != '.':
+        spellings |= {f'{home}/{relative}' for home in ('~', '$HOME', '${HOME}')}
+    return sorted(spellings, key=len, reverse=True)
+
+
 def _normalize(value, root, replacement=ROOT):
     """Replace a profile's own root inside every string; a profile copy passes the new root."""
     if isinstance(value, str):
         # The root must end at a path boundary: ~/.claude must not rewrite ~/.claude-lab.
-        return re.sub(re.escape(str(root)) + r'(?![\w.-])', lambda _: str(replacement), value)
+        pattern = '(?:' + '|'.join(map(re.escape, _spellings(root))) + r')(?![\w.-])'
+        return re.sub(pattern, lambda _: str(replacement), value)
     if isinstance(value, list):
         return [_normalize(item, root, replacement) for item in value]
     if isinstance(value, dict):

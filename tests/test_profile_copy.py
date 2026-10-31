@@ -190,6 +190,18 @@ class Write(Copy):
         self.assertTrue((self.target / 'settings.json').is_file())
 
 
+    def edit_source(self, change):
+        data = self.settings(self.left)
+        change(data)
+        (self.left / 'settings.json').write_text(json.dumps(data))
+
+    def test_home_relative_source_paths_are_rewritten(self):
+        self.edit_source(lambda data: data['statusLine'].update(command=f'bash ~/{self.left.name}/status.sh'))
+        with mock.patch('pathlib.Path.home', return_value=self.tmp):
+            self.report('--write')
+        self.assertEqual(self.settings(self.target)['statusLine']['command'], f'bash {self.target}/status.sh')
+
+
 class Refuse(Copy):
     def test_text_output_lists_plugin_steps_with_the_target_config_dir(self):
         (self.left / 'plugins' / 'known_marketplaces.json').write_text(json.dumps(

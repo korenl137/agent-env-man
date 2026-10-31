@@ -766,6 +766,7 @@ It never opens credentials, sessions, project history or plugin data.
   Other groups, including personal hooks, are compared by their commands with the identity marker removed, so the same hook compares equal across agents; their labels carry a short digest of the command.
 - Skill links, output styles and the instruction entry compare link targets, with relative targets resolved against the link's folder; an instruction file compares by its text.
 - A string that contains a profile's own root, ending at a path boundary, is compared with the root replaced by `{root}`, so a profile-specific path is not a difference while a sibling such as `.claude-lab` next to `.claude` is left alone.
+  The root is recognized as an absolute path, with forward slashes, and, inside the home folder, after `~/`, `$HOME/` or `${HOME}/`.
 
 Each item is `same`, `different`, or `expected` when `--expect ITEM` names it as the report prints it, for example `model`, `statusLine.command`, `skills/NAME` or `plugins/NAME@MARKETPLACE`.
 `unmatched_expect` lists names that matched no item.
@@ -799,7 +800,7 @@ A preview takes no locks; `--write` takes the same operation lock as other writi
 It supports the Claude Code profile layout and refuses other products.
 
 Copied: the settings fields outside AEM-generated hooks, with exact numbers and the source file's permissions, and the instruction entry, output styles, skill links and `hooks/` files that AEM did not install (links you made yourself are kept).
-Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root are rewritten to TARGET.
+Links are recreated against their own targets (relative links are resolved first), so the copy does not point into the source, and strings containing the source root, in any spelling `compare` recognizes, are rewritten to TARGET.
 `--set` changes a settings field in the copy only; the path is dotted, the value is JSON or plain text, and `hooks` cannot be set.
 Not copied: anything recorded as an AEM installation target in the machine's saved state (reported as skipped; `aem apply --agent NAME` creates it for the new profile, which a copied link would turn into a conflict), credentials, sessions, project history, plugin data, installed plugins, skill entries that are not links, and hook groups AEM generated.
 The report lists the product CLI steps that would reinstall the source's user-scope plugins in TARGET (`claude plugin marketplace add`, then `claude plugin install`, each with `CLAUDE_CONFIG_DIR` set to TARGET) as `plugin_steps`; AEM never runs them, a plugin whose marketplace source is unknown is listed as skipped, and the installed versions follow each marketplace's current release.
