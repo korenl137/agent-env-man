@@ -84,7 +84,7 @@ def _leaves(value, prefix=()):
     if isinstance(value, dict) and value:
         for key, item in value.items():
             yield from _leaves(item, prefix + (key,))
-    else:
+    elif prefix:  # an empty document has no field to report
         yield '.'.join(prefix), value
 
 

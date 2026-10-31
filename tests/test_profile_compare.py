@@ -238,5 +238,11 @@ class Compare(Roots):
         self.assertEqual(self.items(report, 'settings')['statusLine.command']['status'], 'same')
 
 
+    def test_a_settings_file_holding_only_hooks_has_no_unnamed_field(self):
+        self.edit(self.left, lambda data: [data.pop(key) for key in list(data) if key != 'hooks'])
+        (self.right / 'settings.json').unlink()
+        self.assertNotIn('', self.items(self.report(), 'settings'))
+
+
 if __name__ == '__main__':
     unittest.main()
